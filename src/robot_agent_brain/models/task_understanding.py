@@ -100,7 +100,10 @@ class TaskParseOutput(BaseModel):
         span_index = 0
         for item in self.operations:
             values = item.model_dump(exclude={"type"})
-            if values.get("assignment_mode") == "broadcast" and ("分别" in instruction or "一一对应" in instruction):
+            entity_counts = {entity.id: entity.count for entity in self.entities}
+            pairwise_clause = ("分别" in instruction or "一一对应" in instruction)
+            role_counts = [entity_counts.get(role, 1) for role in (item.source, item.target, item.destination, item.reference) if role]
+            if values.get("assignment_mode") == "broadcast" and pairwise_clause and sum(count > 1 for count in role_counts) >= 2:
                 values["assignment_mode"] = "pairwise"
             if item.type == TaskType.MOVE and spans:
                 span = spans[span_index]

@@ -19,10 +19,6 @@ def test_end_to_end_brain_pipeline_without_physics():
         SceneObject(scene_object_id="apple_01", asset_id="apple_basic", semantic_name="apple", category="fruit"),
     ])
     result = BrainPipeline(FakeUnderstanding(), assets).run("req-001", "把苹果向右移动一点", scene)
-    assert result.grounded_task.operations[0].distance_m == 0.008
-    assert result.commands.schema_version == "2.0"
-    move = result.commands.commands[-2]
-    assert move.skill_name == "move"
-    assert move.parameters["motion_direction"] == "right"
-    assert move.parameters["distance_m"] == 0.008
-
+    assert result.commands is None
+    patch = result.scene_patch.operations[0]
+    assert patch.transform.position == (0.008, 0.0, 0.0)

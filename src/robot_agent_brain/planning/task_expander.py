@@ -17,24 +17,38 @@ class TaskExpander:
                 members[entity.entity_id].append(concrete_id)
                 data = dict(entity_id=concrete_id, scene_object_id=object_id, scene_object_ids=[object_id])
                 if object_id in objects:
-                    data.update(asset_id=objects[object_id].asset_id, category=objects[object_id].category)
+                    data.update(asset_id=objects[object_id].asset_id,
+                                category=objects[object_id].category,
+                                model_scale=objects[object_id].transform.scale)
                 entities.append(entity.model_copy(update=data))
         operations, expanded_ids = [], {}
+        pairwise_cursors = {}
         for operation_index, operation in enumerate(task.operations):
             actor = operation.source or operation.target
             if actor not in members:
                 raise ValueError("task_semantic_invalid: operation has no bound actor")
-            size = len(members[actor])
-            pair_index = sum(1 for prior in task.operations[:operation_index] if prior.source == operation.source and prior.assignment_mode == "pairwise")
+            roles = [getattr(operation, name) for name in ("source", "target", "destination", "reference")]
+            cardinalities = [len(members[value]) for value in roles if value is not None]
+            size = max(cardinalities or [1])
+            if any(value not in {1, size} for value in cardinalities):
+                raise ValueError("task_expansion_assignment_cardinality_mismatch")
             if operation.assignment_mode == "pairwise":
+                key = operation.source or operation.target or operation.destination or operation.reference
+                pair_index = pairwise_cursors.get(key, 0)
+                if pair_index >= size:
+                    raise ValueError("task_expansion_pairwise_overassigned")
                 size = 1
+                pairwise_cursors[key] = pair_index + 1
+            else:
+                pair_index = 0
             def select(role, index):
                 if role is None:
                     return None
                 values = members[role]
-                if len(values) not in {1, size}:
+                expected = max(cardinalities or [1]) if operation.assignment_mode == "pairwise" else size
+                if len(values) not in {1, expected}:
                     raise ValueError("task_expansion_pairwise_cardinality_mismatch")
-                return values[0] if len(values) == 1 else values[index]
+                return values[0] if len(values) == 1 else values[index if operation.assignment_mode != "pairwise" else pair_index]
             ids = []
             for index in range(size):
                 data = operation.model_dump()

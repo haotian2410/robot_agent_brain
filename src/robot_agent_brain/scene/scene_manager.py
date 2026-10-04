@@ -26,7 +26,13 @@ class SceneManager:
             elif operation.action == PatchAction.UPDATE_TRANSFORM:
                 if object_id not in objects:
                     raise ValueError(f"scene_object_missing: {object_id}")
-                objects[object_id] = objects[object_id].model_copy(update={"transform": operation.transform})
+                current = objects[object_id]
+                properties = dict(current.properties)
+                # A direct transform edit invalidates derived containment/support
+                # facts; they must be re-established by the next grounding pass.
+                for key in ("parent", "container_membership", "support_relation"):
+                    properties.pop(key, None)
+                objects[object_id] = current.model_copy(update={"transform": operation.transform, "properties": properties})
             elif operation.action == PatchAction.UPDATE_PROPERTY:
                 if object_id not in objects:
                     raise ValueError(f"scene_object_missing: {object_id}")

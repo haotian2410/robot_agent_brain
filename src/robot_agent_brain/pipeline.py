@@ -20,6 +20,7 @@ from .planning.command_exporter import CommandExporter
 from .planning.motion_scale import MotionScaleResolver
 from .planning.recipe_planner import RecipePlanner
 from .planning.task_expander import TaskExpander
+from .semantics.task_domain_policy import TaskDomainPolicy
 
 class BrainResult(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -66,6 +67,7 @@ class BrainPipeline:
         self.exporter = CommandExporter()
         self.vision_provider = vision_provider
         self.vision_fallback = VisionFallbackGrounder()
+        self.domain_policy = TaskDomainPolicy()
 
     def run(self, request_id: str, instruction: str, scene: SceneConfig, *,
             dialogue=None, capture: Callable[[], CameraFrame] | None = None, held_object: str | None = None) -> BrainResult:
@@ -76,6 +78,7 @@ class BrainPipeline:
         else:
             intent = self.understanding.understand(request)
             turn = BrainTurn(status="accepted", turn_kind="robot_task", instruction=instruction, task_intent=intent)
+        turn = self.domain_policy.classify(turn, instruction)
         if turn.status != TurnStatus.ACCEPTED:
             return BrainResult(status=turn.status, turn_kind=turn.turn_kind)
         if turn.turn_kind == TurnKind.SCENE_EDIT:

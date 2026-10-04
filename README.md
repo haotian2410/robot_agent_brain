@@ -57,6 +57,19 @@ and emits one command sequence per scene object. `CommandExporter` fails if a
 set reaches it without expansion, so a command can never contain a list of
 physical targets.
 
+### Scene edits versus robot actions
+
+`把苹果向右移动十厘米` and `把苹果旋转 30 度` are scene edits: Brain returns
+`ScenePatch` and no robot commands, preserving the object's quaternion and
+scale. `把苹果放到香蕉右边` is a robot pick-and-place task and returns
+`commands.json`. A mixed request such as `抓起苹果，右移十厘米后放下` remains
+a robot chain; a request that mixes a direct scene edit with a robot chain is
+rejected for clarification instead of being partially applied.
+
+Vague motion uses model-relative distances for both domains: `small`, `medium`,
+and `large` mean 10%, 50%, and 200% of the selected object's model extent on
+the requested axis, including instance scale.
+
 ## Development
 
 ```bash

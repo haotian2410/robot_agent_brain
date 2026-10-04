@@ -18,18 +18,30 @@ class TurnKind(StrEnum):
 
 class SceneEditIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["add", "remove", "update"]
+    operation: Literal["add", "remove", "translate", "rotate", "move_relative", "update_properties", "update"]
     semantic_name: str
     category: str
     count: int = Field(default=1, ge=1)
     relation: str | None = None
     reference: str | None = None
     properties: dict[str, str | float | bool] = Field(default_factory=dict)
+    direction: str | None = None
+    distance_m: float | None = Field(default=None, gt=0, le=2)
+    motion_scale: str | None = None
+    coordinate_frame: Literal["world", "object_local"] = "world"
+    axis: Literal["x", "y", "z"] | None = None
+    angle_deg: float | None = None
+    pivot: Literal["origin"] = "origin"
+    explicit_robot: bool = False
 
     @model_validator(mode="after")
     def paired_relation(self):
         if (self.relation is None) != (self.reference is None):
             raise ValueError("task_semantic_invalid: scene edit relation/reference must be paired")
+        if self.operation in {"translate", "move_relative"} and not (self.direction or self.relation):
+            raise ValueError("task_semantic_invalid: translation requires direction or relation")
+        if self.operation == "rotate" and (self.axis is None or self.angle_deg is None):
+            raise ValueError("task_semantic_invalid: rotation requires axis and angle")
         return self
 
 class SceneQueryIntent(BaseModel):

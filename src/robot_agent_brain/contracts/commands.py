@@ -108,6 +108,18 @@ class CommandsFile(BaseModel):
     operations: list[CommandOperation]
     commands: list[Command]
 
+    @classmethod
+    def model_json_schema(cls, by_alias=True, ref_template="#/$defs/{model}", **kwargs):
+        schema = super().model_json_schema(by_alias=by_alias, ref_template=ref_template, **kwargs)
+        command_schema = schema.get("$defs", {}).get("Command")
+        if command_schema is not None and "allOf" not in command_schema:
+            command_schema["allOf"] = [
+                {"if": {"properties": {"skill_name": {"const": "move"}}}, "then": {"properties": {"parameters": {"oneOf": [{"required": ["target", "region"], "not": {"anyOf": [{"required": ["motion_direction"]}, {"required": ["distance_m"]}]}}, {"required": ["target", "motion_direction", "distance_m"], "not": {"required": ["region"]}}]}}}},
+                {"if": {"properties": {"skill_name": {"const": "grasp"}}}, "then": {"properties": {"parameters": {"required": ["target"], "not": {"anyOf": [{"required": ["region"]}, {"required": ["motion_direction"]}, {"required": ["distance_m"]}]}}}}},
+                {"if": {"properties": {"skill_name": {"const": "locate"}}}, "then": {"properties": {"parameters": {"required": ["target"]}}}},
+            ]
+        return schema
+
     @model_validator(mode="after")
     def validate_consistency(self):
         for values in ([c.command_id for c in self.commands],

@@ -13,6 +13,7 @@ class BrainSession:
         self.sync_state = "synchronized"
         self.holding_object = None
         self.last_request_id = None
+        self.pending_execution_request = None
         self._check_snapshot(platform.load_scene(self.scene), self.scene)
 
     @property
@@ -52,14 +53,19 @@ class BrainSession:
     def run_task(self, request_id, instruction):
         if self.session_action == "close":
             raise ValueError("session_closed")
-        if self.session_action == "pause" and not any(token in instruction.casefold() for token in ("resume", "继续", "恢复")):
-            raise ValueError("session_paused")
         if self.sync_state != "synchronized":
             raise ValueError("scene_sync_unknown")
         result = self.pipeline.run(request_id, instruction, self.scene,
                                    dialogue=self.dialogue, capture=self.capture, held_object=self.holding_object)
-        self.last_request_id = request_id
+        if self.session_action == "pause":
+            if result.session_action is None or result.session_action.action != "resume":
+                raise ValueError("session_paused")
+        if result.commands is not None:
+            self.pending_execution_request = request_id
+            self.last_request_id = request_id
         if result.scene_patch is not None:
+            if self.holding_object and any(op.scene_object_id == self.holding_object for op in result.scene_patch.operations):
+                raise ValueError("scene_edit_held_object_conflict")
             self.apply_scene_patch(result.scene_patch)
         if result.session_action is not None:
             self.session_action = result.session_action.action
@@ -67,7 +73,8 @@ class BrainSession:
         return result
 
     def apply_execution_feedback(self, feedback: ExecutionFeedback):
-        if self.last_request_id != feedback.request_id:
+        if self.pending_execution_request != feedback.request_id:
             raise ValueError("execution_feedback_stale_or_unknown_request")
         self.holding_object = feedback.holding_object
+        self.pending_execution_request = None
         return feedback.status

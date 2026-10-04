@@ -8,6 +8,7 @@ from ..contracts.task_intent import TaskType
 class RecipePlanner:
     def plan(self, task: GroundedTask, held_object: str | None = None) -> SkillPlan:
         steps: list[SkillStep] = []
+        current_held = held_object
 
         def add(operation_id, skill, target=None, reference=None, region=None):
             steps.append(SkillStep(
@@ -30,14 +31,16 @@ class RecipePlanner:
                 add(op, SkillName.MOVE, actor)
                 add(op, SkillName.RELEASE, actor)
             elif operation.task_type == TaskType.PICK_AND_PLACE:
-                already_held = held_object is not None and any(e.entity_id == operation.source and e.scene_object_id == held_object for e in task.entities)
+                already_held = current_held is not None and any(e.entity_id == operation.source and e.scene_object_id == current_held for e in task.entities)
                 if not already_held:
                     add(op, SkillName.LOCATE, operation.source)
                     add(op, SkillName.MOVE, operation.source, region="grasp_region")
                     add(op, SkillName.GRASP, operation.source)
+                    current_held = next((e.scene_object_id for e in task.entities if e.entity_id == operation.source), operation.source)
                 add(op, SkillName.LOCATE, operation.destination)
                 add(op, SkillName.MOVE, operation.destination, operation.source, "placement_region")
                 add(op, SkillName.RELEASE, operation.source, operation.destination, "placement_region")
+                current_held = None
             elif operation.task_type == TaskType.PRESS:
                 add(op, SkillName.LOCATE, actor)
                 add(op, SkillName.MOVE, actor, region="button_surface")

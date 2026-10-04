@@ -4,6 +4,8 @@ from ..contracts.scene import PatchAction, SceneObject, ScenePatch, ScenePatchOp
 from ..contracts.task_intent import PlacementTarget
 from ..ports.asset_catalog import AssetCatalogPort
 from .scene_layout import SceneLayoutPolicy
+from .transform_editor import translate, rotate
+from ..models.motion_policy import MotionPolicy
 
 
 class SceneEditor:
@@ -12,6 +14,7 @@ class SceneEditor:
     def __init__(self, assets: AssetCatalogPort, layout: SceneLayoutPolicy | None = None):
         self.assets = assets
         self.layout = layout or SceneLayoutPolicy()
+        self.motion_policy = MotionPolicy()
 
     def edit(self, intent, scene) -> ScenePatch:
         """Resolve names to assets/instances before producing a versioned patch."""
@@ -80,27 +83,65 @@ class SceneEditor:
                     )
                     updated_transforms.append((transform, self.assets.get_model_property(obj.asset_id)))
                     operations.append(ScenePatchOperation(action=PatchAction.UPDATE_TRANSFORM, scene_object_id=obj.scene_object_id, transform=transform))
+                elif intent.operation in {"translate", "move_relative"}:
+                    model = self.assets.get_model_property(obj.asset_id)
+                    distance = intent.distance_m
+                    if distance is None:
+                        if not intent.motion_scale:
+                            raise ValueError("scene_edit_motion_distance_missing")
+                        axis = {"left": 0, "right": 0, "front": 1, "back": 1, "up": 2, "down": 2}.get(intent.direction)
+                        if axis is None:
+                            raise ValueError("scene_edit_motion_direction_missing")
+                        distance = model.dimensions_m[axis] * obj.transform.scale[axis] * self.motion_policy.scale_factor(intent.motion_scale)
+                    transform = translate(obj.transform, intent.direction, distance)
+                    if self._collides(transform, obj, scene):
+                        raise ValueError("scene_edit_transform_collision")
+                    operations.append(ScenePatchOperation(action=PatchAction.UPDATE_TRANSFORM, scene_object_id=obj.scene_object_id, transform=transform))
+                elif intent.operation == "rotate":
+                    transform = rotate(obj.transform, intent.axis, intent.angle_deg, intent.coordinate_frame)
+                    operations.append(ScenePatchOperation(action=PatchAction.UPDATE_TRANSFORM, scene_object_id=obj.scene_object_id, transform=transform))
                 if intent.properties:
                     operations.append(ScenePatchOperation(action=PatchAction.UPDATE_PROPERTY, scene_object_id=obj.scene_object_id, properties=intent.properties))
-                if reference is None and not intent.properties:
+                if reference is None and intent.operation not in {"translate", "move_relative", "rotate"} and not intent.properties:
                     raise ValueError("scene_edit_update_missing")
         return ScenePatch(scene_id=scene.scene_id, base_scene_version=scene.scene_version, operations=operations)
 
     def _separate(self, obj, scene, model, excluded=None, extra=None):
         excluded = excluded or set()
         x, y, z = obj.transform.position
-        for existing in scene.objects:
-            if existing.scene_object_id in excluded:
+        candidates = [(o.transform, self.assets.get_model_property(o.asset_id), o.transform.scale)
+                      for o in scene.objects if o.scene_object_id not in excluded]
+        candidates += [(transform, other, transform.scale) for transform, other in (extra or [])]
+        for _ in range(len(candidates) + 1):
+            changed = False
+            for other_transform, other, other_scale in candidates:
+                ox, oy, _ = other_transform.position
+                sx = model.dimensions_m[0] * obj.transform.scale[0]
+                sy = model.dimensions_m[1] * obj.transform.scale[1]
+                osx = other.dimensions_m[0] * other_scale[0]
+                osy = other.dimensions_m[1] * other_scale[1]
+                if abs(x - ox) < (sx + osx) / 2 + self.layout.clearance_m and abs(y - oy) < (sy + osy) / 2 + self.layout.clearance_m:
+                    y = oy + (sy + osy) / 2 + self.layout.clearance_m
+                    changed = True
+            if not changed:
+                break
+        return Transform(position=(x, y, z), quaternion_xyzw=obj.transform.quaternion_xyzw, scale=obj.transform.scale)
+
+    def _collides(self, transform, obj, scene):
+        model = self.assets.get_model_property(obj.asset_id)
+        sx = model.dimensions_m[0] * transform.scale[0]
+        sy = model.dimensions_m[1] * transform.scale[1]
+        for other_obj in scene.objects:
+            if other_obj.scene_object_id == obj.scene_object_id:
                 continue
-            other = self.assets.get_model_property(existing.asset_id)
-            ox, oy, _ = existing.transform.position
-            if abs(x - ox) < (model.dimensions_m[0] + other.dimensions_m[0]) / 2 + self.layout.clearance_m and abs(y - oy) < (model.dimensions_m[1] + other.dimensions_m[1]) / 2 + self.layout.clearance_m:
-                y = oy + (model.dimensions_m[1] + other.dimensions_m[1]) / 2 + self.layout.clearance_m
-        for transform, other in extra or []:
-            ox, oy, _ = transform.position
-            if abs(x - ox) < (model.dimensions_m[0] + other.dimensions_m[0]) / 2 + self.layout.clearance_m and abs(y - oy) < (model.dimensions_m[1] + other.dimensions_m[1]) / 2 + self.layout.clearance_m:
-                y = oy + (model.dimensions_m[1] + other.dimensions_m[1]) / 2 + self.layout.clearance_m
-        return Transform(position=(x, y, z))
+            other = self.assets.get_model_property(other_obj.asset_id)
+            ox, oy, _ = other_obj.transform.position
+            x, y, _ = transform.position
+            osx = other.dimensions_m[0] * other_obj.transform.scale[0]
+            osy = other.dimensions_m[1] * other_obj.transform.scale[1]
+            if abs(x - ox) < (sx + osx) / 2 and abs(y - oy) < (sy + osy) / 2:
+                return True
+        return False
 
     def add_object(
         self,
