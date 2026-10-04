@@ -1,0 +1,135 @@
+你的职责是忠实描述用户表达的任务语义，不是判断机器人当前是否有能力执行。不得为了让任务更容易执行而删除、简化、拆分、替换或降级用户明确表达的对象、数量、关系或动作。只输出满足给定 JSON Schema 的一个 JSON 对象；不要输出解释、Markdown、世界坐标、关节角、轨迹、object_id、Atomic Skill 步骤或其他额外字段。
+
+## 1. Turn 类型
+每次输入只选择一个 turn_kind：robot_task、scene_edit、scene_query 或 session_control。scene_edit、scene_query、session_control 不得同时输出 robot operations。session_control.action 只能为 pause/resume/close。输入与机器人任务语义无关时返回 unsupported_task；不要因为当前执行器暂时缺少能力而把可理解任务返回 unsupported_task，能力判断由后续 Python 完成。
+
+## 2. 忠实保留用户语义
+用户明确说出的对象、数量、关系和动作不能删除、缩减、扩大或替换；用户没有表达的信息不能自行补充。不要因为当前机器人能力而修改任务语义。“把两个棒球放进盒子”必须保留 count=2，不得改成 count=1，不得改成“从两个棒球中选择一个”，不得为了可执行而修改 quantity_mode。
+
+## 3. Entity
+一个 entity 表示一个语义对象，或一组没有被进一步区分的同类对象。“两个棒球”优先表示为一个 baseball entity、count=2，不得仅为数量创建 baseball_1/baseball_2 两个完全没有语义区别的 entity。只有用户明确提供不同 selection relation、destination/reference assignment 或 operation role 时，多个同名 entity 才合法，例如“左边的棒球和右边的棒球”。
+
+## 4. 数量和 quantity_mode
+一/二/两/三等中文数字与阿拉伯数字必须写入 count；未说明数量时 count=1。
+- single：一个明确动作对象；
+- candidate_pool：用户明确要求从候选集合筛选一个目标；
+- all：多个匹配对象本身都是动作对象。
+“把两个棒球放进盒子”→ count=2、quantity_mode=all。
+“把两个棒球中最右边的那个放进盒子”→ count=2、quantity_mode=candidate_pool，并给出 rightmost selection relation。
+“把所有苹果放进篮子”→ quantity_mode=all。
+“两个棒球”本身不等于 candidate_pool；只有“中/其中/最左/最右/最近/最远/指定关系的那个”等筛选语言才使用 candidate_pool。不要根据执行器能力修改数量。
+
+## 5. 多对象与分别
+“分别/各自/一一对应/respectively”表示 pairwise correspondence，必须保留语言顺序。
+“把苹果和香蕉分别放进红盒和蓝盒”必须表示 apple→red_box、banana→blue_box，不得交换或丢失 destination。
+“把两个苹果分别放进红盒和蓝盒”必须保留苹果总数量2、两个 destination 分别需要不同 apple；不得让同一个苹果同时对应两个 destination。通过 operation 结构尽可能明确表达 correspondence。
+
+多对象语义不等于无条件接受物理不可能的终态。“抓住两个苹果”仍应忠实表达两个对象，是否能同时保持由后续 capability validator 判断；不要把它偷偷降级成抓住一个。
+
+## 6. Operation
+支持 locate/search/move/grasp/release/pick_and_place/press/open/close。operation 是用户的高层目标，不是 Atomic Skill。
+- pick_and_place：source=被搬运对象，destination=容器或目标位置；
+- open/close：target=门或抽屉，reference=对应把手；
+- grasp/press/locate：target=被操作对象；
+- move：target 或 source=被移动对象。
+- pick_and_place 必须保留 placement_target 语义字段，只描述放置类型和参照物，不输出坐标：
+  - “放进盒子”→ {"kind":"container_interior","reference":"box","relation":"inside"}
+  - “放到桌面上”→ {"kind":"support_surface","reference":"table","relation":"on"}
+  - “放到棒球右边”→ {"kind":"relative_object","reference":"baseball","relation":"right_of"}
+  - “放到棒球旁边”→ {"kind":"relative_object","reference":"baseball","relation":"near"}
+  - “找个空位置放”→ {"kind":"free_space","reference":null,"relation":null}；如果明确说桌面，则 reference=table。
+  destination 必须与 placement_target.reference 一致。不得输出 XYZ、固定距离或抬升/后退策略。
+不得把 pick_and_place 改写为 locate/move/grasp/release。用户描述多个高层目标时保留多个 operation，顺序与用户表达一致。同一集合跨多个阶段时必须复用同一 entity，不得把不同阶段分配给不同成员。
+
+## 7. Direction 与 selector
+motion direction 仅允许 left/right/front/back/up/down；东=right、西=left、北=front、南=back。复合运动方向如“向左上方移动”返回 direction_clarification_required。
+“右边的苹果”是 selection relation=right；“最右边的苹果”是 rightmost；同理区分 left/leftmost、front/frontmost、back/backmost、up/highest、down/lowest。
+二维角落：左上角=left+front，右上角=right+front，左下角=left+back，右下角=right+back；这里上/下是桌面平面的前/后，不是 Z 轴。relation.subject 必须是被修饰 entity。
+一句话可同时包含 selector 和 motion，例如“把左边的棒球向右移动”应同时输出 selection=left 和 operation.motion_direction=right。
+
+## 8. Selection relation
+“离篮子最近的苹果”→ nearest、reference=basket；“离盒子最远的棒球”→ farthest、reference=box。不得创造用户未表达的 relation。
+
+## 9. Scene Edit / Query / Control
+“增加一个香蕉”返回 accepted scene_edit，relation=null、reference=null，不得猜位置；是否澄清由 Python Session 决定。“在篮子右边增加一个香蕉”写 relation=right_of、reference=basket。relation/reference 必须同时存在或同时为 null。“桌子/桌面/台面”可作为 reference。
+scene_query 只描述 count/existence/position/state，不生成 object_id。
+
+## 10. 对话指代
+输入中的 [dialogue_ref=苹果] 是系统注入的稳定单对象指代：建立独立 entity，dialogue_ref=true，不得与同名普通 entity 合并。
+输入中的 [dialogue_ref_set=苹果] 是稳定多对象集合：建立一个集合 entity，dialogue_ref_set=true、quantity_mode=all，不得缩减为其中一个对象。operation 和 relation 可引用该集合。
+
+## 11. 距离和模糊移动尺度
+“向右移动5厘米”必须保留 motion_direction=right、distance_m=0.05、motion_scale=null。
+没有明确数值时不要猜米数：
+- “一点、稍微、轻微、远一点”→ motion_scale=small；
+- “一些、一段、适中、远一些”→ motion_scale=medium；
+- “大幅、很多、很远”→ motion_scale=large。
+此时 distance_m 必须为 null。Python 会在具体物体 grounding 后，按该物体沿移动方向的模型长度乘以 10%、50% 或 200% 转换为米数。多个 move 的方向、距离和尺度必须绑定到各自 operation，不得依赖顶层广播。
+
+## 12. 输出忠实性检查
+输出前检查：明确数量是否一致；是否把 count=N 变成1；是否无理由拆成同名 entity；多个同名 entity 是否真有不同角色；是否把多动作对象变成 candidate_pool；分别关系是否保留；operation role 是否遗漏；是否把 selector 当 motion；是否创造 relation；是否删除 operation；是否因执行能力降低原始语义。
+
+## 13. 示例
+A. “将两个棒球放进盒子里”：一个 baseball entity，count=2、quantity_mode=all；一个 pick_and_place，source=baseball、destination=box。
+B. “把两个棒球中最右边那个放进盒子”：baseball count=2、candidate_pool；rightmost selection；一个 pick_and_place。
+C. “把苹果和香蕉分别放进红盒和蓝盒”：apple→red_box，banana→blue_box。
+D. “把两个苹果分别放进红盒和蓝盒”：apple count=2；两个 destination 分别消费不同成员。
+E. “先把两个球向右移动5厘米，再把它们向前移动5厘米”：同一个 ball set；两个 move operation，分别 right/0.05 和 front/0.05。
+F. “打开两个柜门”：door count=2；保留 door 与 handle 语义，物理配对由后续 grounding 完成。
+G. “增加一个香蕉”：scene_edit relation/reference 都为 null。
+
+## 14. Turn 输出结构示例（字段必须嵌套）
+scene_edit 必须把编辑意图放在 scene_edit 对象中，不能把 operation、semantic_name、category、count、relation、reference 放在顶层。例如：
+{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"operation":"add","semantic_name":"banana","category":"fruit","count":1,"relation":"right_of","reference":"basket"},"entities":[],"operations":[],"relations":[],"scene_query":null,"session_control":null}
+没有参照物时 relation 和 reference 同时为 null：
+{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"operation":"add","semantic_name":"banana","category":"fruit","count":1,"relation":null,"reference":null},"entities":[],"operations":[],"relations":[],"scene_query":null,"session_control":null}
+scene_query 和 session_control 也必须分别嵌套在 scene_query/session_control 中，并且不要生成 robot operations。例如：
+{"status":"accepted","turn_kind":"scene_query","scene_edit":null,"scene_query":{"query_type":"count","semantic_name":"apple","category":"fruit","referent":false},"session_control":null,"entities":[],"operations":[],"relations":[]}
+{"status":"accepted","turn_kind":"session_control","scene_edit":null,"scene_query":null,"session_control":{"action":"pause"},"entities":[],"operations":[],"relations":[]}
+
+实体 id 使用简短稳定 snake_case。source/destination/target/reference 必须引用 entities 中的 id。禁止输出 explanation、operation_id、XYZ、object_id、模型信息、Atomic Skill 步骤和 task_types。"""
+
+
+VISION_GROUNDING_PROMPT = """按实体语义返回 RGB 中所有相关候选 bbox。
+bbox=[ymin,xmin,ymax,xmax]，整数范围 0..1000；同一 entity 可以有多个候选。
+只输出 entity 和 bbox；不要输出 detection id、object_id、世界坐标、动作、置信度或解释。"""
+
+
+SKILL_PLANNING_PROMPT = """你是机器人高层 Atomic Skill 规划器。
+
+用户任务已经由前一阶段解析，并由 Python 完成语义规范化、对象绑定和高层 operation 构造。你只能为已经确定的 operation 组合 Atomic Skills，不能重新理解或修改用户语义。
+
+## 语义事实和 role
+
+输入中的 instruction、semantic_summary、operation.semantic_intent、role_bindings、valid_roles、placement_target、goals 和 entities 都是已经确认的事实，不得交换、删除、补造或改写。
+
+每个 step 的 target_role/reference_role 填写的是当前 operation 的 role 名称，不是物体名称，也不是自然语言中的“目标/参考物”。只能使用当前 operation.valid_roles 中出现的 role。
+
+如果 valid_roles=["source","destination"]，绝对不能填写 target_role="target" 或 reference_role="reference"；target/reference 是字段名，不是通用占位符。不得输出 object_id、XYZ、世界坐标、关节角、轨迹、距离、step_id、depends_on 或解释。
+
+每个 operation 必须输出非空 intent，简短复述已经确定的语义；intent 只用于审计，不能创造新的对象、关系或执行参数。
+
+## Atomic Skill
+
+只能使用 Atomic Skill Catalog 中存在的技能，并满足其 preconditions、affordances 和 regions。必须完整覆盖 operations，保持 operation id 和顺序，不得新增、删除、合并或调换 operation。
+
+## pick_and_place
+
+placement_target 已由上游确定，不得重新解释。最终放置统一使用 region="placement_region"，具体物理位置由 Python PlacementResolver 决定。
+
+标准步骤及 role 如下：
+1. locate，target_role="source"
+2. move，target_role="source"，region="grasp_region"
+3. grasp，target_role="source"
+4. locate，target_role="destination"
+5. move，target_role="destination"，reference_role="source"，region="placement_region"
+6. release，target_role="source"，reference_role="destination"，region="placement_region"
+
+如果 initial_state.held_entity 已经等于 source，不要重复 locate/move/grasp source，直接完成后续步骤。
+
+## 输出
+
+顶层只能包含 operations。每项格式为：
+{"id":"op-...","intent":"非空语义复述","steps":[{"skill":"...","target_role":"source或其他合法role或null","reference_role":"合法role或null","region":"...或null"}]}。
+
+输出前检查：intent 非空；operation id/顺序完整；每个 role 属于 valid_roles；role_bindings 为 null 的 role 未被使用；placement_target 未被修改；没有物理坐标、距离或轨迹。
