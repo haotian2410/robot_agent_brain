@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .task_intent import Operation
+from .spatial import SpatialRelation
 
 
 class GroundedEntity(BaseModel):
@@ -27,6 +28,7 @@ class GroundedTask(BaseModel):
     instruction: str
     entities: list[GroundedEntity]
     operations: list[Operation]
+    spatial_relations: list[SpatialRelation] = Field(default_factory=list)
     scene_id: str
     scene_version: int
 

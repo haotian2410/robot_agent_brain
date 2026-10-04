@@ -1,44 +1,84 @@
-from __future__ import annotations
-
 from ..contracts.grounded_task import GroundedEntity, GroundedTask
 from ..contracts.scene import SceneConfig
-from ..contracts.task_intent import TaskIntent
+from ..contracts.task_intent import QuantityMode, TaskIntent
+from .scene_relation_resolver import SceneRelationResolver
 
+def discover_candidates(entity, scene: SceneConfig):
+    available = list(scene.objects)
+    name = entity.semantic_name.casefold()
+    exact = [o for o in available if o.semantic_name.casefold() == name or o.scene_object_id == entity.semantic_name]
+    aliases = {a.casefold() for a in entity.aliases} | {name}
+    alias = [o for o in available if aliases.intersection({o.semantic_name.casefold(), *[a.casefold() for a in o.properties.get("aliases", [])]})]
+    category = [o for o in available if o.category.casefold() == entity.category.casefold()]
+    # A supplied color is a constraint even on exact name matches.
+    for level in (exact, alias, category):
+        if level:
+            return [o for o in level if not entity.color or str(o.properties.get("color", "")).casefold() == entity.color.casefold()]
+    return []
+
+class GroundingAmbiguous(ValueError):
+    def __init__(self, entity, candidates):
+        self.entity, self.candidates = entity, candidates
+        super().__init__(f"grounding_ambiguous: entity={entity.entity_id} candidates={[o.scene_object_id for o in candidates]}")
 
 class SceneGrounder:
-    """Bind semantic entities to public SceneConfig objects, without poses."""
+    def __init__(self, relation_resolver=None):
+        self.relations = relation_resolver or SceneRelationResolver()
 
-    def ground(self, intent: TaskIntent, scene: SceneConfig) -> GroundedTask:
-        available = list(scene.objects)
-        bindings: list[GroundedEntity] = []
-        used: set[str] = set()
+    discover_candidates = staticmethod(discover_candidates)
+
+    def ground(self, intent: TaskIntent, scene: SceneConfig, bindings_override=None) -> GroundedTask:
+        overrides = bindings_override or {}
+        by_entity = {e.entity_id: e for e in intent.entities}
+        by_object = {o.scene_object_id: o for o in scene.objects}
+        resolved, visiting = {}, set()
+        def bind(entity_id):
+            if entity_id in resolved:
+                return resolved[entity_id]
+            if entity_id in visiting:
+                raise ValueError("scene_relation_reference_cycle")
+            visiting.add(entity_id)
+            entity = by_entity[entity_id]
+            if entity_id in overrides:
+                ids = overrides[entity_id]
+                if not ids or any(i not in by_object for i in ids):
+                    raise ValueError("grounding_missing: stale binding")
+                candidates = [by_object[i] for i in ids]
+            else:
+                candidates = discover_candidates(entity, scene)
+            relations = []
+            for rel in intent.spatial_relations:
+                if rel.scope != "selection" or rel.subject != entity_id:
+                    continue
+                if rel.reference:
+                    refs = bind(rel.reference)
+                    if len(refs) != 1:
+                        raise ValueError("scene_relation_reference_ambiguous")
+                    rel = rel.model_copy(update={"reference": refs[0].scene_object_id})
+                relations.append(rel)
+            candidates = self.relations.resolve(candidates, relations, scene, entity_id)
+            if not candidates:
+                raise ValueError("grounding_missing: " + entity_id)
+            if entity.quantity_mode == QuantityMode.ALL:
+                count = len(candidates) if entity.all_available else entity.count
+                if len(candidates) < count:
+                    raise ValueError("grounding_missing: insufficient members for " + entity_id)
+                if len(candidates) > count:
+                    raise GroundingAmbiguous(entity, candidates)
+            elif len(candidates) != 1:
+                raise GroundingAmbiguous(entity, candidates)
+            resolved[entity_id] = candidates
+            visiting.remove(entity_id)
+            return candidates
+        entities = []
         for entity in intent.entities:
-            candidates = [item for item in available if item.scene_object_id not in used and (
-                item.semantic_name.casefold() == entity.semantic_name.casefold()
-                or item.category.casefold() == entity.category.casefold()
-                or item.semantic_name.casefold() in {alias.casefold() for alias in entity.aliases}
-            )]
-            required = entity.count if entity.quantity_mode.value == "all" else 1
-            if len(candidates) < required:
-                raise ValueError(
-                    f"scene_grounding_ambiguous: entity={entity.entity_id} candidates="
-                    f"{[item.scene_object_id for item in candidates]}"
-                )
-            members = candidates[:required]
-            item = members[0]
-            used.update(member.scene_object_id for member in members)
-            bindings.append(GroundedEntity(
-                entity_id=entity.entity_id,
-                semantic_name=entity.semantic_name,
-                scene_object_id=item.scene_object_id,
-                scene_object_ids=[member.scene_object_id for member in members],
-                asset_id=item.asset_id,
-                category=item.category,
+            members = bind(entity.entity_id)
+            entities.append(GroundedEntity(
+                entity_id=entity.entity_id, semantic_name=entity.semantic_name,
+                scene_object_id=members[0].scene_object_id,
+                scene_object_ids=[o.scene_object_id for o in members],
+                asset_id=members[0].asset_id, category=members[0].category,
             ))
-        return GroundedTask(
-            instruction=intent.instruction,
-            entities=bindings,
-            operations=intent.operations,
-            scene_id=scene.scene_id,
-            scene_version=scene.scene_version,
-        )
+        return GroundedTask(instruction=intent.instruction, entities=entities,
+                            operations=intent.operations, spatial_relations=intent.spatial_relations,
+                            scene_id=scene.scene_id, scene_version=scene.scene_version)
