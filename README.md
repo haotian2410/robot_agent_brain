@@ -45,6 +45,18 @@ asset_id                  -> AssetCatalogPort   -> ModelProperty
 `placement_region`; it never contains physical anchors, poses, XML paths,
 runtime settings, IK parameters, or trajectories.
 
+The complete Brain turn contract supports `robot_task`, `scene_edit`,
+`scene_query`, and `session_control`. Robot tasks pass through semantic
+relation grounding, concrete instance expansion, motion-scale resolution,
+recipe planning, and command export. Scene edits produce `ScenePatch`, scene
+queries read the local `SceneConfig`, and session control produces a semantic
+pause/resume/close action.
+
+For a set such as two apples, planning expands the set into concrete entities
+and emits one command sequence per scene object. `CommandExporter` fails if a
+set reaches it without expansion, so a command can never contain a list of
+physical targets.
+
 ## Development
 
 ```bash
@@ -55,4 +67,3 @@ pytest brain_tests/
 
 The test suite includes a dependency-boundary check and runs without MuJoCo or
 `robot_agent_control` installed.
-

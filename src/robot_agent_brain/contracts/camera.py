@@ -27,5 +27,12 @@ class CameraFrame(BaseModel):
     width: int = Field(gt=0)
     height: int = Field(gt=0)
     rgb: bytes | None = None
+    depth: bytes | None = None
+    segmentation: bytes | None = None
+    instance_boxes: list["CameraInstanceBox"] = Field(default_factory=list)
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+class CameraInstanceBox(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    scene_object_id: str
+    bbox: tuple[int, int, int, int]
