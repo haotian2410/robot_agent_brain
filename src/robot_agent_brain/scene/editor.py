@@ -23,6 +23,7 @@ class SceneEditor:
             if len(refs) != 1:
                 raise ValueError("scene_edit_reference_missing" if not refs else "scene_edit_reference_ambiguous")
             reference = refs[0]
+        updated_transforms = []
         if intent.operation == "add":
             models = self.assets.find_models(intent.semantic_name, intent.category)
             if len(models) != 1:
@@ -70,6 +71,14 @@ class SceneEditor:
                         self.assets.get_model_property(reference.asset_id),
                         self.assets.get_model_property(obj.asset_id),
                     )
+                    transform = self._separate(
+                        obj.model_copy(update={"transform": transform}),
+                        scene,
+                        self.assets.get_model_property(obj.asset_id),
+                        excluded={item.scene_object_id for item in matches},
+                        extra=updated_transforms,
+                    )
+                    updated_transforms.append((transform, self.assets.get_model_property(obj.asset_id)))
                     operations.append(ScenePatchOperation(action=PatchAction.UPDATE_TRANSFORM, scene_object_id=obj.scene_object_id, transform=transform))
                 if intent.properties:
                     operations.append(ScenePatchOperation(action=PatchAction.UPDATE_PROPERTY, scene_object_id=obj.scene_object_id, properties=intent.properties))
@@ -77,11 +86,18 @@ class SceneEditor:
                     raise ValueError("scene_edit_update_missing")
         return ScenePatch(scene_id=scene.scene_id, base_scene_version=scene.scene_version, operations=operations)
 
-    def _separate(self, obj, scene, model):
+    def _separate(self, obj, scene, model, excluded=None, extra=None):
+        excluded = excluded or set()
         x, y, z = obj.transform.position
         for existing in scene.objects:
+            if existing.scene_object_id in excluded:
+                continue
             other = self.assets.get_model_property(existing.asset_id)
             ox, oy, _ = existing.transform.position
+            if abs(x - ox) < (model.dimensions_m[0] + other.dimensions_m[0]) / 2 + self.layout.clearance_m and abs(y - oy) < (model.dimensions_m[1] + other.dimensions_m[1]) / 2 + self.layout.clearance_m:
+                y = oy + (model.dimensions_m[1] + other.dimensions_m[1]) / 2 + self.layout.clearance_m
+        for transform, other in extra or []:
+            ox, oy, _ = transform.position
             if abs(x - ox) < (model.dimensions_m[0] + other.dimensions_m[0]) / 2 + self.layout.clearance_m and abs(y - oy) < (model.dimensions_m[1] + other.dimensions_m[1]) / 2 + self.layout.clearance_m:
                 y = oy + (model.dimensions_m[1] + other.dimensions_m[1]) / 2 + self.layout.clearance_m
         return Transform(position=(x, y, z))
