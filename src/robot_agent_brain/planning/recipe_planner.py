@@ -34,7 +34,7 @@ class RecipePlanner:
                 add(op, SkillName.MOVE, operation.source, region="grasp_region")
                 add(op, SkillName.GRASP, operation.source)
                 add(op, SkillName.LOCATE, operation.destination)
-                add(op, SkillName.MOVE, operation.source, operation.destination, "placement_region")
+                add(op, SkillName.MOVE, operation.destination, operation.source, "placement_region")
                 add(op, SkillName.RELEASE, operation.source, operation.destination, "placement_region")
             elif operation.task_type == TaskType.PRESS:
                 add(op, SkillName.LOCATE, actor)
@@ -52,4 +52,3 @@ class RecipePlanner:
             else:
                 add(op, SkillName.LOCATE, actor)
         return SkillPlan(steps=steps)
-

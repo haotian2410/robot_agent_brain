@@ -24,9 +24,14 @@ class CommandExporter:
             parameters = {}
             if step.target_entity:
                 targets = bindings[step.target_entity]
+                if len(targets) != 1:
+                    raise ValueError("command_export_requires_concrete_entity")
                 parameters["target"] = targets[0] if len(targets) == 1 else targets
             if step.reference_entity:
-                parameters["reference"] = bindings[step.reference_entity][0]
+                references = bindings[step.reference_entity]
+                if len(references) != 1:
+                    raise ValueError("command_export_requires_concrete_entity")
+                parameters["reference"] = references[0]
             if step.region:
                 parameters["region"] = step.region
             if step.skill_name == SkillName.MOVE and operation.task_type == TaskType.MOVE and step.region is None:

@@ -77,6 +77,7 @@ class SceneSnapshot(StrictModel):
     scene_id: str
     scene_version: int
     accepted: bool = True
+    error: str | None = None
 
 
 class ModelProperty(StrictModel):
@@ -91,4 +92,3 @@ class ModelProperty(StrictModel):
         if any(value <= 0 for value in self.dimensions_m):
             raise ValueError("dimensions_m must be positive")
         return self
-
