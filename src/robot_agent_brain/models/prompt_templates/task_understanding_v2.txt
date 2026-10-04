@@ -6,6 +6,8 @@
 ## 2. 忠实保留用户语义
 用户明确说出的对象、数量、关系和动作不能删除、缩减、扩大或替换；用户没有表达的信息不能自行补充。不要因为当前机器人能力而修改任务语义。“把两个棒球放进盒子”必须保留 count=2，不得改成 count=1，不得改成“从两个棒球中选择一个”，不得为了可执行而修改 quantity_mode。
 
+实体语义名是具体名称时 category_only=false，例如“苹果”；只有用户说“一个水果”“一个物体”等类别而没有具体名称时 category_only=true。具体名称没有匹配对象时必须报告 grounding_missing，不能改用同类别的其他对象。
+
 ## 3. Entity
 一个 entity 表示一个语义对象，或一组没有被进一步区分的同类对象。“两个棒球”优先表示为一个 baseball entity、count=2，不得仅为数量创建 baseball_1/baseball_2 两个完全没有语义区别的 entity。只有用户明确提供不同 selection relation、destination/reference assignment 或 operation role 时，多个同名 entity 才合法，例如“左边的棒球和右边的棒球”。
 

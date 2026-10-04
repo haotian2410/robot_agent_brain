@@ -9,6 +9,7 @@ class DialogueState(BaseModel):
     def contextualize(self, instruction, scene):
         by_id = {o.scene_object_id: o for o in scene.objects}
         ids = self.last_entity_ids or ([self.last_entity_id] if self.last_entity_id else [])
+        plural = bool(re.search(r"它们|这些|那些", instruction))
         if "另一个" in instruction:
             if not self.last_entity_id:
                 raise ValueError("dialogue_reference_missing")
@@ -16,8 +17,11 @@ class DialogueState(BaseModel):
         if not re.search(r"它们|这些|那些|它|刚才那个", instruction):
             return instruction
         if not ids or any(i not in by_id for i in ids):
+            # Demonstratives on the first turn may describe the visible
+            # current scene; only a singular pronoun requires a prior binding.
+            if plural:
+                return instruction
             raise ValueError("dialogue_reference_missing")
-        plural = bool(re.search(r"它们|这些|那些", instruction))
         if not plural and len(ids) != 1:
             raise ValueError("dialogue_reference_ambiguous")
         marker = "dialogue_ref_set" if plural else "dialogue_ref"
