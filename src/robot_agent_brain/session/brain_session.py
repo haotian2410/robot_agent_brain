@@ -1,4 +1,5 @@
 from ..contracts.camera import CameraRequest
+from ..contracts.commands import ExecutionFeedback
 from ..scene.scene_manager import SceneManager
 from .dialogue_state import DialogueState
 
@@ -10,6 +11,8 @@ class BrainSession:
         self.dialogue = DialogueState()
         self.session_action = None
         self.sync_state = "synchronized"
+        self.holding_object = None
+        self.last_request_id = None
         self._check_snapshot(platform.load_scene(self.scene), self.scene)
 
     @property
@@ -54,10 +57,17 @@ class BrainSession:
         if self.sync_state != "synchronized":
             raise ValueError("scene_sync_unknown")
         result = self.pipeline.run(request_id, instruction, self.scene,
-                                   dialogue=self.dialogue, capture=self.capture)
+                                   dialogue=self.dialogue, capture=self.capture, held_object=self.holding_object)
+        self.last_request_id = request_id
         if result.scene_patch is not None:
             self.apply_scene_patch(result.scene_patch)
         if result.session_action is not None:
             self.session_action = result.session_action.action
         self.dialogue.observe(result)
         return result
+
+    def apply_execution_feedback(self, feedback: ExecutionFeedback):
+        if self.last_request_id != feedback.request_id:
+            raise ValueError("execution_feedback_stale_or_unknown_request")
+        self.holding_object = feedback.holding_object
+        return feedback.status

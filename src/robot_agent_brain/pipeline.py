@@ -68,7 +68,7 @@ class BrainPipeline:
         self.vision_fallback = VisionFallbackGrounder()
 
     def run(self, request_id: str, instruction: str, scene: SceneConfig, *,
-            dialogue=None, capture: Callable[[], CameraFrame] | None = None) -> BrainResult:
+            dialogue=None, capture: Callable[[], CameraFrame] | None = None, held_object: str | None = None) -> BrainResult:
         provider_instruction = dialogue.contextualize(instruction, scene) if dialogue else instruction
         request = TaskUnderstandingRequest(instruction=provider_instruction)
         if hasattr(self.understanding, "understand_turn"):
@@ -101,7 +101,7 @@ class BrainPipeline:
                 overrides[exc.entity.entity_id] = ids
         grounded = self.expander.expand(grounded, scene)
         grounded = self.motion.resolve(grounded)
-        plan = self.planner.plan(grounded)
+        plan = self.planner.plan(grounded, held_object=held_object)
         commands = self.exporter.export(request_id, grounded, plan, scene)
         return BrainResult(task_intent=intent, grounded_task=grounded, skill_plan=plan, commands=commands)
 
