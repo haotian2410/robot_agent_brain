@@ -3,6 +3,8 @@ from .commands import Command, CommandsFile, ExecutionFeedback
 from .grounded_task import GroundedEntity, GroundedTask
 from .scene import ModelProperty, SceneConfig, SceneObject, ScenePatch, ScenePatchOperation, SceneSnapshot, Transform
 from .skill_plan import SkillPlan, SkillStep
+from .spatial import RelationScope, SpatialRelation, SpatialRelationType
+from .turn import BrainTurn, SceneEditIntent, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
 from .task_intent import Direction, MotionScale, Operation, PlacementTarget, QuantityMode, TaskEntity, TaskIntent, TaskType
 
 __all__ = [
@@ -11,5 +13,6 @@ __all__ = [
     "ScenePatch", "ScenePatchOperation", "SceneSnapshot", "Transform", "SkillPlan",
     "SkillStep", "Direction", "MotionScale", "Operation", "PlacementTarget",
     "QuantityMode", "TaskEntity", "TaskIntent", "TaskType",
+    "RelationScope", "SpatialRelation", "SpatialRelationType", "BrainTurn", "SceneEditIntent",
+    "SceneQueryIntent", "SessionControlIntent", "TurnKind", "TurnStatus",
 ]
-

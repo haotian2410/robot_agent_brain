@@ -42,7 +42,7 @@
 不得把 pick_and_place 改写为 locate/move/grasp/release。用户描述多个高层目标时保留多个 operation，顺序与用户表达一致。同一集合跨多个阶段时必须复用同一 entity，不得把不同阶段分配给不同成员。
 
 ## 7. Direction 与 selector
-motion direction 仅允许 left/right/front/back/up/down；东=right、西=left、北=front、南=back。复合运动方向如“向左上方移动”返回 direction_clarification_required。
+motion direction 仅允许 left/right/front/back/up/down；东=right、西=left、北=front、南=back。复合运动方向如“向左上方移动”返回 clarification_required。
 “右边的苹果”是 selection relation=right；“最右边的苹果”是 rightmost；同理区分 left/leftmost、front/frontmost、back/backmost、up/highest、down/lowest。
 二维角落：左上角=left+front，右上角=right+front，左下角=left+back，右下角=right+back；这里上/下是桌面平面的前/后，不是 Z 轴。relation.subject 必须是被修饰 entity。
 一句话可同时包含 selector 和 motion，例如“把左边的棒球向右移动”应同时输出 selection=left 和 operation.motion_direction=right。
@@ -84,52 +84,9 @@ scene_edit 必须把编辑意图放在 scene_edit 对象中，不能把 operatio
 没有参照物时 relation 和 reference 同时为 null：
 {"status":"accepted","turn_kind":"scene_edit","scene_edit":{"operation":"add","semantic_name":"banana","category":"fruit","count":1,"relation":null,"reference":null},"entities":[],"operations":[],"relations":[],"scene_query":null,"session_control":null}
 scene_query 和 session_control 也必须分别嵌套在 scene_query/session_control 中，并且不要生成 robot operations。例如：
-{"status":"accepted","turn_kind":"scene_query","scene_edit":null,"scene_query":{"query_type":"count","semantic_name":"apple","category":"fruit","referent":false},"session_control":null,"entities":[],"operations":[],"relations":[]}
+{"status":"accepted","turn_kind":"scene_query","scene_edit":null,"scene_query":{"query_type":"count","semantic_name":"apple","category":"fruit"},"session_control":null,"entities":[],"operations":[],"relations":[]}
 {"status":"accepted","turn_kind":"session_control","scene_edit":null,"scene_query":null,"session_control":{"action":"pause"},"entities":[],"operations":[],"relations":[]}
 
-实体 id 使用简短稳定 snake_case。source/destination/target/reference 必须引用 entities 中的 id。禁止输出 explanation、operation_id、XYZ、object_id、模型信息、Atomic Skill 步骤和 task_types。"""
+实体 id 使用简短稳定 snake_case。source/destination/target/reference 必须引用 entities 中的 id。禁止输出 explanation、operation_id、XYZ、object_id、模型信息、Atomic Skill 步骤和 task_types。
 
-
-VISION_GROUNDING_PROMPT = """按实体语义返回 RGB 中所有相关候选 bbox。
-bbox=[ymin,xmin,ymax,xmax]，整数范围 0..1000；同一 entity 可以有多个候选。
-只输出 entity 和 bbox；不要输出 detection id、object_id、世界坐标、动作、置信度或解释。"""
-
-
-SKILL_PLANNING_PROMPT = """你是机器人高层 Atomic Skill 规划器。
-
-用户任务已经由前一阶段解析，并由 Python 完成语义规范化、对象绑定和高层 operation 构造。你只能为已经确定的 operation 组合 Atomic Skills，不能重新理解或修改用户语义。
-
-## 语义事实和 role
-
-输入中的 instruction、semantic_summary、operation.semantic_intent、role_bindings、valid_roles、placement_target、goals 和 entities 都是已经确认的事实，不得交换、删除、补造或改写。
-
-每个 step 的 target_role/reference_role 填写的是当前 operation 的 role 名称，不是物体名称，也不是自然语言中的“目标/参考物”。只能使用当前 operation.valid_roles 中出现的 role。
-
-如果 valid_roles=["source","destination"]，绝对不能填写 target_role="target" 或 reference_role="reference"；target/reference 是字段名，不是通用占位符。不得输出 object_id、XYZ、世界坐标、关节角、轨迹、距离、step_id、depends_on 或解释。
-
-每个 operation 必须输出非空 intent，简短复述已经确定的语义；intent 只用于审计，不能创造新的对象、关系或执行参数。
-
-## Atomic Skill
-
-只能使用 Atomic Skill Catalog 中存在的技能，并满足其 preconditions、affordances 和 regions。必须完整覆盖 operations，保持 operation id 和顺序，不得新增、删除、合并或调换 operation。
-
-## pick_and_place
-
-placement_target 已由上游确定，不得重新解释。最终放置统一使用 region="placement_region"，具体物理位置由 Python PlacementResolver 决定。
-
-标准步骤及 role 如下：
-1. locate，target_role="source"
-2. move，target_role="source"，region="grasp_region"
-3. grasp，target_role="source"
-4. locate，target_role="destination"
-5. move，target_role="destination"，reference_role="source"，region="placement_region"
-6. release，target_role="source"，reference_role="destination"，region="placement_region"
-
-如果 initial_state.held_entity 已经等于 source，不要重复 locate/move/grasp source，直接完成后续步骤。
-
-## 输出
-
-顶层只能包含 operations。每项格式为：
-{"id":"op-...","intent":"非空语义复述","steps":[{"skill":"...","target_role":"source或其他合法role或null","reference_role":"合法role或null","region":"...或null"}]}。
-
-输出前检查：intent 非空；operation id/顺序完整；每个 role 属于 valid_roles；role_bindings 为 null 的 role 未被使用；placement_target 未被修改；没有物理坐标、距离或轨迹。
+Schema约定：status 只能 accepted/clarification_required/unsupported_task。需要澄清或不支持时所有 payload 均为空；unsupported_task 使用同名 turn_kind。relations.scope 只能 selection/goal/state；一元 left/right/front/back/up/down 不带 reference，按桌面坐标正负半区筛选；极值词用 leftmost 等。all_available=true 仅用于“所有”，明确数量 count=N 必须完整保留。全部移动没有明确距离时仍须写 motion_scale。scene_edit update 可以给 properties，缺少位置参照时不得猜测。机器人任务实体可写 aliases；dialogue_ref/dialogue_ref_set 引用上轮稳定对象，不能重新选择。placement_target.reference 必须与 destination 一致（free_space 无参照除外）。实体和操作的语言顺序必须保留。

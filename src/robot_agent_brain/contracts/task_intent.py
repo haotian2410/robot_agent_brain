@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from .spatial import SpatialRelation
 
 
 class StrictModel(BaseModel):
@@ -63,6 +64,9 @@ class TaskEntity(StrictModel):
     aliases: list[str] = Field(default_factory=list)
     count: int = Field(default=1, ge=1)
     quantity_mode: QuantityMode = QuantityMode.SINGLE
+    dialogue_ref: bool = False
+    dialogue_ref_set: bool = False
+    all_available: bool = False
 
 
 class Operation(StrictModel):
@@ -80,12 +84,8 @@ class Operation(StrictModel):
 
     @model_validator(mode="after")
     def validate_operation(self):
-        if self.distance_m is not None and self.motion_scale is not None:
-            raise ValueError("explicit distance has priority and forbids motion_scale")
-        if self.task_type == TaskType.MOVE and not self.motion_direction:
-            raise ValueError("move requires motion_direction")
-        if self.task_type == TaskType.PICK_AND_PLACE and (not self.source or not self.destination or not self.placement_target):
-            raise ValueError("pick_and_place requires source, destination and placement_target")
+        from ..semantics.operation_contracts import validate_operation_contract
+        validate_operation_contract(self)
         return self
 
 
@@ -93,18 +93,27 @@ class TaskIntent(StrictModel):
     instruction: str = Field(min_length=1)
     entities: list[TaskEntity]
     operations: list[Operation]
+    spatial_relations: list[SpatialRelation] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_references(self):
         entity_ids = {item.entity_id for item in self.entities}
         if len(entity_ids) != len(self.entities):
-            raise ValueError("entity_id must be unique")
+            raise ValueError("task_semantic_invalid: entity_id must be unique")
         operation_ids = {item.operation_id for item in self.operations}
+        if len(operation_ids) != len(self.operations):
+            raise ValueError("task_semantic_invalid: operation ids must be unique")
+        previous = set()
         for operation in self.operations:
             refs = {value for value in (operation.source, operation.destination, operation.target, operation.reference) if value}
             if not refs <= entity_ids:
-                raise ValueError(f"operation references unknown entities: {sorted(refs - entity_ids)}")
-            if not set(operation.depends_on) <= operation_ids:
-                raise ValueError("operation depends_on references unknown operation")
+                raise ValueError(f"task_semantic_invalid: operation references unknown entities: {sorted(refs - entity_ids)}")
+            if not set(operation.depends_on) <= previous:
+                raise ValueError("task_semantic_invalid: invalid operation depends_on")
+            previous.add(operation.operation_id)
+            if operation.placement_target and operation.placement_target.reference and operation.placement_target.reference not in entity_ids:
+                raise ValueError("task_semantic_invalid: unknown placement reference")
+        for relation in self.spatial_relations:
+            if relation.subject not in entity_ids or (relation.reference and relation.reference not in entity_ids):
+                raise ValueError("task_semantic_invalid: spatial relation references unknown entities")
         return self
-

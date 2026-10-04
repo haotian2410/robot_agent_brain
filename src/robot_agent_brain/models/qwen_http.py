@@ -85,6 +85,10 @@ class QwenHTTPProvider:
         )
         return TaskParseOutput.model_validate(value).to_task_intent(request.instruction)
 
+    def understand_turn(self, request: TaskUnderstandingRequest):
+        value = self._call("task_understanding", TASK_UNDERSTANDING_PROMPT, prompt_payload({"instruction": request.instruction}), TaskParseOutput.model_json_schema())
+        return TaskParseOutput.model_validate(value).to_brain_turn(request.instruction)
+
     def detect(self, frame: CameraFrame, entities: list[VisionEntity]) -> VisionGroundingOutput:
         if frame.rgb is None:
             raise QwenProviderError("vision_grounding: RGB frame is missing")
