@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from typing import Any
 
 import httpx
@@ -34,6 +35,8 @@ class QwenHTTPProvider:
         self.timeout = timeout
         self.structured_output = structured_output
         self.calls: list[dict[str, Any]] = []
+        self.last_raw_values: dict[str, Any] = {}
+        self.last_raw_text: dict[str, str] = {}
 
     def _call(self, stage: str, prompt: str, content, schema: dict[str, Any]) -> dict[str, Any]:
         payload: dict[str, Any] = {
@@ -64,8 +67,16 @@ class QwenHTTPProvider:
             if not isinstance(raw, str):
                 raise QwenProviderError(f"{stage}: response content is not text")
             value = _extract_json(raw)
+            self.last_raw_text[stage] = raw
+            self.last_raw_values[stage] = value
             usage = body.get("usage", {})
-            self.calls.append({"stage": stage, "status": "succeeded", **usage})
+            finish_reason = body.get("choices", [{}])[0].get("finish_reason")
+            record = {"stage": stage, "status": "succeeded", "finish_reason": finish_reason, **usage}
+            if finish_reason == "length":
+                record.update(status="failed", error="model_output_truncated")
+                self.calls.append(record)
+                raise QwenProviderError(f"{stage}: model_output_truncated")
+            self.calls.append(record)
             return value
         except (httpx.HTTPError, KeyError, ValueError, json.JSONDecodeError) as exc:
             self.calls.append({
@@ -87,6 +98,9 @@ class QwenHTTPProvider:
 
     def understand_turn(self, request: TaskUnderstandingRequest):
         value = self._call("task_understanding", TASK_UNDERSTANDING_PROMPT, prompt_payload({"instruction": request.instruction}), TaskParseOutput.model_json_schema())
+        marker = re.search(r"\[dialogue_exclude=([^\]]+)\]", request.instruction)
+        if marker and value.get("entities"):
+            value["entities"][0]["exclude_scene_object_ids"] = [marker.group(1)]
         return TaskParseOutput.model_validate(value).to_brain_turn(request.instruction)
 
     def detect(self, frame: CameraFrame, entities: list[VisionEntity]) -> VisionGroundingOutput:

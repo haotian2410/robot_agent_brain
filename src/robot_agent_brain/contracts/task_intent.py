@@ -69,6 +69,8 @@ class TaskEntity(StrictModel):
     dialogue_ref: bool = False
     dialogue_ref_set: bool = False
     all_available: bool = False
+    category_only: bool = False
+    exclude_scene_object_ids: list[str] = Field(default_factory=list)
 
 
 class Operation(StrictModel):
@@ -83,6 +85,7 @@ class Operation(StrictModel):
     motion_scale: MotionScale | None = None
     placement_target: PlacementTarget | None = None
     depends_on: list[str] = Field(default_factory=list)
+    assignment_mode: str = Field(default="broadcast", pattern=r"^(broadcast|pairwise|repeat_all|relation_matched)$")
 
     @model_validator(mode="after")
     def validate_operation(self):

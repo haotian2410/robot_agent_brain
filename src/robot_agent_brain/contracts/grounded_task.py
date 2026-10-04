@@ -13,6 +13,8 @@ class GroundedEntity(BaseModel):
     scene_object_ids: list[str] = Field(default_factory=list)
     asset_id: str
     category: str
+    category_only: bool = False
+    model_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
 
     @model_validator(mode="after")
     def normalize_members(self):

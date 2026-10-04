@@ -34,7 +34,7 @@ class SceneEditor:
             operations = []
             for _ in range(intent.count):
                 index = 1
-                while f"{intent.semantic_name}_{index:02d}" in used:
+                while f"{intent.semantic_name}_{index:02d}" in used or f"{intent.semantic_name}_{index:02d}" in scene.retired_object_ids:
                     index += 1
                 object_id = f"{intent.semantic_name}_{index:02d}"
                 used.add(object_id)
@@ -44,6 +44,7 @@ class SceneEditor:
                     reference_object=reference,
                 )
                 obj = patch.operations[0].object
+                obj.transform = self._separate(obj, scene, model)
                 if operations:
                     # Deterministic initial layout spacing, not robot execution placement.
                     offset = len(operations) * (model.dimensions_m[1] + self.layout.clearance_m)
@@ -75,6 +76,15 @@ class SceneEditor:
                 if reference is None and not intent.properties:
                     raise ValueError("scene_edit_update_missing")
         return ScenePatch(scene_id=scene.scene_id, base_scene_version=scene.scene_version, operations=operations)
+
+    def _separate(self, obj, scene, model):
+        x, y, z = obj.transform.position
+        for existing in scene.objects:
+            other = self.assets.get_model_property(existing.asset_id)
+            ox, oy, _ = existing.transform.position
+            if abs(x - ox) < (model.dimensions_m[0] + other.dimensions_m[0]) / 2 + self.layout.clearance_m and abs(y - oy) < (model.dimensions_m[1] + other.dimensions_m[1]) / 2 + self.layout.clearance_m:
+                y = oy + (model.dimensions_m[1] + other.dimensions_m[1]) / 2 + self.layout.clearance_m
+        return Transform(position=(x, y, z))
 
     def add_object(
         self,

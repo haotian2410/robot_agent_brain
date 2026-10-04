@@ -4,14 +4,14 @@ from ..contracts.task_intent import QuantityMode, TaskIntent
 from .scene_relation_resolver import SceneRelationResolver
 
 def discover_candidates(entity, scene: SceneConfig):
-    available = list(scene.objects)
+    available = [o for o in scene.objects if o.scene_object_id not in entity.exclude_scene_object_ids]
     name = entity.semantic_name.casefold()
     exact = [o for o in available if o.semantic_name.casefold() == name or o.scene_object_id == entity.semantic_name]
     aliases = {a.casefold() for a in entity.aliases} | {name}
     alias = [o for o in available if aliases.intersection({o.semantic_name.casefold(), *[a.casefold() for a in o.properties.get("aliases", [])]})]
     category = [o for o in available if o.category.casefold() == entity.category.casefold()]
     # A supplied color is a constraint even on exact name matches.
-    for level in (exact, alias, category):
+    for level in ((category,) if entity.category_only else (exact, alias)):
         if level:
             return [o for o in level if not entity.color or str(o.properties.get("color", "")).casefold() == entity.color.casefold()]
     return []
@@ -78,6 +78,8 @@ class SceneGrounder:
                 scene_object_id=members[0].scene_object_id,
                 scene_object_ids=[o.scene_object_id for o in members],
                 asset_id=members[0].asset_id, category=members[0].category,
+                category_only=entity.category_only,
+                model_scale=members[0].transform.scale,
             ))
         return GroundedTask(instruction=intent.instruction, entities=entities,
                             operations=intent.operations, spatial_relations=intent.spatial_relations,

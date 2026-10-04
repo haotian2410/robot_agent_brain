@@ -30,12 +30,15 @@ class SceneConfig(StrictModel):
     scene_version: int = Field(default=0, ge=0)
     robot: str | None = None
     objects: list[SceneObject] = Field(default_factory=list)
+    retired_object_ids: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def unique_objects(self):
         ids = [item.scene_object_id for item in self.objects]
         if len(ids) != len(set(ids)):
             raise ValueError("scene_object_id must be unique")
+        if set(ids) & set(self.retired_object_ids):
+            raise ValueError("active object id cannot be retired")
         return self
 
 

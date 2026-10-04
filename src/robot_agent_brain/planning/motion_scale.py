@@ -32,7 +32,6 @@ class MotionScaleResolver:
                 Direction.FRONT: 1, Direction.BACK: 1,
                 Direction.UP: 2, Direction.DOWN: 2,
             }[operation.motion_direction]
-            distance = model.dimensions_m[axis] * self.policy.scale_factor(operation.motion_scale)
+            distance = model.dimensions_m[axis] * actor.model_scale[axis] * self.policy.scale_factor(operation.motion_scale)
             operations.append(operation.model_copy(update={"distance_m": distance, "motion_scale": None}))
         return task.model_copy(update={"operations": operations})
-

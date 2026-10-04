@@ -20,11 +20,14 @@ class TaskExpander:
                     data.update(asset_id=objects[object_id].asset_id, category=objects[object_id].category)
                 entities.append(entity.model_copy(update=data))
         operations, expanded_ids = [], {}
-        for operation in task.operations:
+        for operation_index, operation in enumerate(task.operations):
             actor = operation.source or operation.target
             if actor not in members:
                 raise ValueError("task_semantic_invalid: operation has no bound actor")
             size = len(members[actor])
+            pair_index = sum(1 for prior in task.operations[:operation_index] if prior.source == operation.source and prior.assignment_mode == "pairwise")
+            if operation.assignment_mode == "pairwise":
+                size = 1
             def select(role, index):
                 if role is None:
                     return None
@@ -37,7 +40,11 @@ class TaskExpander:
                 data = operation.model_dump()
                 data["operation_id"] = operation.operation_id if size == 1 else f"{operation.operation_id}__{index+1:02d}"
                 for role in ("source", "target", "destination", "reference"):
-                    data[role] = select(getattr(operation, role), index)
+                    role_value = getattr(operation, role)
+                    if operation.assignment_mode == "pairwise" and role_value == actor:
+                        data[role] = members[actor][pair_index]
+                    else:
+                        data[role] = select(role_value, index)
                 if operation.placement_target:
                     data["placement_target"]["reference"] = select(operation.placement_target.reference, index)
                 dependencies = [i for dep in operation.depends_on for i in expanded_ids[dep]]

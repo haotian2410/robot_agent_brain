@@ -9,6 +9,10 @@ class DialogueState(BaseModel):
     def contextualize(self, instruction, scene):
         by_id = {o.scene_object_id: o for o in scene.objects}
         ids = self.last_entity_ids or ([self.last_entity_id] if self.last_entity_id else [])
+        if "另一个" in instruction:
+            if not self.last_entity_id:
+                raise ValueError("dialogue_reference_missing")
+            return instruction + f" [dialogue_exclude={self.last_entity_id}]"
         if not re.search(r"它们|这些|那些|它|刚才那个", instruction):
             return instruction
         if not ids or any(i not in by_id for i in ids):

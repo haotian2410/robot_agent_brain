@@ -9,6 +9,7 @@ class BrainSession:
         self.pipeline, self.platform = pipeline, platform
         self.dialogue = DialogueState()
         self.session_action = None
+        self.sync_state = "synchronized"
         self._check_snapshot(platform.load_scene(self.scene), self.scene)
 
     @property
@@ -25,8 +26,17 @@ class BrainSession:
     def apply_scene_patch(self, patch):
         candidate = SceneManager(self.scene)
         candidate_scene = candidate.apply_patch(patch)
-        snapshot = self.platform.apply_patch(patch)
-        self._check_snapshot(snapshot, candidate_scene)
+        try:
+            snapshot = self.platform.apply_patch(patch)
+        except Exception:
+            self.sync_state = "unknown"
+            raise
+        try:
+            self._check_snapshot(snapshot, candidate_scene)
+        except Exception:
+            self.sync_state = "unknown"
+            raise
+        self.sync_state = "synchronized"
         self.scene_manager = candidate
         return self.scene
 
@@ -39,6 +49,10 @@ class BrainSession:
     def run_task(self, request_id, instruction):
         if self.session_action == "close":
             raise ValueError("session_closed")
+        if self.session_action == "pause" and not any(token in instruction.casefold() for token in ("resume", "继续", "恢复")):
+            raise ValueError("session_paused")
+        if self.sync_state != "synchronized":
+            raise ValueError("scene_sync_unknown")
         result = self.pipeline.run(request_id, instruction, self.scene,
                                    dialogue=self.dialogue, capture=self.capture)
         if result.scene_patch is not None:

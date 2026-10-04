@@ -32,9 +32,11 @@ class SceneManager:
                     raise ValueError(f"scene_object_missing: {object_id}")
                 merged = {**objects[object_id].properties, **operation.properties}
                 objects[object_id] = objects[object_id].model_copy(update={"properties": merged})
+        retired = list(self.scene.retired_object_ids)
+        retired.extend(operation.scene_object_id for operation in patch.operations if operation.action == PatchAction.REMOVE)
         self.scene = self.scene.model_copy(update={
             "scene_version": self.scene.scene_version + 1,
             "objects": list(objects.values()),
+            "retired_object_ids": list(dict.fromkeys(retired)),
         })
         return self.scene.model_copy(deep=True)
-

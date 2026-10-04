@@ -67,6 +67,18 @@ class Command(BaseModel):
     skill_name: SkillName
     parameters: LocateParameters | MoveParameters | GraspParameters | ReleaseParameters | PressParameters | PullParameters | PushParameters
 
+    @classmethod
+    def model_json_schema(cls, by_alias=True, ref_template="#/$defs/{model}", **kwargs):
+        schema = super().model_json_schema(by_alias=by_alias, ref_template=ref_template, **kwargs)
+        # Keep the flat v2 JSON shape while expressing the skill/parameter
+        # dependency for consumers that validate the published schema.
+        schema["allOf"] = [
+            {"if": {"properties": {"skill_name": {"const": "move"}}}, "then": {"properties": {"parameters": {"oneOf": [{"required": ["target", "region"], "not": {"anyOf": [{"required": ["motion_direction"]}, {"required": ["distance_m"]}]}}, {"required": ["target", "motion_direction", "distance_m"], "not": {"required": ["region"]}}]}}}},
+            {"if": {"properties": {"skill_name": {"const": "grasp"}}}, "then": {"properties": {"parameters": {"required": ["target"], "not": {"anyOf": [{"required": ["region"]}, {"required": ["motion_direction"]}, {"required": ["distance_m"]}]}}}}},
+            {"if": {"properties": {"skill_name": {"const": "locate"}}}, "then": {"properties": {"parameters": {"required": ["target"]}}}},
+        ]
+        return schema
+
     @model_validator(mode="before")
     @classmethod
     def typed_parameters(cls, data):
