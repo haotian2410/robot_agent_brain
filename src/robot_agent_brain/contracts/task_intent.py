@@ -53,6 +53,8 @@ class PlacementTarget(StrictModel):
             raise ValueError("relative_object placement requires reference and relation")
         if self.kind == "container_interior" and self.relation not in {None, "inside"}:
             raise ValueError("container placement relation must be inside")
+        if self.kind == "free_space" and (self.reference is not None or self.relation is not None):
+            raise ValueError("free_space placement cannot have reference or relation")
         return self
 
 
