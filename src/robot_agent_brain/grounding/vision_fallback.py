@@ -1,27 +1,44 @@
-from ..contracts.camera import CameraFrame
-from ..models.vision_grounding import VisionEntity, VisionGroundingOutput
+import math
+from ..models.vision_grounding import VisionEntity
 
 def _iou(left, right):
-    ly1, lx1, ly2, lx2 = left
-    ry1, rx1, ry2, rx2 = right
-    iy1, ix1, iy2, ix2 = max(ly1, ry1), max(lx1, rx1), min(ly2, ry2), min(lx2, rx2)
-    area = max(0, iy2 - iy1) * max(0, ix2 - ix1)
-    union = (ly2-ly1)*(lx2-lx1) + (ry2-ry1)*(rx2-rx1) - area
-    return area / union if union else 0.0
+    y1, x1, y2, x2 = left
+    v1, u1, v2, u2 = right
+    overlap = max(0, min(y2,v2)-max(y1,v1)) * max(0, min(x2,u2)-max(x1,u1))
+    union = (y2-y1)*(x2-x1)+(v2-v1)*(u2-u1)-overlap
+    return overlap / union if union else 0
 
 class VisionFallbackGrounder:
-    def ground(self, frame: CameraFrame, output: VisionGroundingOutput, entities: list[VisionEntity]):
-        by_entity = {item.entity_id: item for item in entities}
-        result = {}
+    def __init__(self, min_iou=0.5):
+        self.min_iou = min_iou
+
+    def resolve(self, entity, candidates, scene, frame, provider):
+        if (frame.scene_id, frame.scene_version) != (scene.scene_id, scene.scene_version):
+            raise ValueError("camera_frame_scene_mismatch")
+        if frame.rgb is None or not frame.instance_boxes:
+            raise ValueError("vision_grounding_scene_instance_missing")
+        known = {o.scene_object_id for o in scene.objects}
+        if any(b.scene_object_id not in known for b in frame.instance_boxes):
+            raise ValueError("vision_grounding_unknown_scene_instance")
+        output = provider.detect(frame, [VisionEntity(entity_id=entity.entity_id, semantic_name=entity.semantic_name)])
+        eligible = {o.scene_object_id for o in candidates}
+        result = []
         for detection in output.detections:
-            if detection.entity not in by_entity:
-                continue
-            matches = [(box.scene_object_id, _iou(detection.bbox, box.bbox)) for box in frame.instance_boxes]
-            matches = [item for item in matches if item[1] > 0]
-            if not matches:
+            if detection.entity != entity.entity_id:
+                raise ValueError("vision_grounding_unknown_entity")
+            matches = sorted([(_iou(detection.bbox, b.bbox), b.scene_object_id) for b in frame.instance_boxes], reverse=True)
+            if not matches or matches[0][0] < self.min_iou:
                 raise ValueError("vision_grounding_scene_instance_missing")
-            matches.sort(key=lambda item: item[1], reverse=True)
-            if len(matches) > 1 and matches[0][1] == matches[1][1]:
+            if len(matches) > 1 and math.isclose(matches[0][0], matches[1][0], abs_tol=1e-9):
                 raise ValueError("vision_grounding_scene_instance_ambiguous")
-            result[detection.entity] = matches[0][0]
+            object_id = matches[0][1]
+            if object_id not in eligible:
+                raise ValueError("vision_grounding_candidate_mismatch")
+            if object_id not in result:
+                result.append(object_id)
+        required = entity.count if entity.quantity_mode == "all" else 1
+        if entity.all_available:
+            required = len(candidates)
+        if len(result) != required:
+            raise ValueError("vision_grounding_ambiguous")
         return result

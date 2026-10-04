@@ -1,37 +1,49 @@
-from __future__ import annotations
-from copy import deepcopy
-
 from ..contracts.camera import CameraRequest
-from ..contracts.scene import SceneConfig, ScenePatch
-from ..pipeline import BrainPipeline, BrainResult
 from ..scene.scene_manager import SceneManager
-from ..ports.scene_platform import ScenePlatformPort
-
+from .dialogue_state import DialogueState
 
 class BrainSession:
-    """Multi-turn semantic session; physical execution remains outside it."""
-
-    def __init__(self, scene: SceneConfig, pipeline: BrainPipeline, platform: ScenePlatformPort):
+    """Local semantic state commits only after platform acknowledgement."""
+    def __init__(self, scene, pipeline, platform):
         self.scene_manager = SceneManager(scene)
-        self.scene = self.scene_manager.scene.model_copy(deep=True)
-        self.pipeline = pipeline
-        self.platform = platform
-        self.platform.load_scene(self.scene)
+        self.pipeline, self.platform = pipeline, platform
+        self.dialogue = DialogueState()
+        self.session_action = None
+        self._check_snapshot(platform.load_scene(self.scene), self.scene)
 
-    def apply_scene_patch(self, patch: ScenePatch) -> SceneConfig:
-        candidate = deepcopy(self.scene_manager)
-        candidate_scene = candidate.apply_patch(patch)
-        snapshot = self.platform.apply_patch(patch)
-        if snapshot.scene_id != candidate_scene.scene_id or snapshot.scene_version != candidate_scene.scene_version:
-            raise ValueError("scene_platform_snapshot_mismatch")
+    @property
+    def scene(self):
+        return self.scene_manager.scene.model_copy(deep=True)
+
+    @staticmethod
+    def _check_snapshot(snapshot, expected):
         if not snapshot.accepted:
             raise ValueError(snapshot.error or "scene_platform_rejected_patch")
+        if (snapshot.scene_id, snapshot.scene_version) != (expected.scene_id, expected.scene_version):
+            raise ValueError("scene_platform_snapshot_mismatch")
+
+    def apply_scene_patch(self, patch):
+        candidate = SceneManager(self.scene)
+        candidate_scene = candidate.apply_patch(patch)
+        snapshot = self.platform.apply_patch(patch)
+        self._check_snapshot(snapshot, candidate_scene)
         self.scene_manager = candidate
-        self.scene = candidate_scene
-        return self.scene.model_copy(deep=True)
+        return self.scene
 
-    def capture(self, request: CameraRequest | None = None):
-        return self.platform.capture(request or CameraRequest())
+    def capture(self, request=None):
+        frame = self.platform.capture(request or CameraRequest())
+        if (frame.scene_id, frame.scene_version) != (self.scene.scene_id, self.scene.scene_version):
+            raise ValueError("camera_frame_scene_mismatch")
+        return frame
 
-    def run_task(self, request_id: str, instruction: str) -> BrainResult:
-        return self.pipeline.run_turn(request_id, instruction, self.scene)
+    def run_task(self, request_id, instruction):
+        if self.session_action == "close":
+            raise ValueError("session_closed")
+        result = self.pipeline.run(request_id, instruction, self.scene,
+                                   dialogue=self.dialogue, capture=self.capture)
+        if result.scene_patch is not None:
+            self.apply_scene_patch(result.scene_patch)
+        if result.session_action is not None:
+            self.session_action = result.session_action.action
+        self.dialogue.observe(result)
+        return result

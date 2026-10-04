@@ -1,110 +1,120 @@
 from __future__ import annotations
-
-from typing import Any, Literal
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from .task_intent import PlacementTarget
+from .task_intent import Direction, PlacementTarget
+from .skill_plan import SkillName
 
-class LocateParameters(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    target: str
+Region = Literal["grasp_region", "placement_region", "button_surface"]
 
-class GraspParameters(BaseModel):
+class Parameters(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    target: str
+    target: str = Field(min_length=1)
 
-class ReleaseParameters(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    target: str
+    # Compatibility for clients of the v2 JSON-shaped Python API.
+    def __getitem__(self, key):
+        return self.model_dump(exclude_none=True)[key]
+
+    def __contains__(self, key):
+        return key in self.model_dump(exclude_none=True)
+
+class LocateParameters(Parameters):
+    pass
+
+class GraspParameters(Parameters):
+    pass
+
+class ReleaseParameters(Parameters):
     reference: str | None = None
-    region: str | None = None
+    region: Region | None = None
 
-class MoveParameters(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    target: str
+class MoveParameters(Parameters):
     reference: str | None = None
-    region: str | None = None
-    motion_direction: str | None = None
-    distance_m: float | None = Field(default=None, gt=0, le=2)
+    region: Region | None = None
+    motion_direction: Direction | None = None
+    distance_m: float | None = Field(default=None, gt=0, le=2, allow_inf_nan=False)
 
-class PressParameters(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    target: str
-    region: str | None = None
+    @model_validator(mode="after")
+    def exclusive_modes(self):
+        if self.region is not None:
+            if self.motion_direction is not None or self.distance_m is not None:
+                raise ValueError("command_semantic_invalid: region and displacement are exclusive")
+        elif self.motion_direction is None or self.distance_m is None:
+            raise ValueError("command_semantic_invalid: directional move requires direction and distance")
+        return self
 
-class PullPushParameters(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    target: str
+class PressParameters(Parameters):
+    region: Region | None = None
+
+class PullParameters(Parameters):
     reference: str | None = None
-    region: str | None = None
+    region: Region | None = None
 
+class PushParameters(Parameters):
+    reference: str | None = None
+    region: Region | None = None
+
+PARAMETER_TYPES = {
+    SkillName.LOCATE: LocateParameters, SkillName.MOVE: MoveParameters,
+    SkillName.GRASP: GraspParameters, SkillName.RELEASE: ReleaseParameters,
+    SkillName.PRESS: PressParameters, SkillName.PULL: PullParameters, SkillName.PUSH: PushParameters,
+}
 
 class Command(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    command_id: str
-    source_skill_step_id: str
-    operation_id: str
-    skill_name: str
-    parameters: dict[str, Any] = Field(default_factory=dict)
+    command_id: str = Field(min_length=1)
+    source_skill_step_id: str = Field(min_length=1)
+    operation_id: str = Field(min_length=1)
+    skill_name: SkillName
+    parameters: LocateParameters | MoveParameters | GraspParameters | ReleaseParameters | PressParameters | PullParameters | PushParameters
 
-    @model_validator(mode="after")
-    def forbid_physical_execution_fields(self):
-        forbidden = {"anchor", "pose", "xyz", "trajectory", "ik_method", "planning_method", "joint_angles", "joint_positions", "quaternion", "waypoints", "path", "velocity_scale", "acceleration_scale", "cartesian_step", "collision_margin", "ee_pose", "tcp_pose"}
-        overlap = forbidden & set(self.parameters)
-        if overlap:
-            raise ValueError(f"Brain command contains physical fields: {sorted(overlap)}")
-        if self.skill_name == "move":
-            region = self.parameters.get("region")
-            directional = {"motion_direction", "distance_m"} & set(self.parameters)
-            if region is not None and directional:
-                raise ValueError("command_semantic_invalid: move region and directional parameters are mutually exclusive")
-            if region is None and directional != {"motion_direction", "distance_m"}:
-                raise ValueError("command_semantic_invalid: directional move requires direction and distance")
-            MoveParameters.model_validate(self.parameters)
-        elif self.skill_name == "locate":
-            LocateParameters.model_validate(self.parameters)
-        elif self.skill_name == "grasp":
-            GraspParameters.model_validate(self.parameters)
-        elif self.skill_name == "release":
-            ReleaseParameters.model_validate(self.parameters)
-        elif self.skill_name == "press":
-            PressParameters.model_validate(self.parameters)
-        elif self.skill_name in {"pull", "push"}:
-            PullPushParameters.model_validate(self.parameters)
-        return self
-
+    @model_validator(mode="before")
+    @classmethod
+    def typed_parameters(cls, data):
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        kind = SkillName(data["skill_name"])
+        params = data.get("parameters", {})
+        if isinstance(params, BaseModel):
+            params = params.model_dump(exclude_none=True)
+        data["parameters"] = PARAMETER_TYPES[kind].model_validate(params)
+        return data
 
 class CommandOperation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation_id: str
-    semantic_intent: str
+    semantic_intent: str = Field(min_length=1)
     placement_target: PlacementTarget | None = None
-
 
 class CommandsFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal["2.0"] = "2.0"
     request_id: str
     scene_id: str
-    scene_version: int
+    scene_version: int = Field(ge=0)
     robot: str
     operations: list[CommandOperation]
     commands: list[Command]
 
     @model_validator(mode="after")
     def validate_consistency(self):
-        if len({item.command_id for item in self.commands}) != len(self.commands):
-            raise ValueError("commands command_id must be unique")
-        operation_ids = {item.operation_id for item in self.operations}
-        if any(item.operation_id not in operation_ids for item in self.commands):
+        for values in ([c.command_id for c in self.commands],
+                       [c.source_skill_step_id for c in self.commands],
+                       [o.operation_id for o in self.operations]):
+            if len(values) != len(set(values)):
+                raise ValueError("command and operation identifiers must be unique")
+        order = {o.operation_id: i for i, o in enumerate(self.operations)}
+        if any(c.operation_id not in order for c in self.commands):
             raise ValueError("command operation_id is not declared")
+        indices = [order[c.operation_id] for c in self.commands]
+        if indices != sorted(indices):
+            raise ValueError("commands operation order mismatch")
         return self
-
 
 class CommandFeedback(BaseModel):
     model_config = ConfigDict(extra="forbid")
     command_id: str
     status: Literal["success", "failed"]
-
 
 class ExecutionFeedback(BaseModel):
     model_config = ConfigDict(extra="forbid")

@@ -49,6 +49,8 @@ class RecipePlanner:
             elif operation.task_type == TaskType.CLOSE:
                 add(op, SkillName.LOCATE, actor)
                 add(op, SkillName.PUSH, actor, operation.reference)
+            elif operation.task_type == TaskType.RELEASE:
+                add(op, SkillName.RELEASE, actor)
             else:
                 add(op, SkillName.LOCATE, actor)
         return SkillPlan(steps=steps)

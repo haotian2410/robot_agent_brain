@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from ..contracts.camera import CameraFrame
 
 
@@ -19,8 +19,14 @@ class Detection(BaseModel):
     entity: str
     bbox: tuple[int, int, int, int]
 
+    @model_validator(mode="after")
+    def valid_box(self):
+        y1, x1, y2, x2 = self.bbox
+        if not (0 <= y1 < y2 <= 1000 and 0 <= x1 < x2 <= 1000):
+            raise ValueError("invalid normalized bbox")
+        return self
+
 
 class VisionGroundingOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     detections: list[Detection] = Field(default_factory=list)
-

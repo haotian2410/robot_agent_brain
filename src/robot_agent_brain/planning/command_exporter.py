@@ -12,7 +12,15 @@ class CommandExporter:
 
     def export(self, request_id: str, task: GroundedTask, plan: SkillPlan, scene: SceneConfig) -> CommandsFile:
         bindings = {item.entity_id: item.scene_object_ids for item in task.entities}
+        if any(len(ids) != 1 for ids in bindings.values()):
+            raise ValueError("command_export_requires_concrete_entity")
+        if (task.scene_id, task.scene_version) != (scene.scene_id, scene.scene_version):
+            raise ValueError("command_export_scene_mismatch")
+        if len({s.step_id for s in plan.steps}) != len(plan.steps):
+            raise ValueError("command_export_duplicate_skill_step")
         operations_by_id = {item.operation_id: item for item in task.operations}
+        if {s.operation_id for s in plan.steps} != set(operations_by_id):
+            raise ValueError("command_export_operation_coverage_mismatch")
         command_operations = [CommandOperation(
             operation_id=item.operation_id,
             semantic_intent=self._semantic_intent(item, bindings),
@@ -26,7 +34,7 @@ class CommandExporter:
                 targets = bindings[step.target_entity]
                 if len(targets) != 1:
                     raise ValueError("command_export_requires_concrete_entity")
-                parameters["target"] = targets[0] if len(targets) == 1 else targets
+                parameters["target"] = targets[0]
             if step.reference_entity:
                 references = bindings[step.reference_entity]
                 if len(references) != 1:
@@ -67,7 +75,7 @@ class CommandExporter:
         actor_values = bindings.get(actor, [actor])
         actor_id = actor_values[0]
         if operation.task_type == TaskType.PICK_AND_PLACE:
-            destination = bindings.get(operation.destination, operation.destination)
+            destination = bindings[operation.destination][0]
             return f"place {actor_id} relative to {destination}"
         if operation.task_type == TaskType.MOVE:
             return f"move {actor_id} {operation.motion_direction.value} {operation.distance_m}m"

@@ -87,6 +87,21 @@ class TaskParseOutput(BaseModel):
         return self
 
     def to_task_intent(self, instruction: str) -> TaskIntent:
+        if self.status != TurnStatus.ACCEPTED or self.turn_kind != TurnKind.ROBOT_TASK:
+            raise ValueError("task_semantic_invalid: no robot task payload")
+        moves = [o for o in self.operations if o.type == TaskType.MOVE]
+        spans = _extract_motion_spans(instruction)
+        if moves and spans and len(moves) != len(spans):
+            raise ValueError("motion_clause_binding_ambiguous")
+        operation_values = []
+        span_index = 0
+        for item in self.operations:
+            values = item.model_dump(exclude={"type"})
+            if item.type == TaskType.MOVE and spans:
+                span = spans[span_index]
+                span_index += 1
+                values.update(motion_direction=span.direction, distance_m=span.distance_m, motion_scale=span.motion_scale)
+            operation_values.append(Operation(operation_id=f"op-{len(operation_values)+1}", task_type=item.type, **values))
         entity_ids = {item.id for item in self.entities}
         relations = [SpatialRelation(
             scope=item.scope, subject=item.subject, relation=item.relation, reference=item.reference,
@@ -104,19 +119,7 @@ class TaskParseOutput(BaseModel):
                 quantity_mode=item.quantity_mode,
                 aliases=item.aliases, dialogue_ref=item.dialogue_ref, dialogue_ref_set=item.dialogue_ref_set, all_available=item.all_available,
             ) for item in self.entities],
-            operations=[Operation(
-                operation_id=f"op-{index}",
-                task_type=item.type,
-                source=item.source,
-                destination=item.destination,
-                target=item.target,
-                reference=item.reference,
-                motion_direction=item.motion_direction,
-                distance_m=item.distance_m,
-                motion_scale=item.motion_scale,
-                placement_target=item.placement_target,
-                depends_on=item.depends_on,
-            ) for index, item in enumerate(self.operations, start=1)],
+            operations=operation_values,
             spatial_relations=relations,
         )
 
@@ -134,7 +137,19 @@ _DIRECTION_PATTERNS = (
     (r"(?:向|往|朝)\s*上\s*(?:移(?:动)?|挪)|上移", Direction.UP),
     (r"(?:向|往|朝)\s*下\s*(?:移(?:动)?|挪)|下移", Direction.DOWN),
 )
-_DISTANCE = re.compile(r"(\d+(?:\.\d+)?)\s*(厘米|cm|米|m)", re.IGNORECASE)
+_DISTANCE = re.compile(r"(\d+(?:\.\d+)?|[零一二两三四五六七八九十百]+)\s*(厘米|cm|米|m)", re.IGNORECASE)
+
+def _number(text):
+    if re.fullmatch(r"\d+(?:\.\d+)?", text):
+        return float(text)
+    digits = dict(zip("零一二两三四五六七八九", [0,1,2,2,3,4,5,6,7,8,9]))
+    if "百" in text:
+        left, right = text.split("百", 1)
+        return (digits[left] if left else 1) * 100 + (_number(right) if right else 0)
+    if "十" in text:
+        left, right = text.split("十", 1)
+        return (digits[left] if left else 1) * 10 + (digits[right] if right else 0)
+    return digits[text]
 
 @dataclass(frozen=True)
 class ExplicitMotionSpan:
@@ -154,10 +169,13 @@ def _extract_motion_spans(instruction: str) -> list[ExplicitMotionSpan]:
     spans = []
     for index, (start, end, direction) in enumerate(matches):
         window_end = matches[index + 1][0] if index + 1 < len(matches) else len(instruction)
+        separator = re.search(r"[，,。；;]|然后|再把", instruction[end:window_end])
+        if separator:
+            window_end = end + separator.start()
         distance_match = _DISTANCE.search(instruction, end, window_end)
         distance = None
         if distance_match:
-            distance = float(distance_match.group(1))
+            distance = _number(distance_match.group(1))
             if distance_match.group(2).casefold() in {"厘米", "cm"}:
                 distance /= 100.0
         phrase = instruction[end:window_end]
@@ -175,8 +193,10 @@ def normalize_motion_language(intent: TaskIntent) -> TaskIntent:
     operations = []
     move_count = sum(operation.task_type.value == "move" for operation in intent.operations)
     spans = _extract_motion_spans(intent.instruction)
-    if move_count and len(spans) != move_count:
+    if move_count and spans and len(spans) != move_count:
         raise ValueError("motion_clause_binding_ambiguous: move operations and motion clauses differ")
+    if not spans:
+        return intent
     span_index = 0
     for operation in intent.operations:
         if operation.task_type.value != "move":
@@ -184,5 +204,7 @@ def normalize_motion_language(intent: TaskIntent) -> TaskIntent:
             continue
         span = spans[span_index]
         span_index += 1
-        operations.append(operation.model_copy(update={"motion_direction": span.direction, "distance_m": span.distance_m, "motion_scale": span.motion_scale}))
+        values = operation.model_dump()
+        values.update(motion_direction=span.direction, distance_m=span.distance_m, motion_scale=span.motion_scale)
+        operations.append(Operation.model_validate(values))
     return intent.model_copy(update={"operations": operations})
