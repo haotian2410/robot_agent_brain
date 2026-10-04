@@ -37,6 +37,7 @@ class SceneQueryIntent(BaseModel):
     query_type: Literal["count", "existence", "position", "state"]
     semantic_name: str | None = None
     category: str | None = None
+    referent_scene_object_id: str | None = None
 
 class SessionControlIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")

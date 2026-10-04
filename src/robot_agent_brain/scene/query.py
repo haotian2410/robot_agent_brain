@@ -15,5 +15,5 @@ class SceneQueryResult(BaseModel):
 
 class SceneQueryEngine:
     def query(self, intent: SceneQueryIntent, scene: SceneConfig) -> SceneQueryResult:
-        items = [item for item in scene.objects if (intent.semantic_name is None or item.semantic_name.casefold() == intent.semantic_name.casefold()) and (intent.category is None or item.category.casefold() == intent.category.casefold())]
+        items = [item for item in scene.objects if (intent.referent_scene_object_id is None or item.scene_object_id == intent.referent_scene_object_id) and (intent.semantic_name is None or item.semantic_name.casefold() == intent.semantic_name.casefold()) and (intent.category is None or item.category.casefold() == intent.category.casefold())]
         return SceneQueryResult(query_type=intent.query_type, semantic_name=intent.semantic_name, count=len(items) if intent.query_type == "count" else None, exists=bool(items) if intent.query_type == "existence" else None, object_ids=[item.scene_object_id for item in items] if intent.query_type in {"position", "state"} else [], positions={item.scene_object_id: item.transform.position for item in items} if intent.query_type == "position" else {}, states={item.scene_object_id: item.properties for item in items} if intent.query_type == "state" else {})

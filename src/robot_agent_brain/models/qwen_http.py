@@ -101,6 +101,9 @@ class QwenHTTPProvider:
         marker = re.search(r"\[dialogue_exclude=([^\]]+)\]", request.instruction)
         if marker and value.get("entities"):
             value["entities"][0]["exclude_scene_object_ids"] = [marker.group(1)]
+        referent = re.search(r"\[dialogue_scene_object_id=([^\]]+)\]", request.instruction)
+        if referent and value.get("scene_query"):
+            value["scene_query"]["referent_scene_object_id"] = referent.group(1)
         return TaskParseOutput.model_validate(value).to_brain_turn(request.instruction)
 
     def detect(self, frame: CameraFrame, entities: list[VisionEntity]) -> VisionGroundingOutput:
