@@ -2,7 +2,8 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from .task_intent import TaskIntent
+from .task_intent import TaskIntent, TaskEntity, Direction, MotionScale
+from .spatial import SpatialRelation
 
 class TurnStatus(StrEnum):
     ACCEPTED = "accepted"
@@ -19,15 +20,16 @@ class TurnKind(StrEnum):
 class SceneEditIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation: Literal["add", "remove", "translate", "rotate", "move_relative", "update_properties", "update"]
-    semantic_name: str
-    category: str
+    semantic_name: str = ""
+    category: str = ""
+    target: str | None = None
     count: int = Field(default=1, ge=1)
     relation: str | None = None
     reference: str | None = None
     properties: dict[str, str | float | bool] = Field(default_factory=dict)
-    direction: str | None = None
+    direction: Direction | None = None
     distance_m: float | None = Field(default=None, gt=0, le=2)
-    motion_scale: str | None = None
+    motion_scale: MotionScale | None = None
     coordinate_frame: Literal["world", "object_local"] = "world"
     axis: Literal["x", "y", "z"] | None = None
     angle_deg: float | None = None
@@ -36,12 +38,34 @@ class SceneEditIntent(BaseModel):
 
     @model_validator(mode="after")
     def paired_relation(self):
+        if not self.target and not (self.semantic_name and self.category):
+            raise ValueError("scene edit needs a target selector or legacy name/category")
         if (self.relation is None) != (self.reference is None):
             raise ValueError("task_semantic_invalid: scene edit relation/reference must be paired")
         if self.operation in {"translate", "move_relative"} and not (self.direction or self.relation):
             raise ValueError("task_semantic_invalid: translation requires direction or relation")
         if self.operation == "rotate" and (self.axis is None or self.angle_deg is None):
             raise ValueError("task_semantic_invalid: rotation requires axis and angle")
+        return self
+
+
+class SceneEditPlan(BaseModel):
+    """Ordered edits sharing the same entity/selection contract as robot tasks."""
+    model_config = ConfigDict(extra="forbid")
+    entities: list[TaskEntity] = Field(default_factory=list)
+    relations: list[SpatialRelation] = Field(default_factory=list)
+    operations: list[SceneEditIntent] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_selectors(self):
+        TaskIntent(instruction="scene selection", entities=self.entities,
+                   operations=[], spatial_relations=self.relations)
+        ids = {entity.entity_id for entity in self.entities}
+        for op in self.operations:
+            if op.target and op.target not in ids:
+                raise ValueError("scene_edit_unknown_selector")
+            if op.reference and op.target and op.reference not in ids:
+                raise ValueError("scene_edit_unknown_reference_selector")
         return self
 
 class SceneQueryIntent(BaseModel):
@@ -61,7 +85,7 @@ class BrainTurn(BaseModel):
     turn_kind: TurnKind
     instruction: str
     task_intent: TaskIntent | None = None
-    scene_edit: SceneEditIntent | None = None
+    scene_edit: SceneEditPlan | SceneEditIntent | None = None
     scene_query: SceneQueryIntent | None = None
     session_control: SessionControlIntent | None = None
 

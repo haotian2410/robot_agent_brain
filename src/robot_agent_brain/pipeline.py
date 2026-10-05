@@ -82,7 +82,7 @@ class BrainPipeline:
         if turn.status != TurnStatus.ACCEPTED:
             return BrainResult(status=turn.status, turn_kind=turn.turn_kind)
         if turn.turn_kind == TurnKind.SCENE_EDIT:
-            return BrainResult(turn_kind=turn.turn_kind, scene_patch=self.scene_editor.edit(turn.scene_edit, scene))
+            return BrainResult(turn_kind=turn.turn_kind, scene_patch=self.scene_editor.edit(turn.scene_edit, scene, dialogue=dialogue))
         if turn.turn_kind == TurnKind.SCENE_QUERY:
             return BrainResult(turn_kind=turn.turn_kind, scene_query_result=SceneQueryEngine().query(turn.scene_query, scene))
         if turn.turn_kind == TurnKind.SESSION_CONTROL:

@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import Protocol
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from ..contracts.turn import BrainTurn, SceneEditIntent, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
+from ..contracts.turn import BrainTurn, SceneEditPlan, SceneEditIntent, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
 
 from ..contracts.spatial import RelationScope, SpatialRelation, SpatialRelationType
 from ..contracts.task_intent import Direction, MotionScale, Operation, PlacementTarget, QuantityMode, TaskEntity, TaskIntent, TaskType
@@ -62,7 +62,7 @@ class TaskParseOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     status: TurnStatus = TurnStatus.ACCEPTED
     turn_kind: TurnKind = TurnKind.ROBOT_TASK
-    scene_edit: SceneEditIntent | None = None
+    scene_edit: SceneEditPlan | SceneEditIntent | None = None
     scene_query: SceneQueryIntent | None = None
     session_control: SessionControlIntent | None = None
     entities: list[ParseEntity] = Field(default_factory=list)

@@ -56,6 +56,10 @@ motion direction 仅允许 left/right/front/back/up/down；东=right、西=left�
 “增加一个香蕉”返回 accepted scene_edit，relation=null、reference=null，不得猜位置；是否澄清由 Python Session 决定。“在篮子右边增加一个香蕉”写 relation=right_of、reference=basket。relation/reference 必须同时存在或同时为 null。“桌子/桌面/台面”可作为 reference。
 scene_query 只描述 count/existence/position/state，不生成 object_id。
 
+任务域边界必须先按用户意图判断：直接改变场景状态的普通移动、相对移动、旋转、增加、删除和属性修改输出 `scene_edit`，不输出 robot operations；要求机器人抓取、拿起、放置、释放、按压、推拉、开关，或明确说“用机械臂/机器人”，输出 `robot_task`。例如“把苹果右移10厘米”是 scene_edit translate；“把苹果移到香蕉右边”是 scene_edit move_relative；“把苹果放到香蕉右边”是 robot_task pick_and_place；“用机械臂把苹果右移10厘米”是 robot_task move；“抓起苹果，右移后放下”整体是 robot_task。明确说“直接修改场景”时优先 scene_edit。混合“增加香蕉然后把它放进盒子”必须返回 clarification_required，不得只执行一半。
+
+普通场景编辑也可以包含多个有序 operation，必须全部保留。例如“苹果向右移动5厘米，香蕉向前移动10厘米”输出 scene_edit.operations 两条 translate；不要只保留第一条。场景编辑对象选择必须保留 entities、颜色、数量、quantity_mode、selection relations、dialogue_ref 和排除条件，Python 会使用与 robot grounding 相同的对象绑定规则。旋转至少支持“绕世界Z轴旋转90度”和“绕自身X轴旋转30度”，分别写 coordinate_frame=world/object_local、axis=z/x、angle_deg=90/30；不要输出坐标或四元数。
+
 ## 10. 对话指代
 输入中的 [dialogue_ref=苹果] 是系统注入的稳定单对象指代：建立独立 entity，dialogue_ref=true，不得与同名普通 entity 合并。
 输入中的 [dialogue_ref_set=苹果] 是稳定多对象集合：建立一个集合 entity，dialogue_ref_set=true、quantity_mode=all，不得缩减为其中一个对象。operation 和 relation 可引用该集合。

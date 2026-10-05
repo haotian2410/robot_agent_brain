@@ -6,6 +6,9 @@ from ..ports.asset_catalog import AssetCatalogPort
 from .scene_layout import SceneLayoutPolicy
 from .transform_editor import translate, rotate
 from ..models.motion_policy import MotionPolicy
+from ..contracts.turn import SceneEditPlan
+from ..grounding.scene_object_selector import SceneObjectSelector
+from .scene_manager import SceneManager
 
 
 class SceneEditor:
@@ -16,10 +19,35 @@ class SceneEditor:
         self.layout = layout or SceneLayoutPolicy()
         self.motion_policy = MotionPolicy()
 
-    def edit(self, intent, scene) -> ScenePatch:
+    def edit(self, intent, scene, *, dialogue=None) -> ScenePatch:
+        if not isinstance(intent, SceneEditPlan):
+            return self._edit_one(intent, scene)
+        # Preview every step locally; publish one atomic patch only on success.
+        preview = SceneManager(scene)
+        operations = []
+        selector = SceneObjectSelector()
+        for edit in intent.operations:
+            matches = None
+            reference = None
+            if edit.target and edit.operation != "add":
+                matches = selector.resolve(edit.target, intent.entities, intent.relations, preview.scene, dialogue)
+            if edit.reference and edit.target:
+                refs = selector.resolve(edit.reference, intent.entities, intent.relations, preview.scene, dialogue)
+                if len(refs) != 1:
+                    raise ValueError("scene_edit_reference_ambiguous")
+                reference = refs[0]
+            if edit.operation == "add" and edit.target:
+                entity = next(e for e in intent.entities if e.entity_id == edit.target)
+                edit = edit.model_copy(update={"semantic_name": entity.semantic_name, "category": entity.category,
+                                               "count": entity.count})
+            patch = self._edit_one(edit, preview.scene, matches=matches, reference=reference)
+            preview.apply_patch(patch)
+            operations.extend(patch.operations)
+        return ScenePatch(scene_id=scene.scene_id, base_scene_version=scene.scene_version, operations=operations)
+
+    def _edit_one(self, intent, scene, *, matches=None, reference=None) -> ScenePatch:
         """Resolve names to assets/instances before producing a versioned patch."""
-        reference = None
-        if intent.reference:
+        if intent.reference and reference is None:
             refs = [o for o in scene.objects if o.scene_object_id == intent.reference]
             if not refs:
                 refs = [o for o in scene.objects if o.semantic_name.casefold() == intent.reference.casefold()]
@@ -57,12 +85,13 @@ class SceneEditor:
                 obj.properties.update(intent.properties)
                 operations.extend(patch.operations)
         else:
-            matches = [o for o in scene.objects if o.scene_object_id == intent.semantic_name]
-            if not matches:
-                matches = [o for o in scene.objects if o.semantic_name.casefold() == intent.semantic_name.casefold()
-                           and o.category.casefold() == intent.category.casefold()]
-            if len(matches) != intent.count:
-                raise ValueError("scene_edit_object_missing" if len(matches) < intent.count else "scene_edit_object_ambiguous")
+            if matches is None:
+                matches = [o for o in scene.objects if o.scene_object_id == intent.semantic_name]
+                if not matches:
+                    matches = [o for o in scene.objects if o.semantic_name.casefold() == intent.semantic_name.casefold()
+                               and o.category.casefold() == intent.category.casefold()]
+                if len(matches) != intent.count:
+                    raise ValueError("scene_edit_object_missing" if len(matches) < intent.count else "scene_edit_object_ambiguous")
             operations = []
             for obj in matches:
                 if intent.operation == "remove":
@@ -99,6 +128,8 @@ class SceneEditor:
                     operations.append(ScenePatchOperation(action=PatchAction.UPDATE_TRANSFORM, scene_object_id=obj.scene_object_id, transform=transform))
                 elif intent.operation == "rotate":
                     transform = rotate(obj.transform, intent.axis, intent.angle_deg, intent.coordinate_frame)
+                    if self._collides(transform, obj, scene):
+                        raise ValueError("scene_edit_transform_collision")
                     operations.append(ScenePatchOperation(action=PatchAction.UPDATE_TRANSFORM, scene_object_id=obj.scene_object_id, transform=transform))
                 if intent.properties:
                     operations.append(ScenePatchOperation(action=PatchAction.UPDATE_PROPERTY, scene_object_id=obj.scene_object_id, properties=intent.properties))
@@ -129,19 +160,32 @@ class SceneEditor:
 
     def _collides(self, transform, obj, scene):
         model = self.assets.get_model_property(obj.asset_id)
-        sx = model.dimensions_m[0] * transform.scale[0]
-        sy = model.dimensions_m[1] * transform.scale[1]
+        sx, sy, sz = self._world_extents(model.dimensions_m, transform)
         for other_obj in scene.objects:
             if other_obj.scene_object_id == obj.scene_object_id:
                 continue
             other = self.assets.get_model_property(other_obj.asset_id)
             ox, oy, _ = other_obj.transform.position
             x, y, _ = transform.position
-            osx = other.dimensions_m[0] * other_obj.transform.scale[0]
-            osy = other.dimensions_m[1] * other_obj.transform.scale[1]
-            if abs(x - ox) < (sx + osx) / 2 and abs(y - oy) < (sy + osy) / 2:
+            osx, osy, osz = self._world_extents(other.dimensions_m, other_obj.transform)
+            oz = other_obj.transform.position[2]
+            if (abs(x - ox) < (sx + osx) / 2 and abs(y - oy) < (sy + osy) / 2
+                    and abs(transform.position[2] - oz) < (sz + osz) / 2):
                 return True
         return False
+
+    @staticmethod
+    def _world_extents(dimensions, transform):
+        """Return conservative world AABB extents for a scaled quaternion box."""
+        hx, hy, hz = (dimensions[i] * transform.scale[i] / 2 for i in range(3))
+        qx, qy, qz, qw = transform.quaternion_xyzw
+        rotation = (
+            (1 - 2*(qy*qy + qz*qz), 2*(qx*qy - qz*qw), 2*(qx*qz + qy*qw)),
+            (2*(qx*qy + qz*qw), 1 - 2*(qx*qx + qz*qz), 2*(qy*qz - qx*qw)),
+            (2*(qx*qz - qy*qw), 2*(qy*qz + qx*qw), 1 - 2*(qx*qx + qy*qy)),
+        )
+        return tuple(2 * sum(abs(rotation[row][col]) * (hx, hy, hz)[col] for col in range(3))
+                     for row in range(3))
 
     def add_object(
         self,
