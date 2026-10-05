@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass
+from ..semantics.motion_evidence import _extract_motion_spans, resolve_motion_evidence
 from typing import Protocol
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from ..contracts.turn import BrainTurn, SceneEditPlan, SceneEditIntent, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
@@ -93,9 +92,7 @@ class TaskParseOutput(BaseModel):
         if self.status != TurnStatus.ACCEPTED or self.turn_kind != TurnKind.ROBOT_TASK:
             raise ValueError("task_semantic_invalid: no robot task payload")
         moves = [o for o in self.operations if o.type == TaskType.MOVE]
-        spans = _extract_motion_spans(instruction)
-        if moves and spans and len(moves) != len(spans):
-            raise ValueError("motion_clause_binding_ambiguous")
+        spans = resolve_motion_evidence(instruction, len(moves)) if moves else []
         operation_values = []
         span_index = 0
         for item in self.operations:
@@ -139,81 +136,13 @@ class TaskParseOutput(BaseModel):
         return BrainTurn(status=status, turn_kind=self.turn_kind, instruction=instruction, task_intent=task, scene_edit=self.scene_edit, scene_query=self.scene_query, session_control=self.session_control)
 
 
-_DIRECTION_PATTERNS = (
-    (r"(?:向|往|朝)\s*左\s*(?:移(?:动)?|挪)|左移", Direction.LEFT),
-    (r"(?:向|往|朝)\s*右\s*(?:移(?:动)?|挪)|右移", Direction.RIGHT),
-    (r"(?:向|往|朝)\s*前\s*(?:移(?:动)?|挪)|前移", Direction.FRONT),
-    (r"(?:向|往|朝)\s*后\s*(?:移(?:动)?|挪)|后移", Direction.BACK),
-    (r"(?:向|往|朝)\s*上\s*(?:移(?:动)?|挪)|上移", Direction.UP),
-    (r"(?:向|往|朝)\s*下\s*(?:移(?:动)?|挪)|下移", Direction.DOWN),
-)
-_DISTANCE = re.compile(r"(半|\d+(?:\.\d+)?|[零一二两三四五六七八九十百]+(?:点[零一二两三四五六七八九]+)?)\s*(毫米|mm|厘米|cm|米|m)", re.IGNORECASE)
-
-def _number(text):
-    if text == "半":
-        return 0.5
-    if "点" in text:
-        left, right = text.split("点", 1)
-        return _number(left) + sum((int(dict(zip("零一二两三四五六七八九", "01223456789"))[c]) * 10 ** -(i + 1)) for i, c in enumerate(right))
-    if re.fullmatch(r"\d+(?:\.\d+)?", text):
-        return float(text)
-    digits = dict(zip("零一二两三四五六七八九", [0,1,2,2,3,4,5,6,7,8,9]))
-    if "百" in text:
-        left, right = text.split("百", 1)
-        return (digits[left] if left else 1) * 100 + (_number(right) if right else 0)
-    if "十" in text:
-        left, right = text.split("十", 1)
-        return (digits[left] if left else 1) * 10 + (digits[right] if right else 0)
-    return digits[text]
-
-@dataclass(frozen=True)
-class ExplicitMotionSpan:
-    direction: Direction
-    distance_m: float | None
-    motion_scale: MotionScale | None
-    start: int
-    end: int
-
-def _extract_motion_spans(instruction: str) -> list[ExplicitMotionSpan]:
-    matches = []
-    for pattern, direction in _DIRECTION_PATTERNS:
-        for match in re.finditer(pattern, instruction):
-            if not any(match.start() < end and match.end() > start for start, end, _ in matches):
-                matches.append((match.start(), match.end(), direction))
-    matches.sort(key=lambda item: item[0])
-    spans = []
-    for index, (start, end, direction) in enumerate(matches):
-        window_end = matches[index + 1][0] if index + 1 < len(matches) else len(instruction)
-        separator = re.search(r"[，,。；;]|然后|再把", instruction[end:window_end])
-        if separator:
-            window_end = end + separator.start()
-        distance_match = _DISTANCE.search(instruction, end, window_end)
-        distance = None
-        if distance_match:
-            distance = _number(distance_match.group(1))
-            if distance_match.group(2).casefold() in {"毫米", "mm"}:
-                distance /= 1000.0
-            elif distance_match.group(2).casefold() in {"厘米", "cm"}:
-                distance /= 100.0
-        phrase = instruction[max(0, start - 4):window_end]
-        scale = None
-        if distance is None and any(token in phrase for token in ("大幅", "很多", "很远")):
-            scale = MotionScale.LARGE
-        elif distance is None and any(token in phrase for token in ("一些", "一段", "适中", "远一些")):
-            scale = MotionScale.MEDIUM
-        elif distance is None and any(token in phrase for token in ("一点", "稍微", "轻微", "远一点")):
-            scale = MotionScale.SMALL
-        spans.append(ExplicitMotionSpan(direction, distance, scale, start, distance_match.end() if distance_match else end))
-    return spans
 
 
 def normalize_motion_language(intent: TaskIntent) -> TaskIntent:
     """Make the user's explicit distance authoritative over model scale output."""
     operations = []
     move_count = sum(operation.task_type.value == "move" for operation in intent.operations)
-    spans = _extract_motion_spans(intent.instruction)
-    if move_count and spans and len(spans) != move_count:
-        raise ValueError("motion_clause_binding_ambiguous: move operations and motion clauses differ")
+    spans = resolve_motion_evidence(intent.instruction, move_count) if move_count else []
     if not spans:
         return intent
     span_index = 0

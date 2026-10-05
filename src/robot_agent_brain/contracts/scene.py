@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+import math
 from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -13,6 +14,16 @@ class Transform(StrictModel):
     position: tuple[float, float, float] = (0.0, 0.0, 0.0)
     quaternion_xyzw: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
     scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+
+    @model_validator(mode="after")
+    def valid_transform(self):
+        if not all(math.isfinite(v) for v in (*self.position, *self.quaternion_xyzw, *self.scale)):
+            raise ValueError("transform values must be finite")
+        if not math.isclose(math.sqrt(sum(v*v for v in self.quaternion_xyzw)), 1.0, rel_tol=0, abs_tol=1e-6):
+            raise ValueError("transform quaternion must be normalized (xyzw)")
+        if any(value <= 0 for value in self.scale):
+            raise ValueError("transform scale must be positive")
+        return self
 
 
 class SceneObject(StrictModel):

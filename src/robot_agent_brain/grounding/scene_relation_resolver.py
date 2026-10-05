@@ -43,9 +43,8 @@ class SceneRelationResolver:
                     key = "container_membership" if kind == "inside" else "support"
                     def evidence(o):
                         membership = o.properties.get(key)
-                        members = reference.properties.get("members")
-                        if key in o.properties or "parent" in o.properties or members is not None:
-                            return o.properties.get("parent") == reference.scene_object_id or membership == reference.scene_object_id or (isinstance(membership, list) and reference.scene_object_id in membership) or (isinstance(members, list) and o.scene_object_id in members)
+                        if key in o.properties:
+                            return membership == reference.scene_object_id or (isinstance(membership, list) and reference.scene_object_id in membership)
                         return None
                     answers = [(o, evidence(o)) for o in selected]
                     if any(answer is None for _, answer in answers):

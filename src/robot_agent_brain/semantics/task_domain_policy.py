@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..contracts.turn import BrainTurn, SceneEditIntent, SceneEditPlan, TurnKind, TurnStatus
 from ..contracts.task_intent import Operation, TaskIntent, TaskEntity
+from .robot_interactions import RobotInteractionLexicon
 
 
 class TaskDomainPolicy:
@@ -13,11 +14,13 @@ class TaskDomainPolicy:
         text = instruction.casefold()
         explicit_robot = any(token in text for token in ("用机械臂", "让机械臂", "用机器人", "让机器人", "using the robot"))
         explicit_scene = any(token in text for token in ("直接修改", "直接移动", "直接旋转", "编辑场景", "修改场景"))
-        interaction = any(token in text for token in ("抓", "拿起", "夹住", "放进", "放到", "释放", "放下", "grasp", "pick"))
+        interaction = RobotInteractionLexicon.matches(text)
         if any(token in text for token in ("增加", "添加", "删除")) and interaction:
             return self._clarify(instruction)
         if turn.turn_kind == TurnKind.SCENE_EDIT:
-            edits = turn.scene_edit
+            from .motion_evidence import normalize_scene_motion
+            edits = normalize_scene_motion(instruction, turn.scene_edit)
+            turn = turn.model_copy(update={"scene_edit": edits})
             plan = edits if isinstance(edits, SceneEditPlan) else SceneEditPlan(operations=[edits])
             if explicit_robot or any(op.explicit_robot for op in plan.operations):
                 if any(op.operation != "translate" or op.reference for op in plan.operations):

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from ..contracts.scene import Transform
+from .geometry import rotation_matrix
 
 
 def _qmul(a, b):
@@ -12,7 +13,7 @@ def _qmul(a, b):
             aw*bw - ax*bx - ay*by - az*bz)
 
 
-def translate(transform: Transform, direction: str, distance_m: float) -> Transform:
+def translate(transform: Transform, direction: str, distance_m: float, coordinate_frame: str = "world") -> Transform:
     vectors = {
         "left": (-1, 0, 0), "right": (1, 0, 0),
         "front": (0, 1, 0), "back": (0, -1, 0),
@@ -20,7 +21,11 @@ def translate(transform: Transform, direction: str, distance_m: float) -> Transf
     }
     if direction not in vectors:
         raise ValueError(f"unsupported_translation_direction: {direction}")
-    vx, vy, vz = vectors[direction]
+    vector = vectors[direction]
+    if coordinate_frame == "object_local":
+        matrix = rotation_matrix(transform)
+        vector = tuple(sum(row[i] * vector[i] for i in range(3)) for row in matrix)
+    vx, vy, vz = vector
     x, y, z = transform.position
     return Transform(position=(x + vx*distance_m, y + vy*distance_m, z + vz*distance_m),
                      quaternion_xyzw=transform.quaternion_xyzw, scale=transform.scale)

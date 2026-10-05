@@ -9,6 +9,7 @@ from ..models.motion_policy import MotionPolicy
 from ..contracts.turn import SceneEditPlan
 from ..grounding.scene_object_selector import SceneObjectSelector
 from .scene_manager import SceneManager
+from .geometry import world_extents
 
 
 class SceneEditor:
@@ -76,12 +77,8 @@ class SceneEditor:
                     reference_object=reference,
                 )
                 obj = patch.operations[0].object
-                obj.transform = self._separate(obj, scene, model)
-                if operations:
-                    # Deterministic initial layout spacing, not robot execution placement.
-                    offset = len(operations) * (model.dimensions_m[1] + self.layout.clearance_m)
-                    x, y, z = obj.transform.position
-                    obj.transform.position = (x, y + offset, z)
+                obj.transform = self._separate(obj, scene, model, extra=updated_transforms)
+                updated_transforms.append((obj.transform, model))
                 obj.properties.update(intent.properties)
                 operations.extend(patch.operations)
         else:
@@ -97,22 +94,18 @@ class SceneEditor:
                 if intent.operation == "remove":
                     operations.append(ScenePatchOperation(action=PatchAction.REMOVE, scene_object_id=obj.scene_object_id))
                     continue
-                if reference is not None:
+                if intent.operation in {"move_relative", "update"} and reference is not None:
                     transform = self.layout.relative_transform(
                         intent.relation, reference.transform,
                         self.assets.get_model_property(reference.asset_id),
                         self.assets.get_model_property(obj.asset_id),
+                        obj.transform,
                     )
-                    transform = self._separate(
-                        obj.model_copy(update={"transform": transform}),
-                        scene,
-                        self.assets.get_model_property(obj.asset_id),
-                        excluded={item.scene_object_id for item in matches},
-                        extra=updated_transforms,
-                    )
+                    if self._collides(transform, obj, scene):
+                        raise ValueError("scene_edit_layout_collision")
                     updated_transforms.append((transform, self.assets.get_model_property(obj.asset_id)))
                     operations.append(ScenePatchOperation(action=PatchAction.UPDATE_TRANSFORM, scene_object_id=obj.scene_object_id, transform=transform))
-                elif intent.operation in {"translate", "move_relative"}:
+                elif intent.operation == "translate":
                     model = self.assets.get_model_property(obj.asset_id)
                     distance = intent.distance_m
                     if distance is None:
@@ -122,7 +115,7 @@ class SceneEditor:
                         if axis is None:
                             raise ValueError("scene_edit_motion_direction_missing")
                         distance = model.dimensions_m[axis] * obj.transform.scale[axis] * self.motion_policy.scale_factor(intent.motion_scale)
-                    transform = translate(obj.transform, intent.direction, distance)
+                    transform = translate(obj.transform, intent.direction, distance, intent.coordinate_frame)
                     if self._collides(transform, obj, scene):
                         raise ValueError("scene_edit_transform_collision")
                     operations.append(ScenePatchOperation(action=PatchAction.UPDATE_TRANSFORM, scene_object_id=obj.scene_object_id, transform=transform))
@@ -146,12 +139,12 @@ class SceneEditor:
         for _ in range(len(candidates) + 1):
             changed = False
             for other_transform, other, other_scale in candidates:
-                ox, oy, _ = other_transform.position
-                sx = model.dimensions_m[0] * obj.transform.scale[0]
-                sy = model.dimensions_m[1] * obj.transform.scale[1]
-                osx = other.dimensions_m[0] * other_scale[0]
-                osy = other.dimensions_m[1] * other_scale[1]
-                if abs(x - ox) < (sx + osx) / 2 + self.layout.clearance_m and abs(y - oy) < (sy + osy) / 2 + self.layout.clearance_m:
+                ox, oy, oz = other_transform.position
+                sx, sy, sz = world_extents(model.dimensions_m, obj.transform)
+                osx, osy, osz = world_extents(other.dimensions_m, other_transform)
+                if (abs(x - ox) < (sx + osx) / 2 + self.layout.clearance_m
+                        and abs(y - oy) < (sy + osy) / 2 + self.layout.clearance_m
+                        and abs(z - oz) < (sz + osz) / 2 + self.layout.clearance_m):
                     y = oy + (sy + osy) / 2 + self.layout.clearance_m
                     changed = True
             if not changed:
@@ -174,18 +167,7 @@ class SceneEditor:
                 return True
         return False
 
-    @staticmethod
-    def _world_extents(dimensions, transform):
-        """Return conservative world AABB extents for a scaled quaternion box."""
-        hx, hy, hz = (dimensions[i] * transform.scale[i] / 2 for i in range(3))
-        qx, qy, qz, qw = transform.quaternion_xyzw
-        rotation = (
-            (1 - 2*(qy*qy + qz*qz), 2*(qx*qy - qz*qw), 2*(qx*qz + qy*qw)),
-            (2*(qx*qy + qz*qw), 1 - 2*(qx*qx + qz*qz), 2*(qy*qz - qx*qw)),
-            (2*(qx*qz - qy*qw), 2*(qy*qz + qx*qw), 1 - 2*(qx*qx + qy*qy)),
-        )
-        return tuple(2 * sum(abs(rotation[row][col]) * (hx, hy, hz)[col] for col in range(3))
-                     for row in range(3))
+    _world_extents = staticmethod(world_extents)
 
     def add_object(
         self,
@@ -205,10 +187,11 @@ class SceneEditor:
                 raise ValueError("scene_edit_reference_missing")
             reference_model = self.assets.get_model_property(reference_object.asset_id)
             transform = self.layout.relative_transform(
-                relation.relation,
+                relation.relation or "free_space",
                 reference_object.transform,
                 reference_model,
                 model,
+                transform,
             )
         object_value = SceneObject(
             scene_object_id=scene_object_id,

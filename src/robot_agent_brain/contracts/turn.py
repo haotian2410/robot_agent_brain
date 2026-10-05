@@ -46,6 +46,28 @@ class SceneEditIntent(BaseModel):
             raise ValueError("task_semantic_invalid: translation requires direction or relation")
         if self.operation == "rotate" and (self.axis is None or self.angle_deg is None):
             raise ValueError("task_semantic_invalid: rotation requires axis and angle")
+        fields = {
+            "relation": self.relation, "reference": self.reference,
+            "direction": self.direction, "distance_m": self.distance_m,
+            "motion_scale": self.motion_scale, "axis": self.axis, "angle_deg": self.angle_deg,
+        }
+        allowed = {
+            "add": {"relation", "reference"}, "remove": set(),
+            "translate": {"direction", "distance_m", "motion_scale"},
+            "move_relative": {"relation", "reference"},
+            "rotate": {"axis", "angle_deg"}, "update_properties": set(),
+            "update": {"relation", "reference"},  # legacy layout/property edit
+        }[self.operation]
+        if any(value is not None and key not in allowed for key, value in fields.items()):
+            raise ValueError(f"scene_edit_fields_forbidden: {self.operation}")
+        if self.operation == "move_relative" and self.reference is None:
+            raise ValueError("scene_edit_relative_reference_missing")
+        if self.operation == "translate" and self.distance_m is not None and self.motion_scale is not None:
+            raise ValueError("scene_edit_distance_modes_exclusive")
+        if self.properties and self.operation not in {"add", "update", "update_properties"}:
+            raise ValueError("scene_edit_properties_forbidden")
+        if self.operation not in {"translate", "rotate"} and self.coordinate_frame != "world":
+            raise ValueError("scene_edit_coordinate_frame_forbidden")
         return self
 
 
