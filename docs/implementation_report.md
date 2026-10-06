@@ -220,3 +220,32 @@ Pipeline defers missing/ambiguous prior-focus errors until the one understanding
 call can identify a valid ordered add-then-reference lifecycle. Same-turn local
 IDs can therefore resolve without a prior focus; unresolved cross-turn pronouns
 still fail. This does not add a second understanding call.
+
+## First outside-checkout wheel acceptance — 2026-10-07
+
+Core revision tested: `039114a`. Built with Python 3.12 using `pip wheel`, installed
+into a fresh venv without system site packages, then ran from `/tmp` with
+`PYTHONPATH` removed. Wheel SHA256:
+`6cd0afc55e61fe9428fbdd0d588d30accd4f944583e47c5eff2b86e9df0d6efa`.
+
+```bash
+/home/cscvlab/miniconda3/envs/robot_agent_integ/bin/python -m pip wheel --wheel-dir /tmp/brain-wheel-audit-dWyV3yio/wheels .
+/home/cscvlab/miniconda3/envs/robot_agent_integ/bin/python -m venv /tmp/brain-wheel-audit-dWyV3yio/env
+/tmp/brain-wheel-audit-dWyV3yio/env/bin/python -m pip install --no-index --find-links /tmp/brain-wheel-audit-dWyV3yio/wheels robot-agent-brain
+cd /tmp
+env -u PYTHONPATH /tmp/brain-wheel-audit-dWyV3yio/env/bin/python /home/cscvlab/lht/robot_agent_brain/scripts/wheel_smoke.py
+```
+
+Result: **passed**. Imported module came from the new venv's site-packages, not
+the checkout. Console help, prompt/default/asset resources, schema export,
+replay robot task with no scene, two generated apples, matching scene/commands,
+independent schema validation, and second-process recovery all passed. Evidence
+directory: `/tmp/brain-wheel-smoke-sqzgj_9q` (temporary local test output, not
+committed). `scripts/wheel_smoke.py` is also wired into both existing CI Python
+3.11/3.12 jobs. Only 3.12 was exercised locally; no remote CI result claimed.
+
+Real Qwen availability check: `curl --noproxy '*' --max-time 3 --silent
+--show-error http://127.0.0.1:8080/v1/models` failed with connection refused
+(exit 7). **Real Qwen task acceptance was not run**. No service was started or
+replay substituted for it. Final acceptance still requires remaining behavioral
+audit and current documentation, and rebuilding the final revision's wheel.

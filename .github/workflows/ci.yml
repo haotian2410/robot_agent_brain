@@ -21,3 +21,4 @@ jobs:
       - run: python -m venv /tmp/brain-wheel-env
       - run: /tmp/brain-wheel-env/bin/python -m pip install --no-index --find-links "$GITHUB_WORKSPACE/wheelhouse" robot-agent-brain
       - run: cd /tmp && /tmp/brain-wheel-env/bin/python -c "import robot_agent_brain; from robot_agent_brain.models.prompts import TASK_UNDERSTANDING_PROMPT; assert TASK_UNDERSTANDING_PROMPT"
+      - run: cd /tmp && env -u PYTHONPATH /tmp/brain-wheel-env/bin/python "$GITHUB_WORKSPACE/scripts/wheel_smoke.py"
