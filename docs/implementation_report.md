@@ -1,329 +1,201 @@
-# Implementation progress — 2026-10-06
+# 增量实现交付报告 — 2026-10-07
 
-Specification: `robot_agent_brain_codex_implementation_plan.md`, supplied by the user.
-Baseline: `266ebcc94fd5b433ebe1000f4d04c7356b747faa`, branch `main`.
-Initial working tree was clean; baseline suite had 26 passing tests.
+## 范围与基线
 
-This is an in-progress implementation, **not overall acceptance**.
+仓库 robot_agent_brain，分支 main。开始时核对基线
+`266ebcc94fd5b433ebe1000f4d04c7356b747faa`，工作区干净，原有 26 项测试通过。
+保留原 Pipeline、SceneManager、Grounder、TaskExpander、RecipePlanner 和 Commands v2，
+增量增加应用编排，没有引入 MuJoCo、MJCF、Control、IK 或轨迹依赖。
 
-## Implemented foundation
+本报告的最终**代码**验收版本为 `d427bc5`，之后的报告整理只修改文档。
+全部提交保留在本地，**未推送 GitHub**。逐条行为证据见 [验收矩阵](acceptance_matrix.md)。
 
-- `pipeline.py`: explicit `understand_turn` and provider-free `process_turn`;
-  compatibility `run`/`run_turn` delegate to them. Original user text is retained.
-- `session/brain_session.py`: parsed-turn entry point, with pause checks before
-  processing; paused sessions may resume or close.
-- `contracts/commands.py`: nested JSON Schema hooks derive per-skill parameter
-  rules from `PARAMETER_TYPES`; one canonical wire serialization excludes nulls
-  and validates against the public schema.
-- `adapters/json_command_sink.py`: validates before writing, stages in the same
-  directory, reads back and validates before replacement.
-- `pyproject.toml`: adds jsonschema runtime dependency (>=4.23,<5).
-- `brain_tests/test_pipeline_stages.py`: provider call counts, original text,
-  parsed entry point, query/control bypass, compatibility wrapper.
-- `brain_tests/test_export_roundtrip.py`: all seven skills, both MOVE forms,
-  final file schema validation, forbidden parameters, failed-write preservation.
+## 已实现
 
-## Verification so far
+- 一次理解得到 BrainTurn，同一份结果用于可选场景初始化及后续处理；兼容 run/run_turn/run_task。
+- generated/uploaded/session/none 分流；有效空场景不重建，坏上传不 fallback，已有场景缺对象不补造。
+- 元数据初始化保持数量/颜色/候选和初始关系；不提前完成机器人放置目标，不重复首轮 add。
+- 有序原子编辑、SceneEditResult、稳定实例 ID、退休 ID 保护、变换保留、同轮新增引用和跨轮集合焦点。
+- 模糊距离依据用户措辞，按模型轴尺寸与实例比例换算；缺距离证据不接受模型猜测。
+- 握持状态驱动组合 recipe，集合配对保留数量，独立 PlanValidator 在导出入口验证语义前置条件。
+- canonical commands v2 wire、严格读取/写盘和独立公开 Schema 验证，scene/commands 版本一致。
+- run/chat/batch/schemas、配置优先级、包内 demo 资产/布局资源、明确的 Qwen/Replay 区分。
+- export_only 不占 pending、不更新确认姿态；显式 dispatch、反馈检查及外部新快照刷新。
+- JSON 会话保存/恢复、配置指纹、本地 POSIX 锁、隔离请求目录、失败时不返回旧命令。
+- HTTP 注入测试、逐轮调用日志、失败 raw/usage/finish_reason 保留、debug 脱敏诊断。
+- README、手动测试、协议说明、回放用例、CI Python 3.11/3.12 与独立 wheel 验收脚本。
 
-Command:
+## 实测结果
+
+以下检查均实际运行，不是预期结果：
 
 ```bash
+cd /home/cscvlab/lht/robot_agent_brain
 /home/cscvlab/miniconda3/envs/robot_agent_integ/bin/python -m pytest -q brain_tests
+git diff --check
 ```
 
-Result after application integration: **114 passed**. `git diff --check` passed.
-Installed independent schema validator: jsonschema 4.26.0.
+结果：**205 passed**，diff 检查无错误。包含依赖边界、单元、HTTP MockTransport、
+Replay、Application、CLI 子进程和落盘产物测试；不代表真实模型理解准确率。
 
-Real Qwen: **not run**. Wheel outside-source acceptance: **not yet run**.
-No frontend/Control integration or robot execution was performed.
+文档 JSONL 批处理实际运行：**3 passed / 0 failed / 0 skipped**；
+证据目录 `/tmp/brain-manual-doc-audit`（临时本地产物，不提交为真实模型结果）。
 
-## Configuration/assets stage
-
-- Added `config.py` and packaged `resources/config.json`, `defaults.json`,
-  `assets.json`: package defaults < configuration file < ROBOT_BRAIN_* environment
-  < explicit overrides. API key excluded from serialization.
-- Added strict asset index loading and `scene/asset_resolver.py`: duplicate IDs,
-  finite dimensions/AABB, aliases, color constraints, copy isolation; concrete
-  names never silently substitute another asset of the same category.
-- Demo assets are metadata only (center-origin boxes), not actual meshes or
-  implemented rendering materials. No task objects are instantiated by loading
-  these resources. Real asset file errors do not fall back to demo resources.
-- Added `brain_tests/test_config_assets.py` (9 cases). Bootstrap does not yet exist.
-
-## Initial bootstrap stage
-
-- Added pure `SceneBootstrapper.prepare` and `BootstrapResult` with version-scoped
-  generated candidate IDs, assumptions and asset bindings. It neither calls a
-  provider nor writes/loads a platform or executes the task.
-- Generation uses task identities/counts, configured base table and bounded seeded
-  layout; placement goals are not used as initial relations. Initial inside/on
-  geometry is explicitly unsupported until corresponding metadata support exists.
-- Candidate-pool generation still selects through the shared relation resolver;
-  generated binding overrides now validate names/colors/exclusions before use.
-- Editor lifecycle analysis excludes add targets from the initial scene and
-  identifies pre-existing references; pure removal without a scene is blocked.
-- Tests prove two-candidate selection, non-fixed objects, deterministic geometry,
-  no second understanding, explicit unsupported relation/quantity errors.
-- The application/first-add placement-context connection remains pending. This
-  stage alone does not yet make the CLI or all B01–B17 cases usable.
-
-## Remaining specification work
-
-Application stage: `BrainApplication.handle` connects one understanding call to
-import/generated/session scene routes, parsed processing, report and validated
-artifact publication. Tests inject a deterministic Provider (not real Qwen) and
-verify matching snapshot/commands, repeated export, no-scene query versus uploaded
-empty scene, missing objects not generated, and committed scene retained on disk
-failure. CLI, persistence, richer error mapping/debug redaction, configuration
-fingerprints and final failure matrix are still pending.
-
-First-add integration: explicit `edit_defaults` is passed through Session/Pipeline;
-the editor does not infer initialization from version zero. Add uses asset color
-declarations and preserves aliases. New instance bindings are held within the
-ordered preview for add-then-move, before dialogue bindings are considered.
-Tests cover multiple add counts, same-turn stable identity and refusal to invent
-a placement when no default context is supplied. Application wiring, richer
-layout constraints and legacy bootstrap-reference adaptation remain pending.
-
-Artifact foundation: added BrainIssue/BrainError, BrainRunReport, strict flat scene
-codec, and LocalScenePlatform (capture explicitly unsupported). ArtifactWriter
-validates and reads back schemas in a private staging directory, then publishes a
-new request directory. Old paths are not copied into failed reports; input files
-are read-only; traversal and overwrite tests pass. Application orchestration and
-platform-ack-versus-disk-failure reporting are still pending, so this does not yet
-claim end-to-end publication acceptance.
-
-Session migration: exporting commands now updates `last_exported_request` (and
-legacy `last_request_id`) but does NOT set pending. External integration must call
-`mark_dispatched(commands)` with an unchanged, version-matched plan exported by
-this session. Confirmed holding changes only on validated feedback. Feedback
-without a newer confirmed snapshot marks geometry unknown, including partial or
-failed execution. Source is explicitly `external` or `simulated`. Empty sessions
-support pause/resume/close without constructing a scene. Persistence and full
-feedback/refresh adapter documentation are still pending.
-
-Query/focus stage: `SceneQueryIntent` accepts shared entities/selection relations;
-legacy fields remain supported, mixed selector formats fail explicitly. Query
-aggregation permits zero/multiple matches and returns matched IDs for every kind.
-Pipeline exposes focus/deleted IDs and dialogue observes successful edit/query
-results as well as robot tasks. Added `test_query_focus.py` for color, empty/no
-scene distinction, edit/query/delete focus and singular/plural ambiguity.
-Same-turn add identity and query Prompt examples remain to be integrated.
-
-Latest foundation fixes: SceneManager revalidates incoming patches and complete
-candidate scenes before committing. Retired IDs cannot be revived within or
-across patches. Action payloads are exclusive. Compound GRASP/MOVE/RELEASE uses
-one temporary holding state; independent MOVE still grasps/releases. Unsupported
-SEARCH and invalid release/double grasp explicitly fail. PlanValidator and full
-execution profile integration are still pending.
-
-Old-test migration: `test_task_expansion_produces_concrete_commands_for_all_members`
-previously expected consecutive double grasp to export. It now retains both
-expanded objects, asserts single-gripper refusal, and checks concrete wire targets
-using LOCATE. This implements P03 without silently changing the user task.
-
-- Finish T01 normalization/missing-distance evidence and T07 non-finite/schema
-  edge cases; complete application-level readback validation with ArtifactWriter.
-- Finish T02 configuration/layout bounds validation and integrate resources into bootstrap/application.
-- T03 bootstrap lifecycle, constrained initial layout and validated candidates.
-- T04 atomic editor context, same-turn identities, scene/payload invariants.
-- T05 holding-aware compound recipes and semantic PlanValidator.
-- T06 shared query selectors and cross-branch dialogue focus.
-- T08 application reports/errors, codecs, local platform, artifact publication.
-- T09 exported versus dispatched state, feedback and session persistence.
-- T10 run/chat/batch/schemas, replay labeling and provider diagnostics.
-- T11 B01–C03 acceptance matrix and optional real Qwen tests.
-- T12 README/manual/contracts, clean wheel CLI acceptance and CI expansion.
-
-The initial `robot-brain run/chat/schemas` CLI exists; batch and persisted recovery
-are still pending. Brain-native scene/commands formats
-remain distinct from the team's unfinalized components/taskStep interfaces.
-
-## Initial CLI verification
-
-Latest suite: **118 passed**. Four new subprocess tests validate scene-optional
-replay run, clean JSON stdout, exact-input replay refusal and schemas without a
-model. These source-tree tests do NOT constitute wheel outside-source acceptance.
-`--session` currently selects only an in-process session, not disk recovery.
-Real Qwen has not been run; replay fixtures are explicitly labeled.
-
-## Batch verification
-
-Latest suite: **119 passed**. JSONL batches reuse a session within each group,
-skip dependent cases after failures, continue independent groups, and publish a
-provider-labeled summary with expected report/artifact checks. This is replay/
-injected-provider validation, not real model acceptance.
-
-## Session recovery verification
-
-Latest suite: **126 passed**. `session/store.py` adds validated, versioned JSON
-checkpoints, atomic replacement and non-blocking POSIX per-session locks. The
-Application restores scene/IDs/focus/pause/sync/exported and dispatched state;
-independent app instances refresh newer revisions. Corrupt checkpoints and
-symlink/traversal targets fail instead of silently starting fresh. This local
-Linux/POSIX implementation does not claim distributed/network-filesystem locking.
-Application dispatch additionally requires the matching published command file.
-Validated feedback is checkpointed; missing confirmed geometry remains unknown
-after restart. `--session` now resumes under the same output directory.
-Publication failure preserves confirmed in-memory state and attempts a checkpoint
-before publishing artifacts; a failed disk write cannot guarantee recovery.
-
-## HTTP diagnostics verification
-
-Latest suite: **138 passed**. Existing Qwen adapter now accepts an injected
-httpx client/transport. Each call records one outcome including conversion and
-Pydantic failures, duration, request IDs, model/endpoint summary, available usage
-and finish reason. Truncated/malformed output is retained in memory for debug
-before parsing; normal metrics do not contain raw response bodies. API-key text
-is redacted from diagnostic messages. Twelve tests cover success, malformed JSON,
-empty/non-text choices, truncation, validation, HTTP errors, timeout and per-turn
-log slicing. They use MockTransport, **not a real Qwen service**.
-
-## Independent plan gate
-
-Latest suite: **147 passed**. `PlanValidator` now guards `CommandExporter` itself,
-including direct callers: concrete existing targets, scene version, operation
-coverage/order/dependencies, effect counts, grasp/move/release preconditions and
-placement roles. Confirmed holding is an explicit optional exporter input; plans
-do not update it. Tests mutate otherwise valid plans to remove steps, alter roles,
-add motion or reference missing objects. Three existing export fixtures now
-include their actual target objects instead of an empty scene; all original
-wire-format assertions are retained. This is semantic validation, not collision,
-IK or actual execution verification. Quantity expansion still needs final audit.
-
-## Collection pairing regression
-
-Latest suite: **150 passed**. A single pairwise operation with two collection
-roles now expands every corresponding pair instead of retaining only the first.
-Separate scalar-destination operations still allocate distinct source members
-in language order. Incomplete distributed pairing and unequal cardinalities are
-blocked without dropping objects. Existing red-box/blue-box pairing tests remain
-unchanged and pass. Full specification acceptance, packaging and final docs
-remain pending; these local commits have not been pushed.
-
-## Motion evidence, collection editing and local pronouns
-
-Latest suite: **164 passed**. Missing linguistic distance/scale is now blocked
-even when the provider supplied a plausible number; both native scene edits and
-robot moves share this gate. Explicit distances and small/medium/large evidence
-remain supported, with basic English directional phrases added. HTTP conversion
-preserves motion-evidence error codes so missing user facts are not labeled a
-network failure. The old vague-motion test now asserts refusal (its former .01m
-expectation contradicted P05). The atomic two-move test supplies its intended
-5cm/10cm distances explicitly and retains all transform-preservation assertions.
-
-SceneEditor validates affected objects against the complete prospective scene:
-new-new collisions are caught, and old positions of simultaneously moved objects
-do not cause false collisions. Late failures leave the input scene unchanged.
-
-Pipeline defers missing/ambiguous prior-focus errors until the one understanding
-call can identify a valid ordered add-then-reference lifecycle. Same-turn local
-IDs can therefore resolve without a prior focus; unresolved cross-turn pronouns
-still fail. This does not add a second understanding call.
-
-## First outside-checkout wheel acceptance — 2026-10-07
-
-Core revision tested: `039114a`. Built with Python 3.12 using `pip wheel`, installed
-into a fresh venv without system site packages, then ran from `/tmp` with
-`PYTHONPATH` removed. Wheel SHA256:
-`6cd0afc55e61fe9428fbdd0d588d30accd4f944583e47c5eff2b86e9df0d6efa`.
+### 最终代码 wheel 仓库外验收
 
 ```bash
-/home/cscvlab/miniconda3/envs/robot_agent_integ/bin/python -m pip wheel --wheel-dir /tmp/brain-wheel-audit-dWyV3yio/wheels .
-/home/cscvlab/miniconda3/envs/robot_agent_integ/bin/python -m venv /tmp/brain-wheel-audit-dWyV3yio/env
-/tmp/brain-wheel-audit-dWyV3yio/env/bin/python -m pip install --no-index --find-links /tmp/brain-wheel-audit-dWyV3yio/wheels robot-agent-brain
+cd /home/cscvlab/lht/robot_agent_brain
+/home/cscvlab/miniconda3/envs/robot_agent_integ/bin/python -m pip wheel --wheel-dir /tmp/brain-final-wheel-e3jQoGgk/wheels .
+/home/cscvlab/miniconda3/envs/robot_agent_integ/bin/python -m venv /tmp/brain-final-wheel-e3jQoGgk/env
+/tmp/brain-final-wheel-e3jQoGgk/env/bin/python -m pip install --no-index --find-links /tmp/brain-final-wheel-e3jQoGgk/wheels robot-agent-brain
 cd /tmp
-env -u PYTHONPATH /tmp/brain-wheel-audit-dWyV3yio/env/bin/python /home/cscvlab/lht/robot_agent_brain/scripts/wheel_smoke.py
+env -u PYTHONPATH /tmp/brain-final-wheel-e3jQoGgk/env/bin/python /home/cscvlab/lht/robot_agent_brain/scripts/wheel_smoke.py
 ```
 
-Result: **passed**. Imported module came from the new venv's site-packages, not
-the checkout. Console help, prompt/default/asset resources, schema export,
-replay robot task with no scene, two generated apples, matching scene/commands,
-independent schema validation, and second-process recovery all passed. Evidence
-directory: `/tmp/brain-wheel-smoke-sqzgj_9q` (temporary local test output, not
-committed). `scripts/wheel_smoke.py` is also wired into both existing CI Python
-3.11/3.12 jobs. Only 3.12 was exercised locally; no remote CI result claimed.
+**通过**。Python 3.12 新 venv，无 system-site-packages，导入路径实际来自
+`/tmp/brain-final-wheel-e3jQoGgk/env/lib/python3.12/site-packages/robot_agent_brain`。
+没有使用源码 PYTHONPATH。验证控制台入口、prompt/config/assets 包资源、schemas、
+无 scene 的机器人 Replay、两只苹果、commands Schema、场景 ID/版本一致、
+跨进程恢复同一场景并再次导出。验收输出：
+`/tmp/brain-wheel-smoke-h6ncns7s`。
 
-Real Qwen availability check: `curl --noproxy '*' --max-time 3 --silent
---show-error http://127.0.0.1:8080/v1/models` failed with connection refused
-(exit 7). **Real Qwen task acceptance was not run**. No service was started or
-replay substituted for it. Final acceptance still requires remaining behavioral
-audit and current documentation, and rebuilding the final revision's wheel.
+Wheel SHA256：
+`04d36f4981931cb552b50e123a09d114899873bdd602457c4c45939246b75ea0`。
+CI 已配置同一脚本用于 Python 3.11/3.12；本机实际执行的是 3.12，不声称远程 CI 已运行。
 
-## Documentation and diagnostics stage — 2026-10-07
+### 真实 Qwen
 
-Latest full suite: **171 passed**. Added README CLI/config/artifact instructions,
-`docs/manual_testing.md`, `docs/contracts.md`, explicit replay fixtures and a
-three-case JSONL batch. The documented batch was actually run (3 passed, 0 failed,
-0 skipped) under `/tmp/brain-manual-doc-audit`; it is not a real-Qwen result.
+**未运行真实 Qwen 任务验收**。实际执行
+`curl --noproxy '*' --max-time 3 --silent --show-error http://127.0.0.1:8080/v1/models`
+得到连接拒绝（exit 7）。没有自动启动服务，没有用 Replay 冒充真实模型。
+服务恢复后按 manual_testing.md 指定实际 model ID 进行真实自然语言测试。
 
-Request records/checkpoints now include a nonsecret configuration fingerprint
-(provider/model/endpoint summary, robot/seed, prompt/asset/default hashes).
-Recovery with changed configuration warns without recreating confirmed objects.
-`--debug` publishes per-turn semantic and plan artifacts plus redacted raw
-response/call/failure records; normal runs omit raw diagnostics. New tests verify
-secret omission and failure logs. Prompt examples now use shared edit/query
-selectors, explicit all_available, same-turn precedence and missing-distance
-clarification; all JSON examples are parser-validated.
+## 可复制使用方式
 
-Legacy name-only bootstrap references can be completed by unique asset names or
-aliases. First-add all_available no longer silently creates one object: configured
-initial counts are required. A paused empty session is checked before bootstrap,
-so refusal does not create a scene as a side effect. Batch no longer exposes
-ignored scene/session CLI options.
+```bash
+cd /home/cscvlab/lht/robot_agent_brain
+python -m pip install -e '.[dev]'
+robot-brain run '把两个苹果放进篮子' --provider replay \
+  --replay-file examples/replay/manual.json --output-dir var/demo --session demo01 --json
+robot-brain run '有几个苹果' --provider replay \
+  --replay-file examples/replay/manual.json --output-dir var/demo --session demo01 --json
+robot-brain chat --provider replay --replay-file examples/replay/manual.json \
+  --output-dir var/demo --session demo01
+```
 
-The older sections above are chronological stage records, not a current list of
-missing features. Final audit/document consolidation and final-revision wheel
-rebuild remain required. Remaining risks to audit include bounded relative-add
-layout, full schema edge cases, restore metadata compatibility, failure-state
-reporting and acceptance coverage against every numbered specification item.
+输出位置为 `OUTPUT/SESSION/REQUEST/`。机器人拿
+`scene_config.json + commands.json`，编辑拿完整 scene_config.json 和 patch，
+查询拿报告回复及 query_result.json。报告明确 `executed=false`。
+真实模型命令及全部参数见 [手动测试](manual_testing.md)。
 
-## Layout and restore edge audit
+## 兼容与迁移
 
-Latest suite: **181 passed**. Relative add now uses a bounded perpendicular
-search, preserving the requested directional relation and configured initial
-workspace bounds. Failed placement does not shrink counts or mutate the source
-scene. Supporting surface contact is not treated as clearance penetration.
-`SceneConfig.schema_version` is now a Literal 1.0; recursive finite-JSON checks
-reject NaN/Infinity in nested scene properties before platform commit.
+- 旧便捷 API 保留；新增 process_turn 不重复调用理解模型。
+- SceneEditor.edit 仍返回 Patch；新 edit_result 额外返回焦点/创建删除 ID/局部绑定。
+- CommandsFile 仍为 2.0；使用 canonical_commands 或已验证的最终文件，不自行保留互斥 null。
+- CommandExporter 的直接调用也经过 PlanValidator，必须提供实际包含目标实例的场景。
+  如果计划从已握持状态开始，显式传 held_object。
+- 导出不再自动 pending；外部集成必须显式 mark_dispatched。无执行后确认快照则 unknown。
+- 恢复需同一输出根目录和 session ID；配置指纹变化会提示，不重建已确认场景。
+- 原测试意图保留：旧双抓取测试保留数量并断言单夹爪拒绝，用 LOCATE 检查全部实例导出；
+  旧空场景导出夹具补齐其目标对象；无依据 .01m 旧断言改成 P05 要求的拒绝；
+  原多平移测试补写其真实 5cm/10cm 输入，保留全部姿态与数量断言。
 
-Numeric wire tests independently reject non-JSON NaN/Infinity at decoding, then
-use the public JSON Schema for JSON-domain values. Python's permissive default
-JSON decoder is not evidence that those tokens are valid JSON; no claim is made
-that a standard schema alone defines behavior on Python NaN objects.
+## 明确限制与外部未验收项
 
-Added `SceneEditResult` with patch, focus, created/deleted IDs and local bindings;
-the legacy `edit()` method still returns its patch. Pipeline consumes the explicit
-editor outcome. Restored asset IDs are checked against the configured catalog;
-Application lock/restore failures return a complete non-delivery report with
-zero model calls instead of escaping before report construction. Regression
-tests cover corrupt checkpoints and concurrent writer refusal.
+- 只交付 Brain 原生 JSON，不是 scene.xml/MJCF，不宣称兼容未冻结的 components/taskStep。
+- 前端/Control 联调、真实物理执行/抓取、IK/轨迹/碰撞能力均未验证，也不属于本应用实现。
+- 初始 inside/on 等缺内部几何能力的约束明确拒绝；SEARCH 无实现时明确拒绝，不降级。
+- demo 只有尺寸/类别/属性元数据，没有真实 mesh/材质；LocalScenePlatform 没有图片。
+  vision 开启需显式渲染适配器，否则报错，不向 VLM 传假图。
+- 本地会话锁为 Linux/POSIX 单主机方案，不声称 Windows 或分布式并发部署已验收。
+- 模型输出可能仍需澄清；Replay 仅接受夹具精确输入，不能证明任意自然语言理解。
+- 磁盘与平台不是分布式事务；已确认场景后的磁盘失败保持真实提交状态，不能保证失败磁盘的恢复。
+- 标准 JSON Schema 作用于合法 JSON。NaN/Infinity 非 JSON token 由严格解码拒绝，
+  不把 Python 默认解析器的非标准扩展当成合法 wire。
+- 当前源代码验收已完成；真实 Qwen 和外部执行接口须在相应服务/协议可用后另行验收。
 
-## Requirement-indexed acceptance expansion
+## 实际修改文件（相对基线）
 
-Latest suite: **200 passed**. Added `docs/acceptance_matrix.md`, mapping every
-B01–C03 behavioral item and T01–T12 work item to concrete evidence and identifying
-remaining final gates. New tests check initial non-overlap rather than relying
-only on absence of containment properties, first-turn movement exactly once,
-invalid upload refusal before model calls, bounded workspace failure, world/local
-rotation numerical results, query snapshot preservation, and success-then-failure
-artifact isolation.
-
-Grounding now validates candidate-pool cardinality before relation filtering, so
-an override cannot shrink two candidates to the wrong single object and then
-claim it is rightmost. Collection editing followed by plural editing preserves
-both IDs. Feedback duplicate/foreign IDs, incomplete success, unknown holding and
-old confirmed snapshots are tested as no-state-change failures. Local CLI vision
-configuration is rejected without a rendering/detection adapter, rather than
-ignored or supplied mock image data. Real Qwen remains untested/unavailable.
-
-## Configuration/geometry audit
-
-Latest full suite: **205 passed**. Added regression evidence that first-add layout
-uses the configured seed and clearance, is repeatable for the same inputs, and
-changes with a different seed. Bootstrap refuses a workspace extending beyond
-the configured table's dimensions/AABB. Asset resolution and grounded overrides
-now enforce category constraints even for exact names; configured category aliases
-are passed consistently through robot, shared edit selector and query selection.
-Legacy name-only reference inference remains explicitly separate from user
-category constraints. Final wheel rebuild follows this code revision.
+```text
+.github/workflows/ci.yml
+README.md
+brain_tests/test_acceptance_remaining.py
+brain_tests/test_application_artifacts.py
+brain_tests/test_artifact_writer.py
+brain_tests/test_batch.py
+brain_tests/test_bootstrap_scene_edits.py
+brain_tests/test_cli.py
+brain_tests/test_config_assets.py
+brain_tests/test_configuration_geometry.py
+brain_tests/test_diagnostics_artifacts.py
+brain_tests/test_edit_prospective_layout.py
+brain_tests/test_export_roundtrip.py
+brain_tests/test_layout_and_numeric_edges.py
+brain_tests/test_motion_and_commands.py
+brain_tests/test_motion_evidence_gate.py
+brain_tests/test_pairwise_collections.py
+brain_tests/test_pipeline_stages.py
+brain_tests/test_plan_validator.py
+brain_tests/test_query_focus.py
+brain_tests/test_qwen_http.py
+brain_tests/test_recipe_state.py
+brain_tests/test_same_turn_understanding.py
+brain_tests/test_scene_atomicity.py
+brain_tests/test_scene_bootstrap.py
+brain_tests/test_scene_domain.py
+brain_tests/test_scene_file_codec.py
+brain_tests/test_semantic_closure.py
+brain_tests/test_session_lifecycle.py
+brain_tests/test_session_store.py
+docs/acceptance_matrix.md
+docs/contracts.md
+docs/implementation_report.md
+docs/manual_testing.md
+examples/cases/manual_cases.jsonl
+examples/replay/add_apple.json
+examples/replay/manual.json
+pyproject.toml
+scripts/wheel_smoke.py
+src/robot_agent_brain/__main__.py
+src/robot_agent_brain/adapters/artifact_writer.py
+src/robot_agent_brain/adapters/json_command_sink.py
+src/robot_agent_brain/adapters/local_asset_catalog.py
+src/robot_agent_brain/adapters/local_scene_platform.py
+src/robot_agent_brain/adapters/scene_file_codec.py
+src/robot_agent_brain/application.py
+src/robot_agent_brain/batch.py
+src/robot_agent_brain/cli.py
+src/robot_agent_brain/config.py
+src/robot_agent_brain/contracts/bootstrap.py
+src/robot_agent_brain/contracts/commands.py
+src/robot_agent_brain/contracts/run_report.py
+src/robot_agent_brain/contracts/scene.py
+src/robot_agent_brain/contracts/turn.py
+src/robot_agent_brain/diagnostics.py
+src/robot_agent_brain/errors.py
+src/robot_agent_brain/grounding/scene_grounder.py
+src/robot_agent_brain/grounding/scene_object_selector.py
+src/robot_agent_brain/models/prompt_templates/task_understanding_v2.txt
+src/robot_agent_brain/models/qwen_http.py
+src/robot_agent_brain/models/replay.py
+src/robot_agent_brain/pipeline.py
+src/robot_agent_brain/planning/command_exporter.py
+src/robot_agent_brain/planning/plan_validator.py
+src/robot_agent_brain/planning/recipe_planner.py
+src/robot_agent_brain/planning/task_expander.py
+src/robot_agent_brain/presentation.py
+src/robot_agent_brain/resources/__init__.py
+src/robot_agent_brain/resources/assets.json
+src/robot_agent_brain/resources/config.json
+src/robot_agent_brain/resources/defaults.json
+src/robot_agent_brain/scene/asset_resolver.py
+src/robot_agent_brain/scene/bootstrapper.py
+src/robot_agent_brain/scene/editor.py
+src/robot_agent_brain/scene/query.py
+src/robot_agent_brain/scene/scene_manager.py
+src/robot_agent_brain/semantics/motion_evidence.py
+src/robot_agent_brain/session/brain_session.py
+src/robot_agent_brain/session/dialogue_state.py
+src/robot_agent_brain/session/store.py
+```

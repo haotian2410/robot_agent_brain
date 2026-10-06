@@ -1,4 +1,4 @@
-# 附件验收追踪（持续核查）
+# 附件验收追踪 — 最终代码 d427bc5
 
 基线 `266ebcc94fd5b433ebe1000f4d04c7356b747faa`。下表指向实际源码测试，
 不是以总测试数替代逐项验收。`brain_tests/` 下测试使用注入 provider/Replay；
@@ -54,7 +54,7 @@
 | E04 | test_session_store：恢复场景/焦点/pause/sync/pending/反馈来源，不把 corrupt 当新会话 |
 | E05 | test_session_store、test_qwen_http、test_batch：独立会话与逐轮日志隔离；同会话锁拒绝并写 |
 | H01 | test_qwen_http、test_diagnostics_artifacts：超时/HTTP/空 choices/截断/校验失败各有一条记录，无 fallback，debug 脱敏 |
-| C01 | scripts/wheel_smoke.py：已在 039114a 核心版本新 venv、仓库外通过；最终版本待重建复验 |
+| C01 | scripts/wheel_smoke.py：d427bc5 在新 venv、仓库外清除 PYTHONPATH 后通过，见 implementation_report 的路径与 wheel hash |
 | C02 | test_cli：run 单 JSON，chat 按行 JSON、提示在 stderr |
 | C03 | test_batch：独立组继续、依赖 skipped；文档三用例批处理实跑 3/3 |
 
@@ -70,8 +70,8 @@
 - T08：Application/Report/错误、原生 Codec、LocalScenePlatform、暂存发布和真实提交状态已实现。
 - T09：本地严格 JSON checkpoint、配置指纹、POSIX 锁、导出与真实 pending 分离、反馈刷新入口已实现。
 - T10：run/chat/batch/schemas、Qwen 注入测试、Replay 显式精确输入、退出码/日志隔离已实现。
-- T11：本表持续收集证据；真实服务不可达时记录“未运行”，不把 Replay 当模型验收。
-- T12：README、manual_testing、contracts、implementation_report 和 CI wheel 检查均存在；最终报告整合及最终 wheel 仍待完成。
+- T11：最终代码全量回归 205 项通过；真实服务不可达，记录“未运行”，不把 Replay 当模型验收。
+- T12：README、manual_testing、contracts、implementation_report 和 CI wheel 检查均存在；最终代码 wheel 仓库外复验通过。
 
 团队 components/taskStep、真实前端/Control 联调、机器人执行与真实渲染属于明确未验证的外部接口，
 不得通过 Brain 本地测试宣称完成。真实 Qwen 可选验收因 8080 不可达未运行，不是模型通过记录。
