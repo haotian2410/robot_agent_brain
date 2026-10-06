@@ -27,9 +27,10 @@ class SceneEditResult:
 class SceneEditor:
     """Create semantic scene-layout patches; it never creates robot poses."""
 
-    def __init__(self, assets: AssetCatalogPort, layout: SceneLayoutPolicy | None = None):
+    def __init__(self, assets: AssetCatalogPort, layout: SceneLayoutPolicy | None = None, *, seed=0):
         self.assets = assets
         self.layout = layout or SceneLayoutPolicy()
+        self.seed = seed
         self.motion_policy = MotionPolicy()
 
     def edit(self, intent, scene, *, dialogue=None, defaults=None, bindings_override=None) -> ScenePatch:
@@ -44,7 +45,7 @@ class SceneEditor:
         # Preview every step locally; publish one atomic patch only on success.
         preview = SceneManager(scene)
         operations = []
-        selector = SceneObjectSelector()
+        selector = SceneObjectSelector(category_aliases=self.assets.metadata.category_aliases)
         local_bindings = dict(bindings_override or {})
         for edit in intent.operations:
             matches = None
@@ -200,10 +201,10 @@ class SceneEditor:
         if dx >= xmax-xmin or dy >= ymax-ymin:
             raise ValueError("bootstrap_layout_failed")
         candidate_scene = scene.model_copy(update={"objects": [*scene.objects, *[op.object for op in operations if op.action == "add"]]})
-        rng = random.Random(len(candidate_scene.objects))
+        rng = random.Random(f"{self.seed}:{len(candidate_scene.objects)}")
         for _ in range(defaults.max_attempts):
             transform = Transform(position=(rng.uniform(xmin+dx/2,xmax-dx/2), rng.uniform(ymin+dy/2,ymax-dy/2),z))
-            if not self._collides(transform, obj, candidate_scene):
+            if not self._collides(transform, obj, candidate_scene, clearance=defaults.clearance_m):
                 return transform
         raise ValueError("bootstrap_layout_failed")
 
@@ -238,7 +239,7 @@ class SceneEditor:
                 return Transform(position=(cx, cy, z), quaternion_xyzw=obj.transform.quaternion_xyzw, scale=obj.transform.scale)
         raise ValueError("bootstrap_layout_failed" if defaults else "scene_edit_layout_collision")
 
-    def _collides(self, transform, obj, scene):
+    def _collides(self, transform, obj, scene, *, clearance=0):
         model = self.assets.get_model_property(obj.asset_id)
         sx, sy, sz = self._world_extents(model.dimensions_m, transform)
         for other_obj in scene.objects:
@@ -249,8 +250,8 @@ class SceneEditor:
             x, y, _ = transform.position
             osx, osy, osz = self._world_extents(other.dimensions_m, other_obj.transform)
             oz = other_obj.transform.position[2]
-            if (abs(x - ox) < (sx + osx) / 2 and abs(y - oy) < (sy + osy) / 2
-                    and abs(transform.position[2] - oz) < (sz + osz) / 2):
+            if (abs(x - ox) < (sx + osx) / 2 + clearance and abs(y - oy) < (sy + osy) / 2 + clearance
+                    and abs(transform.position[2] - oz) < (sz + osz) / 2 - 1e-9):
                 return True
         return False
 

@@ -30,7 +30,7 @@ class SceneBootstrapper:
                     # Legacy name-only references can be completed only by a
                     # unique catalog name/alias, never guessed from a category.
                     model = self.resolver.resolve(TaskEntity(entity_id="edit_reference", semantic_name=plan.reference,
-                                                              category="unspecified")).model
+                                                              category="unspecified"), infer_category=True).model
                     entities.append(TaskEntity(entity_id="edit_reference", semantic_name=plan.reference, category=model.category))
                     values["reference"] = "edit_reference"
                 plan = SceneEditPlan(entities=entities, operations=[plan.model_copy(update=values)])
@@ -68,6 +68,14 @@ class SceneBootstrapper:
             top = table.transform.position[2] + table_model.dimensions_m[2] / 2
         else:
             raise ValueError("bootstrap_origin_metadata_missing: table")
+        if table_model.aabb_m:
+            table_bounds = [table.transform.position[i] + table_model.aabb_m[i] for i in (0,1)]
+            table_upper = [table.transform.position[i] + table_model.aabb_m[i+3] for i in (0,1)]
+        else:
+            table_bounds = [table.transform.position[i] - table_model.dimensions_m[i]/2 for i in (0,1)]
+            table_upper = [table.transform.position[i] + table_model.dimensions_m[i]/2 for i in (0,1)]
+        if any(self.defaults.workspace_min[i] < table_bounds[i] or self.defaults.workspace_max[i] > table_upper[i] for i in (0,1)):
+            raise ValueError("bootstrap_workspace_outside_support")
         specs, candidates, bindings = [], {}, {}
         assumptions = ["source=system_default: tabletop grid placement; x right, y front, z up"]
         if self.assets.metadata.demo_assets:

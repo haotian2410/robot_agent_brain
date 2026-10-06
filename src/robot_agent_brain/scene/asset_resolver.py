@@ -13,7 +13,7 @@ class AssetResolver:
     def __init__(self, catalog):
         self.catalog = catalog
 
-    def resolve(self, entity):
+    def resolve(self, entity, *, infer_category=False):
         metadata = self.catalog.metadata
         name = entity.semantic_name.strip().casefold()
         category = entity.category.strip().casefold()
@@ -27,6 +27,10 @@ class AssetResolver:
                       (m.category.casefold() == category if entity.category_only else m.semantic_name.casefold() == name)]
         if not candidates:
             raise ValueError("asset_missing: " + entity.semantic_name)
+        if not infer_category:
+            candidates = [m for m in candidates if m.category.casefold() == category]
+            if not candidates:
+                raise ValueError("asset_category_mismatch: " + entity.category)
         if entity.color:
             candidates = [m for m in candidates
                           if metadata.intrinsic_properties.get(m.asset_id, {}).get("color") == entity.color

@@ -3,13 +3,16 @@ from ..contracts.scene import SceneConfig
 from ..contracts.task_intent import QuantityMode, TaskIntent
 from .scene_relation_resolver import SceneRelationResolver
 
-def discover_candidates(entity, scene: SceneConfig):
-    available = [o for o in scene.objects if o.scene_object_id not in entity.exclude_scene_object_ids]
+def discover_candidates(entity, scene: SceneConfig, category_aliases=None):
+    categories = {key.strip().casefold():value.strip().casefold() for key,value in (category_aliases or {}).items()}
+    required_category = categories.get(entity.category.strip().casefold(), entity.category.strip().casefold())
+    available = [o for o in scene.objects if o.scene_object_id not in entity.exclude_scene_object_ids
+                 and categories.get(o.category.casefold(), o.category.casefold()) == required_category]
     name = entity.semantic_name.casefold()
     exact = [o for o in available if o.semantic_name.casefold() == name or o.scene_object_id == entity.semantic_name]
     aliases = {a.casefold() for a in entity.aliases} | {name}
     alias = [o for o in available if aliases.intersection({o.semantic_name.casefold(), *[a.casefold() for a in o.properties.get("aliases", [])]})]
-    category = [o for o in available if o.category.casefold() == entity.category.casefold()]
+    category = available
     # A supplied color is a constraint even on exact name matches.
     for level in ((category,) if entity.category_only else (exact, alias)):
         if level:
@@ -22,8 +25,9 @@ class GroundingAmbiguous(ValueError):
         super().__init__(f"grounding_ambiguous: entity={entity.entity_id} candidates={[o.scene_object_id for o in candidates]}")
 
 class SceneGrounder:
-    def __init__(self, relation_resolver=None):
+    def __init__(self, relation_resolver=None, *, category_aliases=None):
         self.relations = relation_resolver or SceneRelationResolver()
+        self.category_aliases = category_aliases or {}
 
     discover_candidates = staticmethod(discover_candidates)
 
@@ -43,12 +47,12 @@ class SceneGrounder:
                 ids = overrides[entity_id]
                 if not ids or any(i not in by_object for i in ids):
                     raise ValueError("grounding_missing: stale binding")
-                eligible = {o.scene_object_id for o in discover_candidates(entity, scene)}
+                eligible = {o.scene_object_id for o in discover_candidates(entity, scene, self.category_aliases)}
                 if len(ids) != len(set(ids)) or not set(ids) <= eligible:
                     raise ValueError("grounding_binding_invalid: " + entity_id)
                 candidates = [by_object[i] for i in ids]
             else:
-                candidates = discover_candidates(entity, scene)
+                candidates = discover_candidates(entity, scene, self.category_aliases)
             if entity.quantity_mode == QuantityMode.CANDIDATE_POOL and len(candidates) != entity.count:
                 raise ValueError("grounding_candidate_pool_count_mismatch: " + entity_id)
             relations = []

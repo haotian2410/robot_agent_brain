@@ -17,6 +17,9 @@ class SceneQueryResult(BaseModel):
     states: dict[str, dict] = Field(default_factory=dict)
 
 class SceneQueryEngine:
+    def __init__(self, *, category_aliases=None):
+        self.category_aliases = category_aliases or {}
+
     def query(self, intent: SceneQueryIntent, scene: SceneConfig, dialogue=None) -> SceneQueryResult:
         if scene is None:
             raise ValueError("scene_required")
@@ -32,7 +35,7 @@ class SceneQueryEngine:
                 if entity_id in active:
                     raise ValueError("scene_relation_reference_cycle")
                 active.add(entity_id)
-                candidates = discover_candidates(entities[entity_id], scene)
+                candidates = discover_candidates(entities[entity_id], scene, self.category_aliases)
                 if entity_id in overrides:
                     if not set(overrides[entity_id]) <= {o.scene_object_id for o in candidates}:
                         raise ValueError("grounding_binding_invalid")

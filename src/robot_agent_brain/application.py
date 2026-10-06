@@ -10,6 +10,8 @@ from .pipeline import BrainPipeline
 from .session.brain_session import BrainSession
 from .session.store import SessionStore
 from .scene.bootstrapper import SceneBootstrapper
+from .scene.editor import SceneEditor
+from .scene.scene_layout import SceneLayoutPolicy
 from .adapters.local_scene_platform import LocalScenePlatform
 from .adapters.scene_file_codec import SceneFileCodec
 from .adapters.artifact_writer import ArtifactWriter, safe_identifier
@@ -36,7 +38,9 @@ class BrainApplication:
         if self.config.vision and (platform_factory is LocalScenePlatform or not hasattr(provider, "detect")):
             raise BrainError("vision_requires_rendering_platform", "configuration",
                              "Vision requires an explicit rendering platform and a detection provider; LocalScenePlatform has no images")
-        self.pipeline = BrainPipeline(provider, self.assets, vision_provider=provider if self.config.vision else None)
+        editor = SceneEditor(self.assets, SceneLayoutPolicy(clearance_m=self.defaults.clearance_m), seed=self.config.seed)
+        self.pipeline = BrainPipeline(provider, self.assets, scene_editor=editor,
+                                      vision_provider=provider if self.config.vision else None)
         self.bootstrapper = SceneBootstrapper(self.assets, self.defaults, robot=self.config.robot, seed=self.config.seed)
         self.codec = SceneFileCodec(self.assets)
         self.writer = ArtifactWriter(self.config.output_dir)

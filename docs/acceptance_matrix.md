@@ -61,7 +61,7 @@
 ## 工作项/交付物审查
 
 - T01：pipeline 分段、Session 已解析入口、兼容 run/run_turn/run_task 均保留；无第二次完整理解。
-- T02：配置优先级、资产严格加载/复制、别名、demo 标识及包资源已实现。几何默认值和类别约束继续审查。
+- T02：配置优先级、资产严格加载/复制、别名、demo 标识及包资源已实现。test_configuration_geometry 另证种子/间距、支撑面边界、精确名类别约束与类别别名。
 - T03：SceneBootstrapper/BootstrapResult、生成/导入/恢复分流、生命周期、候选数量/布局/关系约束已实现。
 - T04：SceneEditResult、单 patch 全量预览、最终 SceneConfig 重验、retired IDs、变换/集合检查已实现。
 - T05：临时握持状态、TaskExpander 和独立 PlanValidator 导出门禁已实现，不包含物理能力验证。

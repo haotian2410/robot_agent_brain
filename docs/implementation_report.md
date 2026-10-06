@@ -316,3 +316,14 @@ both IDs. Feedback duplicate/foreign IDs, incomplete success, unknown holding an
 old confirmed snapshots are tested as no-state-change failures. Local CLI vision
 configuration is rejected without a rendering/detection adapter, rather than
 ignored or supplied mock image data. Real Qwen remains untested/unavailable.
+
+## Configuration/geometry audit
+
+Latest full suite: **205 passed**. Added regression evidence that first-add layout
+uses the configured seed and clearance, is repeatable for the same inputs, and
+changes with a different seed. Bootstrap refuses a workspace extending beyond
+the configured table's dimensions/AABB. Asset resolution and grounded overrides
+now enforce category constraints even for exact names; configured category aliases
+are passed consistently through robot, shared edit selector and query selection.
+Legacy name-only reference inference remains explicitly separate from user
+category constraints. Final wheel rebuild follows this code revision.
