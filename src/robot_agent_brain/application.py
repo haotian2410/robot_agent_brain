@@ -153,7 +153,7 @@ class BrainApplication:
                     report.reply = "会话状态：" + result.session_action.action
         except Exception as exc:
             report.error = self._issue(exc, stage)
-            report.run_status = "blocked" if report.error.code.startswith(("scene_required", "grounding_", "bootstrap_", "asset_", "holding_", "plan_", "capability_", "dialogue_", "execution_pending", "session_paused", "scene_sync_")) else "failed"
+            report.run_status = "blocked" if report.error.code.startswith(("scene_required", "grounding_", "bootstrap_", "asset_", "holding_", "plan_", "capability_", "dialogue_", "motion_", "execution_pending", "session_paused", "scene_sync_")) else "failed"
             report.reply = report.error.message
             if session.sync_state == "unknown":
                 report.scene_commit_status = "unknown"
@@ -181,7 +181,7 @@ class BrainApplication:
         if isinstance(exc, BrainError):
             return exc.issue
         if isinstance(exc, QwenProviderError):
-            code = "provider_error"
+            code = exc.code
         elif isinstance(exc, ValidationError):
             code = "model_output_invalid" if stage == "understanding" else "validation_failed"
         elif isinstance(exc, ValueError) and ":" in str(exc):

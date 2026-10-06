@@ -19,7 +19,9 @@ from .vision_grounding import VisionEntity, VisionGroundingOutput
 
 
 class QwenProviderError(RuntimeError):
-    pass
+    def __init__(self, message, *, code="provider_error"):
+        super().__init__(message)
+        self.code = code
 
 
 class QwenHTTPProvider:
@@ -108,7 +110,9 @@ class QwenHTTPProvider:
             return result
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, QwenProviderError) as exc:
             record["error"] = self._redact(f"{type(exc).__name__}: {exc}")
-            raise QwenProviderError(f"{stage}: {record['error']}") from exc
+            code = str(exc) if str(exc) in {"motion_distance_evidence_missing", "motion_clause_binding_ambiguous"} else "provider_error"
+            record["error_code"] = code
+            raise QwenProviderError(f"{stage}: {record['error']}", code=code) from exc
         finally:
             record["elapsed_seconds"] = time.monotonic() - started
             self.calls.append(record)

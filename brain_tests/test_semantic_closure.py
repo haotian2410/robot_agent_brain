@@ -136,9 +136,9 @@ def test_removed_scene_ids_are_never_reused():
 
 def test_vague_motion_without_evidence_is_not_silently_small():
     intent = TaskIntent(instruction="苹果向右移动", entities=[TaskEntity(entity_id="apple", semantic_name="apple", category="fruit")], operations=[Operation(operation_id="op-1", task_type=TaskType.MOVE, target="apple", motion_direction=Direction.RIGHT, distance_m=.01)])
-    # The parsed operation remains explicit when there is no linguistic scale;
-    # a raw parser result without one must be rejected before export.
-    assert normalize_motion_language(intent).operations[0].distance_m == .01
+    # A model-supplied distance is not evidence that the user requested it.
+    with pytest.raises(ValueError, match="motion_distance_evidence_missing"):
+        normalize_motion_language(intent)
 
 
 def test_scene_edit_add_uses_asset_and_commits_through_session():

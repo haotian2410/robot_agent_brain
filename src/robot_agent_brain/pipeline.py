@@ -74,7 +74,16 @@ class BrainPipeline:
     def understand_turn(self, instruction: str, *, scene: SceneConfig | None = None,
                         dialogue=None) -> BrainTurn:
         """Call understanding once; keep injected context out of the user text."""
-        provider_instruction = dialogue.contextualize(instruction, scene) if dialogue and scene is not None else instruction
+        deferred_reference_error = None
+        try:
+            provider_instruction = dialogue.contextualize(instruction, scene) if dialogue and scene is not None else instruction
+        except ValueError as exc:
+            if str(exc) not in {"dialogue_reference_missing", "dialogue_reference_ambiguous"}:
+                raise
+            # Only parsed lifecycle can establish whether 'it' is a new object
+            # introduced in this turn. Do not reject it before understanding.
+            deferred_reference_error = exc
+            provider_instruction = instruction
         request = TaskUnderstandingRequest(instruction=provider_instruction)
         if hasattr(self.understanding, "understand_turn"):
             turn = self.understanding.understand_turn(request)
@@ -82,6 +91,24 @@ class BrainPipeline:
             intent = self.understanding.understand(request)
             turn = BrainTurn(status="accepted", turn_kind="robot_task", instruction=instruction, task_intent=intent)
         turn = turn.model_copy(update={"instruction": instruction})
+        if deferred_reference_error is not None and turn.status == TurnStatus.ACCEPTED:
+            from .contracts.turn import SceneEditPlan
+            edits = turn.scene_edit
+            introduced, reused = set(), set()
+            valid_local = isinstance(edits, SceneEditPlan)
+            if valid_local:
+                by_id = {e.entity_id:e for e in edits.entities}
+                for edit in edits.operations:
+                    if edit.reference in by_id and (by_id[edit.reference].dialogue_ref or by_id[edit.reference].dialogue_ref_set):
+                        valid_local &= edit.reference in introduced
+                    if edit.operation == "add":
+                        introduced.add(edit.target)
+                    elif edit.target in introduced:
+                        reused.add(edit.target)
+                    elif edit.target in by_id and (by_id[edit.target].dialogue_ref or by_id[edit.target].dialogue_ref_set):
+                        valid_local = False
+            if not valid_local or not reused:
+                raise deferred_reference_error
         if turn.task_intent is not None:
             turn = turn.model_copy(update={"task_intent": turn.task_intent.model_copy(update={"instruction": instruction})})
         turn = self.domain_policy.classify(turn, instruction)

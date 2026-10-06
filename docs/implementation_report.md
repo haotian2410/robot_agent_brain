@@ -200,3 +200,23 @@ in language order. Incomplete distributed pairing and unequal cardinalities are
 blocked without dropping objects. Existing red-box/blue-box pairing tests remain
 unchanged and pass. Full specification acceptance, packaging and final docs
 remain pending; these local commits have not been pushed.
+
+## Motion evidence, collection editing and local pronouns
+
+Latest suite: **164 passed**. Missing linguistic distance/scale is now blocked
+even when the provider supplied a plausible number; both native scene edits and
+robot moves share this gate. Explicit distances and small/medium/large evidence
+remain supported, with basic English directional phrases added. HTTP conversion
+preserves motion-evidence error codes so missing user facts are not labeled a
+network failure. The old vague-motion test now asserts refusal (its former .01m
+expectation contradicted P05). The atomic two-move test supplies its intended
+5cm/10cm distances explicitly and retains all transform-preservation assertions.
+
+SceneEditor validates affected objects against the complete prospective scene:
+new-new collisions are caught, and old positions of simultaneously moved objects
+do not cause false collisions. Late failures leave the input scene unchanged.
+
+Pipeline defers missing/ambiguous prior-focus errors until the one understanding
+call can identify a valid ordered add-then-reference lifecycle. Same-turn local
+IDs can therefore resolve without a prior focus; unresolved cross-turn pronouns
+still fail. This does not add a second understanding call.

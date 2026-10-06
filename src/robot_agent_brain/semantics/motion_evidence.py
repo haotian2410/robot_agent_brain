@@ -11,6 +11,12 @@ _DIRECTION_PATTERNS = (
     (r"(?:向|往|朝)\s*后\s*(?:移(?:动)?|挪)|后移", Direction.BACK),
     (r"(?:向|往|朝)\s*上\s*(?:移(?:动)?|挪)|上移", Direction.UP),
     (r"(?:向|往|朝)\s*下\s*(?:移(?:动)?|挪)|下移", Direction.DOWN),
+    (r"\b(?:left|leftward|leftwards)\b", Direction.LEFT),
+    (r"\b(?:right|rightward|rightwards)\b", Direction.RIGHT),
+    (r"\b(?:forward|forwards)\b", Direction.FRONT),
+    (r"\b(?:backward|backwards)\b", Direction.BACK),
+    (r"\b(?:up|upward|upwards)\b", Direction.UP),
+    (r"\b(?:down|downward|downwards)\b", Direction.DOWN),
 )
 _DISTANCE = re.compile(r"(半|\d+(?:\.\d+)?|[零一二两三四五六七八九十百]+(?:点[零一二两三四五六七八九]+)?)\s*(毫米|mm|厘米|cm|米|m)", re.IGNORECASE)
 
@@ -42,7 +48,7 @@ class ExplicitMotionSpan:
 def _extract_motion_spans(instruction: str) -> list[ExplicitMotionSpan]:
     matches = []
     for pattern, direction in _DIRECTION_PATTERNS:
-        for match in re.finditer(pattern, instruction):
+        for match in re.finditer(pattern, instruction, re.IGNORECASE):
             if not any(match.start() < end and match.end() > start for start, end, _ in matches):
                 matches.append((match.start(), match.end(), direction))
     matches.sort(key=lambda item: item[0])
@@ -60,13 +66,13 @@ def _extract_motion_spans(instruction: str) -> list[ExplicitMotionSpan]:
                 distance /= 1000.0
             elif distance_match.group(2).casefold() in {"厘米", "cm"}:
                 distance /= 100.0
-        phrase = instruction[max(0, start - 4):window_end]
+        phrase = instruction[max(0, start - 4):window_end].casefold()
         scale = None
-        if distance is None and any(token in phrase for token in ("大幅", "很多", "很远")):
+        if distance is None and any(token in phrase for token in ("大幅", "很多", "很远", "a lot", "far")):
             scale = MotionScale.LARGE
-        elif distance is None and any(token in phrase for token in ("一些", "一段", "适中", "远一些")):
+        elif distance is None and any(token in phrase for token in ("一些", "一段", "适中", "远一些", "some", "moderately")):
             scale = MotionScale.MEDIUM
-        elif distance is None and any(token in phrase for token in ("一点", "稍微", "轻微", "远一点")):
+        elif distance is None and any(token in phrase for token in ("一点", "稍微", "轻微", "远一点", "a little", "slightly")):
             scale = MotionScale.SMALL
         spans.append(ExplicitMotionSpan(direction, distance, scale, start, distance_match.end() if distance_match else end))
     return spans
@@ -76,8 +82,10 @@ def _extract_motion_spans(instruction: str) -> list[ExplicitMotionSpan]:
 def resolve_motion_evidence(instruction, operation_count):
     """Bind motion evidence in clause order; never broadcast a distance."""
     spans = _extract_motion_spans(instruction)
-    if spans and len(spans) != operation_count:
+    if len(spans) != operation_count:
         raise ValueError("motion_clause_binding_ambiguous")
+    if any(span.distance_m is None and span.motion_scale is None for span in spans):
+        raise ValueError("motion_distance_evidence_missing")
     return spans
 
 
@@ -101,4 +109,3 @@ def normalize_scene_motion(instruction, edit):
                 values.update(distance_m=span.distance_m, motion_scale=span.motion_scale)
         result.append(SceneEditIntent.model_validate(values))
     return edit.model_copy(update={"operations": result}) if isinstance(edit, SceneEditPlan) else result[0]
-

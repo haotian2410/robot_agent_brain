@@ -111,8 +111,6 @@ class SceneEditor:
                         self.assets.get_model_property(obj.asset_id),
                         obj.transform,
                     )
-                    if self._collides(transform, obj, scene):
-                        raise ValueError("scene_edit_layout_collision")
                     updated_transforms.append((transform, self.assets.get_model_property(obj.asset_id)))
                     operations.append(ScenePatchOperation(action=PatchAction.UPDATE_TRANSFORM, scene_object_id=obj.scene_object_id, transform=transform))
                 elif intent.operation == "translate":
@@ -126,19 +124,23 @@ class SceneEditor:
                             raise ValueError("scene_edit_motion_direction_missing")
                         distance = model.dimensions_m[axis] * obj.transform.scale[axis] * self.motion_policy.scale_factor(intent.motion_scale)
                     transform = translate(obj.transform, intent.direction, distance, intent.coordinate_frame)
-                    if self._collides(transform, obj, scene):
-                        raise ValueError("scene_edit_transform_collision")
                     operations.append(ScenePatchOperation(action=PatchAction.UPDATE_TRANSFORM, scene_object_id=obj.scene_object_id, transform=transform))
                 elif intent.operation == "rotate":
                     transform = rotate(obj.transform, intent.axis, intent.angle_deg, intent.coordinate_frame)
-                    if self._collides(transform, obj, scene):
-                        raise ValueError("scene_edit_transform_collision")
                     operations.append(ScenePatchOperation(action=PatchAction.UPDATE_TRANSFORM, scene_object_id=obj.scene_object_id, transform=transform))
                 if intent.properties:
                     operations.append(ScenePatchOperation(action=PatchAction.UPDATE_PROPERTY, scene_object_id=obj.scene_object_id, properties=intent.properties))
                 if reference is None and intent.operation not in {"translate", "move_relative", "rotate"} and not intent.properties:
                     raise ValueError("scene_edit_update_missing")
-        return ScenePatch(scene_id=scene.scene_id, base_scene_version=scene.scene_version, operations=operations)
+        patch = ScenePatch(scene_id=scene.scene_id, base_scene_version=scene.scene_version, operations=operations)
+        # Validate the prospective collection, not each new pose against only
+        # old poses. This also permits a group to move into its own vacated space.
+        candidate = SceneManager(scene).apply_patch(patch)
+        affected = {op.scene_object_id for op in operations if op.action in {PatchAction.ADD, PatchAction.UPDATE_TRANSFORM}}
+        for obj in candidate.objects:
+            if obj.scene_object_id in affected and self._collides(obj.transform, obj, candidate):
+                raise ValueError("scene_edit_transform_collision")
+        return patch
 
     def _default_placement(self, obj, scene, model, defaults, operations):
         table = next((o for o in scene.objects if o.scene_object_id == defaults.table_object_id), None)

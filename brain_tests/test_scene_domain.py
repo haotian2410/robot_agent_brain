@@ -30,7 +30,7 @@ def test_multiple_scene_moves_are_atomic_and_keep_transform_components():
         SceneObject(scene_object_id="banana_01", asset_id="banana", semantic_name="banana", category="fruit",
                     transform=Transform(position=(.4, 0, 0))),
     ])
-    result = BrainPipeline(MoveUnderstanding(), assets).run("r", "苹果向右移动，香蕉向前移动", scene)
+    result = BrainPipeline(MoveUnderstanding(), assets).run("r", "苹果向右移动五厘米，香蕉向前移动十厘米", scene)
     assert result.commands is None
     assert len(result.scene_patch.operations) == 2
     assert result.scene_patch.operations[0].transform.position == (.05, 0, 0)
