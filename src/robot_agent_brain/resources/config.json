@@ -1,0 +1,9 @@
+{
+  "provider":"qwen",
+  "base_url":"http://127.0.0.1:8080/v1",
+  "model":null,
+  "robot":"ur5e",
+  "output_dir":"var/manual-tests",
+  "vision":false,
+  "seed":0
+}

@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "demo_assets": true,
+  "models": [
+    {"asset_id":"demo_table", "semantic_name":"table", "category":"surface", "dimensions_m":[1.6,1.2,0.05]},
+    {"asset_id":"demo_apple", "semantic_name":"apple", "category":"fruit", "dimensions_m":[0.08,0.08,0.09]},
+    {"asset_id":"demo_banana", "semantic_name":"banana", "category":"fruit", "dimensions_m":[0.18,0.06,0.05]},
+    {"asset_id":"demo_basket", "semantic_name":"basket", "category":"container", "dimensions_m":[0.25,0.22,0.15]},
+    {"asset_id":"demo_box", "semantic_name":"box", "category":"container", "dimensions_m":[0.24,0.24,0.18]}
+  ],
+  "aliases":{"苹果":"apple","香蕉":"banana","篮子":"basket","盒子":"box","桌子":"table","桌面":"table"},
+  "category_aliases":{"水果":"fruit","容器":"container","桌面":"surface"},
+  "overridable_properties":{
+    "demo_apple":["color"],"demo_banana":["color"],"demo_basket":["color"],"demo_box":["color"]
+  },
+  "center_origin_assets":["demo_table","demo_apple","demo_banana","demo_basket","demo_box"]
+}

@@ -31,17 +31,30 @@ Command:
 /home/cscvlab/miniconda3/envs/robot_agent_integ/bin/python -m pytest -q brain_tests
 ```
 
-Result: **63 passed**. Original tests retained. `git diff --check` passed.
+Result after configuration/assets stage: **72 passed**. Original tests retained. `git diff --check` passed.
 Installed independent schema validator: jsonschema 4.26.0.
 
 Real Qwen: **not run**. Wheel outside-source acceptance: **not yet run**.
 No frontend/Control integration or robot execution was performed.
 
+## Configuration/assets stage
+
+- Added `config.py` and packaged `resources/config.json`, `defaults.json`,
+  `assets.json`: package defaults < configuration file < ROBOT_BRAIN_* environment
+  < explicit overrides. API key excluded from serialization.
+- Added strict asset index loading and `scene/asset_resolver.py`: duplicate IDs,
+  finite dimensions/AABB, aliases, color constraints, copy isolation; concrete
+  names never silently substitute another asset of the same category.
+- Demo assets are metadata only (center-origin boxes), not actual meshes or
+  implemented rendering materials. No task objects are instantiated by loading
+  these resources. Real asset file errors do not fall back to demo resources.
+- Added `brain_tests/test_config_assets.py` (9 cases). Bootstrap does not yet exist.
+
 ## Remaining specification work
 
 - Finish T01 normalization/missing-distance evidence and T07 non-finite/schema
   edge cases; complete application-level readback validation with ArtifactWriter.
-- T02 configuration, strict asset catalog, aliases and explicit demo resources.
+- Finish T02 configuration/layout bounds validation and integrate resources into bootstrap/application.
 - T03 bootstrap lifecycle, constrained initial layout and validated candidates.
 - T04 atomic editor context, same-turn identities, scene/payload invariants.
 - T05 holding-aware compound recipes and semantic PlanValidator.
