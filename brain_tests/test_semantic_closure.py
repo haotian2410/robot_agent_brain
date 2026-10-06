@@ -61,8 +61,14 @@ def test_task_expansion_produces_concrete_commands_for_all_members():
     )
     concrete = TaskExpander().expand(task)
     assert [item.entity_id for item in concrete.entities] == ["apple__01", "apple__02"]
+    # Preserve the requested two grasps, but a single gripper cannot hold both.
+    with pytest.raises(ValueError, match="holding_conflict"):
+        RecipePlanner().plan(concrete)
+    # Keep the original concrete-target export coverage with a supported action.
+    concrete = concrete.model_copy(update={"operations": [
+        op.model_copy(update={"task_type": TaskType.LOCATE}) for op in concrete.operations]})
     commands = CommandExporter().export("r", concrete, RecipePlanner().plan(concrete), SceneConfig(scene_id="s", robot="ur5e"))
-    assert [item.parameters["target"] for item in commands.commands if item.skill_name == "grasp"] == ["apple_01", "apple_02"]
+    assert [item.parameters["target"] for item in commands.commands] == ["apple_01", "apple_02"]
 
 
 def test_brain_session_uses_local_scene_manager_and_remote_snapshot():

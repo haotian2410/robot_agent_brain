@@ -31,7 +31,7 @@ Command:
 /home/cscvlab/miniconda3/envs/robot_agent_integ/bin/python -m pytest -q brain_tests
 ```
 
-Result after initial bootstrap stage: **79 passed**. Original tests retained. `git diff --check` passed.
+Result after scene invariants/recipe state stage: **88 passed**. `git diff --check` passed.
 Installed independent schema validator: jsonschema 4.26.0.
 
 Real Qwen: **not run**. Wheel outside-source acceptance: **not yet run**.
@@ -68,6 +68,18 @@ No frontend/Control integration or robot execution was performed.
   stage alone does not yet make the CLI or all B01–B17 cases usable.
 
 ## Remaining specification work
+
+Latest foundation fixes: SceneManager revalidates incoming patches and complete
+candidate scenes before committing. Retired IDs cannot be revived within or
+across patches. Action payloads are exclusive. Compound GRASP/MOVE/RELEASE uses
+one temporary holding state; independent MOVE still grasps/releases. Unsupported
+SEARCH and invalid release/double grasp explicitly fail. PlanValidator and full
+execution profile integration are still pending.
+
+Old-test migration: `test_task_expansion_produces_concrete_commands_for_all_members`
+previously expected consecutive double grasp to export. It now retains both
+expanded objects, asserts single-gripper refusal, and checks concrete wire targets
+using LOCATE. This implements P03 without silently changing the user task.
 
 - Finish T01 normalization/missing-distance evidence and T07 non-finite/schema
   edge cases; complete application-level readback validation with ArtifactWriter.

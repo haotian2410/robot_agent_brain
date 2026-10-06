@@ -69,6 +69,10 @@ class ScenePatchOperation(StrictModel):
 
     @model_validator(mode="after")
     def validate_payload(self):
+        allowed = {PatchAction.ADD: "object", PatchAction.UPDATE_TRANSFORM: "transform",
+                   PatchAction.UPDATE_PROPERTY: "properties", PatchAction.REMOVE: None}[self.action]
+        if any(getattr(self, name) is not None and name != allowed for name in ("object", "transform", "properties")):
+            raise ValueError("scene_patch_payload_mismatch")
         required = {
             PatchAction.ADD: self.object,
             PatchAction.UPDATE_TRANSFORM: self.transform,
