@@ -146,3 +146,10 @@ replay run, clean JSON stdout, exact-input replay refusal and schemas without a
 model. These source-tree tests do NOT constitute wheel outside-source acceptance.
 `--session` currently selects only an in-process session, not disk recovery.
 Real Qwen has not been run; replay fixtures are explicitly labeled.
+
+## Batch verification
+
+Latest suite: **119 passed**. JSONL batches reuse a session within each group,
+skip dependent cases after failures, continue independent groups, and publish a
+provider-labeled summary with expected report/artifact checks. This is replay/
+injected-provider validation, not real model acceptance.

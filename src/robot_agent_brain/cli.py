@@ -14,10 +14,12 @@ from .contracts.run_report import BrainRunReport
 def parser():
     root = argparse.ArgumentParser(prog="robot-brain", description="Brain native planning CLI; no robot execution")
     commands = root.add_subparsers(dest="command", required=True)
-    for name in ("run", "chat"):
+    for name in ("run", "chat", "batch"):
         cmd = commands.add_parser(name)
         if name == "run":
             cmd.add_argument("instruction")
+        if name == "batch":
+            cmd.add_argument("--cases", required=True)
         for option in ("config", "scene", "assets", "defaults", "base-url", "model", "output-dir", "session", "replay-file"):
             cmd.add_argument("--" + option)
         cmd.add_argument("--provider", choices=["qwen", "replay"])
@@ -53,6 +55,12 @@ def main(argv=None):
             from .models.replay import ReplayProvider
             provider = ReplayProvider(config.replay_file)
         app = BrainApplication(config, provider=provider)
+        if args.command == "batch":
+            from .batch import run_batch
+            summary, path = run_batch(app, args.cases)
+            print(json.dumps({**summary, "summary_path":str(path)}, ensure_ascii=False) if args.json
+                  else f"Provider: {config.provider}\n{summary['totals']}\n{path}")
+            return 4 if summary["totals"]["failed"] else (2 if summary["totals"]["skipped"] else 0)
         if args.command == "run":
             report = app.handle(args.instruction, session_id=args.session, scene_path=args.scene)
             print(report.model_dump_json() if args.json else format_report(report))
