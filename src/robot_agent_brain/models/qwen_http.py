@@ -3,6 +3,10 @@ from __future__ import annotations
 import base64
 import json
 import re
+import time
+import uuid
+from copy import deepcopy
+from urllib.parse import urlsplit, urlunsplit
 from typing import Any
 
 import httpx
@@ -28,17 +32,26 @@ class QwenHTTPProvider:
         api_key: str = "",
         timeout: float = 120.0,
         structured_output: bool = True,
+        *,
+        client: httpx.Client | None = None,
+        transport: httpx.BaseTransport | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
         self.timeout = timeout
         self.structured_output = structured_output
+        if client is not None and transport is not None:
+            raise ValueError("supply either client or transport")
+        self.client, self.transport = client, transport
         self.calls: list[dict[str, Any]] = []
         self.last_raw_values: dict[str, Any] = {}
         self.last_raw_text: dict[str, str] = {}
 
-    def _call(self, stage: str, prompt: str, content, schema: dict[str, Any]) -> dict[str, Any]:
+    def _redact(self, text):
+        return text.replace(self.api_key, "[REDACTED]") if self.api_key else text
+
+    def _call(self, stage: str, prompt: str, content, schema: dict[str, Any], parse=None):
         payload: dict[str, Any] = {
             "model": self.model,
             "temperature": 0,
@@ -53,58 +66,73 @@ class QwenHTTPProvider:
                 "json_schema": {"name": stage, "strict": True, "schema": schema},
             }
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        request_id = uuid.uuid4().hex
+        headers["X-Request-ID"] = request_id
+        url = urlsplit(self.base_url)
+        summary_url = urlunsplit((url.scheme, url.netloc.rsplit("@", 1)[-1], url.path, "", ""))
+        record = {"stage":stage, "status":"failed", "request_id":request_id,
+                  "model":self.model, "base_url":summary_url, "finish_reason":None, "usage":None}
+        started = time.monotonic()
+        self.last_raw_text.pop(stage, None)
+        self.last_raw_values.pop(stage, None)
         response = None
         try:
-            response = httpx.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=self.timeout,
-            )
+            if self.client is not None:
+                response = self.client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload, timeout=self.timeout)
+            else:
+                with httpx.Client(transport=self.transport) as client:
+                    response = client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload, timeout=self.timeout)
+            record["http_status"] = response.status_code
+            record["response_request_id"] = response.headers.get("x-request-id")
+            self.last_raw_text[stage] = self._redact(response.text)
             response.raise_for_status()
             body = response.json()
-            raw = body["choices"][0]["message"]["content"]
+            if not isinstance(body, dict):
+                raise QwenProviderError("response body must be an object")
+            usage = body.get("usage")
+            if isinstance(usage, dict):
+                record["usage"] = {k:v for k,v in usage.items() if k in {"prompt_tokens", "completion_tokens", "total_tokens"} and isinstance(v, int)}
+                record.update(record["usage"])
+            choice = body["choices"][0]
+            record["finish_reason"] = choice.get("finish_reason")
+            raw = choice["message"]["content"]
             if not isinstance(raw, str):
                 raise QwenProviderError(f"{stage}: response content is not text")
+            self.last_raw_text[stage] = self._redact(raw)
+            if record["finish_reason"] == "length":
+                raise QwenProviderError("model_output_truncated")
             value = _extract_json(raw)
-            self.last_raw_text[stage] = raw
-            self.last_raw_values[stage] = value
-            usage = body.get("usage", {})
-            finish_reason = body.get("choices", [{}])[0].get("finish_reason")
-            record = {"stage": stage, "status": "succeeded", "finish_reason": finish_reason, **usage}
-            if finish_reason == "length":
-                record.update(status="failed", error="model_output_truncated")
-                self.calls.append(record)
-                raise QwenProviderError(f"{stage}: model_output_truncated")
+            self.last_raw_values[stage] = deepcopy(value)
+            result = parse(value) if parse else value
+            record["status"] = "succeeded"
+            return result
+        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, QwenProviderError) as exc:
+            record["error"] = self._redact(f"{type(exc).__name__}: {exc}")
+            raise QwenProviderError(f"{stage}: {record['error']}") from exc
+        finally:
+            record["elapsed_seconds"] = time.monotonic() - started
             self.calls.append(record)
-            return value
-        except (httpx.HTTPError, KeyError, ValueError, json.JSONDecodeError) as exc:
-            self.calls.append({
-                "stage": stage,
-                "status": "failed",
-                "http_status": getattr(response, "status_code", None),
-                "error": str(exc),
-            })
-            raise QwenProviderError(f"{stage}: {type(exc).__name__}: {exc}") from exc
 
     def understand(self, request: TaskUnderstandingRequest) -> TaskIntent:
-        value = self._call(
+        return self._call(
             "task_understanding",
             TASK_UNDERSTANDING_PROMPT,
             prompt_payload({"instruction": request.instruction}),
             TaskParseOutput.model_json_schema(),
+            lambda value: TaskParseOutput.model_validate(value).to_task_intent(request.instruction),
         )
-        return TaskParseOutput.model_validate(value).to_task_intent(request.instruction)
 
     def understand_turn(self, request: TaskUnderstandingRequest):
-        value = self._call("task_understanding", TASK_UNDERSTANDING_PROMPT, prompt_payload({"instruction": request.instruction}), TaskParseOutput.model_json_schema())
-        marker = re.search(r"\[dialogue_exclude=([^\]]+)\]", request.instruction)
-        if marker and value.get("entities"):
-            value["entities"][0]["exclude_scene_object_ids"] = [marker.group(1)]
-        referent = re.search(r"\[dialogue_scene_object_id=([^\]]+)\]", request.instruction)
-        if referent and value.get("scene_query"):
-            value["scene_query"]["referent_scene_object_id"] = referent.group(1)
-        return TaskParseOutput.model_validate(value).to_brain_turn(request.instruction)
+        def parse(value):
+            marker = re.search(r"\[dialogue_exclude=([^\]]+)\]", request.instruction)
+            if marker and value.get("entities"):
+                value["entities"][0]["exclude_scene_object_ids"] = [marker.group(1)]
+            referent = re.search(r"\[dialogue_scene_object_id=([^\]]+)\]", request.instruction)
+            if referent and value.get("scene_query") and not value["scene_query"].get("entities"):
+                value["scene_query"]["referent_scene_object_id"] = referent.group(1)
+            return TaskParseOutput.model_validate(value).to_brain_turn(request.instruction)
+        return self._call("task_understanding", TASK_UNDERSTANDING_PROMPT,
+                          prompt_payload({"instruction": request.instruction}), TaskParseOutput.model_json_schema(), parse)
 
     def detect(self, frame: CameraFrame, entities: list[VisionEntity]) -> VisionGroundingOutput:
         if frame.rgb is None:
@@ -113,13 +141,13 @@ class QwenHTTPProvider:
             {"type": "text", "text": prompt_payload({"entities": [item.model_dump(mode="json") for item in entities]})},
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64.b64encode(frame.rgb).decode('ascii')}"}},
         ]
-        value = self._call(
+        return self._call(
             "vision_grounding",
             VISION_GROUNDING_PROMPT,
             content,
             VisionGroundingOutput.model_json_schema(),
+            VisionGroundingOutput.model_validate,
         )
-        return VisionGroundingOutput.model_validate(value)
 
 
 def _extract_json(content: str) -> dict[str, Any]:

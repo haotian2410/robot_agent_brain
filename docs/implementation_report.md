@@ -167,3 +167,14 @@ Validated feedback is checkpointed; missing confirmed geometry remains unknown
 after restart. `--session` now resumes under the same output directory.
 Publication failure preserves confirmed in-memory state and attempts a checkpoint
 before publishing artifacts; a failed disk write cannot guarantee recovery.
+
+## HTTP diagnostics verification
+
+Latest suite: **138 passed**. Existing Qwen adapter now accepts an injected
+httpx client/transport. Each call records one outcome including conversion and
+Pydantic failures, duration, request IDs, model/endpoint summary, available usage
+and finish reason. Truncated/malformed output is retained in memory for debug
+before parsing; normal metrics do not contain raw response bodies. API-key text
+is redacted from diagnostic messages. Twelve tests cover success, malformed JSON,
+empty/non-text choices, truncation, validation, HTTP errors, timeout and per-turn
+log slicing. They use MockTransport, **not a real Qwen service**.
