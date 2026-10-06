@@ -69,27 +69,45 @@ class BrainPipeline:
         self.vision_fallback = VisionFallbackGrounder()
         self.domain_policy = TaskDomainPolicy()
 
-    def run(self, request_id: str, instruction: str, scene: SceneConfig, *,
-            dialogue=None, capture: Callable[[], CameraFrame] | None = None, held_object: str | None = None) -> BrainResult:
-        provider_instruction = dialogue.contextualize(instruction, scene) if dialogue else instruction
+    def understand_turn(self, instruction: str, *, scene: SceneConfig | None = None,
+                        dialogue=None) -> BrainTurn:
+        """Call understanding once; keep injected context out of the user text."""
+        provider_instruction = dialogue.contextualize(instruction, scene) if dialogue and scene is not None else instruction
         request = TaskUnderstandingRequest(instruction=provider_instruction)
         if hasattr(self.understanding, "understand_turn"):
             turn = self.understanding.understand_turn(request)
         else:
             intent = self.understanding.understand(request)
             turn = BrainTurn(status="accepted", turn_kind="robot_task", instruction=instruction, task_intent=intent)
+        turn = turn.model_copy(update={"instruction": instruction})
+        if turn.task_intent is not None:
+            turn = turn.model_copy(update={"task_intent": turn.task_intent.model_copy(update={"instruction": instruction})})
         turn = self.domain_policy.classify(turn, instruction)
+        if turn.status == TurnStatus.ACCEPTED and turn.turn_kind == TurnKind.ROBOT_TASK:
+            turn = turn.model_copy(update={"task_intent": normalize_motion_language(turn.task_intent)})
+        return turn
+
+    def process_turn(self, request_id: str, turn: BrainTurn, scene: SceneConfig | None, *,
+                     dialogue=None, bindings_override=None,
+                     capture: Callable[[], CameraFrame] | None = None,
+                     held_object: str | None = None) -> BrainResult:
+        """Consume an understood turn without another provider call or normalization."""
         if turn.status != TurnStatus.ACCEPTED:
             return BrainResult(status=turn.status, turn_kind=turn.turn_kind)
+        if turn.turn_kind == TurnKind.SESSION_CONTROL:
+            return BrainResult(turn_kind=turn.turn_kind, session_action=turn.session_control)
+        if scene is None:
+            raise ValueError("scene_required")
         if turn.turn_kind == TurnKind.SCENE_EDIT:
             return BrainResult(turn_kind=turn.turn_kind, scene_patch=self.scene_editor.edit(turn.scene_edit, scene, dialogue=dialogue))
         if turn.turn_kind == TurnKind.SCENE_QUERY:
             return BrainResult(turn_kind=turn.turn_kind, scene_query_result=SceneQueryEngine().query(turn.scene_query, scene))
-        if turn.turn_kind == TurnKind.SESSION_CONTROL:
-            return BrainResult(turn_kind=turn.turn_kind, session_action=turn.session_control)
-        intent = turn.task_intent.model_copy(update={"instruction": instruction})
-        intent = normalize_motion_language(intent)
+        intent = turn.task_intent
         overrides = dialogue.bindings(intent, scene) if dialogue else {}
+        for entity_id, ids in (bindings_override or {}).items():
+            if entity_id in overrides and overrides[entity_id] != ids:
+                raise ValueError("grounding_binding_conflict: " + entity_id)
+            overrides[entity_id] = ids
         frame = None
         while True:
             try:
@@ -107,6 +125,13 @@ class BrainPipeline:
         plan = self.planner.plan(grounded, held_object=held_object)
         commands = self.exporter.export(request_id, grounded, plan, scene)
         return BrainResult(task_intent=intent, grounded_task=grounded, skill_plan=plan, commands=commands)
+
+    def run(self, request_id: str, instruction: str, scene: SceneConfig, *,
+            dialogue=None, capture: Callable[[], CameraFrame] | None = None,
+            held_object: str | None = None, bindings_override=None) -> BrainResult:
+        turn = self.understand_turn(instruction, scene=scene, dialogue=dialogue)
+        return self.process_turn(request_id, turn, scene, dialogue=dialogue, capture=capture,
+                                 held_object=held_object, bindings_override=bindings_override)
 
     def run_turn(self, request_id, instruction, scene, **kwargs):
         return self.run(request_id, instruction, scene, **kwargs)

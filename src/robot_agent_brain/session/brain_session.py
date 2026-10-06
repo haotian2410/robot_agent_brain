@@ -55,10 +55,21 @@ class BrainSession:
             raise ValueError("session_closed")
         if self.sync_state != "synchronized":
             raise ValueError("scene_sync_unknown")
-        result = self.pipeline.run(request_id, instruction, self.scene,
-                                   dialogue=self.dialogue, capture=self.capture, held_object=self.holding_object)
+        turn = self.pipeline.understand_turn(instruction, scene=self.scene, dialogue=self.dialogue)
+        return self.process_turn(request_id, turn)
+
+    def process_turn(self, request_id, turn, *, bindings_override=None):
+        if self.session_action == "close":
+            raise ValueError("session_closed")
+        if self.sync_state != "synchronized":
+            raise ValueError("scene_sync_unknown")
+        if self.session_action == "pause" and (turn.session_control is None or turn.session_control.action not in {"resume", "close"}):
+            raise ValueError("session_paused")
+        result = self.pipeline.process_turn(request_id, turn, self.scene,
+                                           dialogue=self.dialogue, capture=self.capture,
+                                           held_object=self.holding_object, bindings_override=bindings_override)
         if self.session_action == "pause":
-            if result.session_action is None or result.session_action.action != "resume":
+            if result.session_action is None or result.session_action.action not in {"resume", "close"}:
                 raise ValueError("session_paused")
         if result.commands is not None:
             self.pending_execution_request = request_id

@@ -1,5 +1,7 @@
 from __future__ import annotations
 from typing import Literal
+import json
+from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .task_intent import Direction, PlacementTarget
 from .skill_plan import SkillName
@@ -32,6 +34,18 @@ class MoveParameters(Parameters):
     region: Region | None = None
     motion_direction: Direction | None = None
     distance_m: float | None = Field(default=None, gt=0, le=2, allow_inf_nan=False)
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema, handler):
+        schema = handler(core_schema)
+        schema["oneOf"] = [
+            {"required": ["region"], "properties": {"region": {"type": "string"}},
+             "not": {"anyOf": [{"required": ["motion_direction"]}, {"required": ["distance_m"]}]}},
+            {"required": ["motion_direction", "distance_m"],
+             "properties": {"motion_direction": {"type": "string"}, "distance_m": {"type": "number"}},
+             "not": {"required": ["region"]}},
+        ]
+        return schema
 
     @model_validator(mode="after")
     def exclusive_modes(self):
@@ -68,16 +82,14 @@ class Command(BaseModel):
     parameters: LocateParameters | MoveParameters | GraspParameters | ReleaseParameters | PressParameters | PullParameters | PushParameters
 
     @classmethod
-    def model_json_schema(cls, by_alias=True, ref_template="#/$defs/{model}", **kwargs):
-        schema = super().model_json_schema(by_alias=by_alias, ref_template=ref_template, **kwargs)
-        # Keep the flat v2 JSON shape while expressing the skill/parameter
-        # dependency for consumers that validate the published schema.
+    def __get_pydantic_json_schema__(cls, core_schema, handler):
+        schema = handler(core_schema)
+        variants = schema["properties"]["parameters"]["anyOf"]
+        by_title = {handler.resolve_ref_schema(ref)["title"]: ref for ref in variants}
         schema["allOf"] = [
-            {"if": {"properties": {"skill_name": {"const": "move"}}}, "then": {"properties": {"parameters": {"oneOf": [{"required": ["target", "region"], "not": {"anyOf": [{"required": ["motion_direction"]}, {"required": ["distance_m"]}]}}, {"required": ["target", "motion_direction", "distance_m"], "not": {"required": ["region"]}}]}}}},
-            {"if": {"properties": {"skill_name": {"const": "grasp"}}}, "then": {"properties": {"parameters": {"required": ["target"], "not": {"anyOf": [{"required": ["region"]}, {"required": ["motion_direction"]}, {"required": ["distance_m"]}]}}}}},
-            {"if": {"properties": {"skill_name": {"const": "locate"}}}, "then": {"properties": {"parameters": {"required": ["target"]}}}},
-            {"if": {"properties": {"skill_name": {"const": "release"}}}, "then": {"properties": {"parameters": {"required": ["target"], "not": {"anyOf": [{"required": ["motion_direction"]}, {"required": ["distance_m"]}]}}}}},
-            {"if": {"properties": {"skill_name": {"enum": ["press", "pull", "push"]}}}, "then": {"properties": {"parameters": {"required": ["target"]}}}},
+            {"if": {"properties": {"skill_name": {"const": skill.value}}},
+             "then": {"properties": {"parameters": by_title[model.__name__]}}}
+            for skill, model in PARAMETER_TYPES.items()
         ]
         return schema
 
@@ -110,19 +122,6 @@ class CommandsFile(BaseModel):
     operations: list[CommandOperation]
     commands: list[Command]
 
-    @classmethod
-    def model_json_schema(cls, by_alias=True, ref_template="#/$defs/{model}", **kwargs):
-        schema = super().model_json_schema(by_alias=by_alias, ref_template=ref_template, **kwargs)
-        command_schema = schema.get("$defs", {}).get("Command")
-        if command_schema is not None and "allOf" not in command_schema:
-            command_schema["allOf"] = [
-                {"if": {"properties": {"skill_name": {"const": "move"}}}, "then": {"properties": {"parameters": {"oneOf": [{"required": ["target", "region"], "not": {"anyOf": [{"required": ["motion_direction"]}, {"required": ["distance_m"]}]}}, {"required": ["target", "motion_direction", "distance_m"], "not": {"required": ["region"]}}]}}}},
-                {"if": {"properties": {"skill_name": {"const": "grasp"}}}, "then": {"properties": {"parameters": {"required": ["target"], "not": {"anyOf": [{"required": ["region"]}, {"required": ["motion_direction"]}, {"required": ["distance_m"]}]}}}}},
-                {"if": {"properties": {"skill_name": {"const": "locate"}}}, "then": {"properties": {"parameters": {"required": ["target"]}}}},
-                {"if": {"properties": {"skill_name": {"const": "release"}}}, "then": {"properties": {"parameters": {"required": ["target"], "not": {"anyOf": [{"required": ["motion_direction"]}, {"required": ["distance_m"]}]}}}}},
-                {"if": {"properties": {"skill_name": {"enum": ["press", "pull", "push"]}}}, "then": {"properties": {"parameters": {"required": ["target"]}}}},
-            ]
-        return schema
 
     @model_validator(mode="after")
     def validate_consistency(self):
@@ -150,3 +149,12 @@ class ExecutionFeedback(BaseModel):
     status: Literal["success", "failed", "partial"]
     commands: list[CommandFeedback]
     holding_object: str | None = None
+
+
+def canonical_commands(commands: CommandsFile) -> dict:
+    """The sole wire representation. Validate models and the public schema."""
+    payload = commands.model_dump(mode="json", exclude_none=True)
+    CommandsFile.model_validate(payload)
+    json.dumps(payload, allow_nan=False)
+    Draft202012Validator(CommandsFile.model_json_schema()).validate(payload)
+    return payload
