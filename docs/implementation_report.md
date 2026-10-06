@@ -153,3 +153,17 @@ Latest suite: **119 passed**. JSONL batches reuse a session within each group,
 skip dependent cases after failures, continue independent groups, and publish a
 provider-labeled summary with expected report/artifact checks. This is replay/
 injected-provider validation, not real model acceptance.
+
+## Session recovery verification
+
+Latest suite: **126 passed**. `session/store.py` adds validated, versioned JSON
+checkpoints, atomic replacement and non-blocking POSIX per-session locks. The
+Application restores scene/IDs/focus/pause/sync/exported and dispatched state;
+independent app instances refresh newer revisions. Corrupt checkpoints and
+symlink/traversal targets fail instead of silently starting fresh. This local
+Linux/POSIX implementation does not claim distributed/network-filesystem locking.
+Application dispatch additionally requires the matching published command file.
+Validated feedback is checkpointed; missing confirmed geometry remains unknown
+after restart. `--session` now resumes under the same output directory.
+Publication failure preserves confirmed in-memory state and attempts a checkpoint
+before publishing artifacts; a failed disk write cannot guarantee recovery.

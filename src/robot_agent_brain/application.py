@@ -1,10 +1,13 @@
 """Application orchestration shared by APIs and terminal clients. Export only."""
 import time
 import uuid
+import json
+from pathlib import Path
 from pydantic import ValidationError
 from .config import BrainConfig
 from .pipeline import BrainPipeline
 from .session.brain_session import BrainSession
+from .session.store import SessionStore
 from .scene.bootstrapper import SceneBootstrapper
 from .adapters.local_scene_platform import LocalScenePlatform
 from .adapters.scene_file_codec import SceneFileCodec
@@ -31,15 +34,26 @@ class BrainApplication:
         self.codec = SceneFileCodec(self.assets)
         self.writer = ArtifactWriter(self.config.output_dir)
         self.sessions = {}
+        self.store = SessionStore(self.config.output_dir)
+        self.revisions = {}
         self.platform_factory = platform_factory
 
     def get_session(self, session_id):
         safe_identifier(session_id)
-        if session_id not in self.sessions:
-            self.sessions[session_id] = BrainSession(None, self.pipeline, self.platform_factory())
+        state = self.store.load(session_id)
+        if session_id not in self.sessions or state is not None and state.revision > self.revisions.get(session_id, 0):
+            session = BrainSession(None, self.pipeline, self.platform_factory())
+            self.sessions[session_id] = self.store.restore(state, session) if state else session
+            self.revisions[session_id] = state.revision if state else 0
         return self.sessions[session_id]
 
     def load_scene(self, session_id, path):
+        with self.store.lock(session_id):
+            scene = self._load_scene(session_id, path)
+            self._save_session(session_id)
+            return scene
+
+    def _load_scene(self, session_id, path):
         session = self.get_session(session_id)
         scene = self.codec.load(path)
         session.initialize_scene(scene)
@@ -47,6 +61,33 @@ class BrainApplication:
 
     def handle(self, instruction, *, session_id=None, scene_path=None):
         session_id = session_id or uuid.uuid4().hex
+        with self.store.lock(session_id):
+            return self._handle(instruction, session_id=session_id, scene_path=scene_path)
+
+    def _save_session(self, session_id):
+        self.revisions[session_id] = self.store.save(session_id, self.sessions[session_id],
+                                                    revision=self.revisions.get(session_id, 0) + 1)
+
+    def mark_dispatched(self, session_id, commands):
+        with self.store.lock(session_id):
+            session = self.get_session(session_id)
+            from .contracts.commands import canonical_commands
+            path = Path(self.config.output_dir).resolve() / safe_identifier(session_id) / safe_identifier(commands.request_id) / "commands.json"
+            if not path.is_file() or json.loads(path.read_text(encoding="utf-8")) != canonical_commands(commands):
+                raise ValueError("execution_export_artifact_missing_or_changed")
+            session.mark_dispatched(commands)
+            self._save_session(session_id)
+
+    def apply_execution_feedback(self, session_id, feedback, *, confirmed_scene=None, feedback_source="external"):
+        with self.store.lock(session_id):
+            session = self.get_session(session_id)
+            try:
+                return session.apply_execution_feedback(feedback, confirmed_scene=confirmed_scene,
+                                                        feedback_source=feedback_source)
+            finally:
+                self._save_session(session_id)
+
+    def _handle(self, instruction, *, session_id, scene_path=None):
         request_id = uuid.uuid4().hex
         session = self.get_session(session_id)
         started = time.monotonic()
@@ -64,7 +105,7 @@ class BrainApplication:
                 stage = "scene_import"
                 if session.scene is not None:
                     raise ValueError("scene_already_loaded: use explicit load_scene to replace it")
-                self.load_scene(session_id, scene_path)
+                self._load_scene(session_id, scene_path)
                 report.scene_source = "uploaded"
                 report.scene_commit_status = "committed"
             elif session.scene is not None:
@@ -125,6 +166,7 @@ class BrainApplication:
                   "scene_source":report.scene_source, "before_version":before.scene_version if before else None,
                   "after_version":report.scene_version}
         try:
+            self._save_session(session_id)
             return self.writer.publish(report, scene=session.scene, result=result, request_record=record)
         except Exception as exc:
             report.run_status = "failed"

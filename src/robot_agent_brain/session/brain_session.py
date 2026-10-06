@@ -45,6 +45,8 @@ class BrainSession:
         self.dialogue = DialogueState()
         self.holding_object = None
         self.exported_commands.clear()
+        self.last_exported_request = None
+        self.last_request_id = None
 
     @staticmethod
     def _check_snapshot(snapshot, expected):
