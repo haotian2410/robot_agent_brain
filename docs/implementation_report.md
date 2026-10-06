@@ -31,7 +31,7 @@ Command:
 /home/cscvlab/miniconda3/envs/robot_agent_integ/bin/python -m pytest -q brain_tests
 ```
 
-Result after dispatch/feedback stage: **97 passed**. `git diff --check` passed.
+Result after codec/artifact foundation: **107 passed**. `git diff --check` passed.
 Installed independent schema validator: jsonschema 4.26.0.
 
 Real Qwen: **not run**. Wheel outside-source acceptance: **not yet run**.
@@ -68,6 +68,14 @@ No frontend/Control integration or robot execution was performed.
   stage alone does not yet make the CLI or all B01–B17 cases usable.
 
 ## Remaining specification work
+
+Artifact foundation: added BrainIssue/BrainError, BrainRunReport, strict flat scene
+codec, and LocalScenePlatform (capture explicitly unsupported). ArtifactWriter
+validates and reads back schemas in a private staging directory, then publishes a
+new request directory. Old paths are not copied into failed reports; input files
+are read-only; traversal and overwrite tests pass. Application orchestration and
+platform-ack-versus-disk-failure reporting are still pending, so this does not yet
+claim end-to-end publication acceptance.
 
 Session migration: exporting commands now updates `last_exported_request` (and
 legacy `last_request_id`) but does NOT set pending. External integration must call
