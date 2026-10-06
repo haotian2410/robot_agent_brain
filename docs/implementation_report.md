@@ -249,3 +249,31 @@ Real Qwen availability check: `curl --noproxy '*' --max-time 3 --silent
 (exit 7). **Real Qwen task acceptance was not run**. No service was started or
 replay substituted for it. Final acceptance still requires remaining behavioral
 audit and current documentation, and rebuilding the final revision's wheel.
+
+## Documentation and diagnostics stage — 2026-10-07
+
+Latest full suite: **171 passed**. Added README CLI/config/artifact instructions,
+`docs/manual_testing.md`, `docs/contracts.md`, explicit replay fixtures and a
+three-case JSONL batch. The documented batch was actually run (3 passed, 0 failed,
+0 skipped) under `/tmp/brain-manual-doc-audit`; it is not a real-Qwen result.
+
+Request records/checkpoints now include a nonsecret configuration fingerprint
+(provider/model/endpoint summary, robot/seed, prompt/asset/default hashes).
+Recovery with changed configuration warns without recreating confirmed objects.
+`--debug` publishes per-turn semantic and plan artifacts plus redacted raw
+response/call/failure records; normal runs omit raw diagnostics. New tests verify
+secret omission and failure logs. Prompt examples now use shared edit/query
+selectors, explicit all_available, same-turn precedence and missing-distance
+clarification; all JSON examples are parser-validated.
+
+Legacy name-only bootstrap references can be completed by unique asset names or
+aliases. First-add all_available no longer silently creates one object: configured
+initial counts are required. A paused empty session is checked before bootstrap,
+so refusal does not create a scene as a side effect. Batch no longer exposes
+ignored scene/session CLI options.
+
+The older sections above are chronological stage records, not a current list of
+missing features. Final audit/document consolidation and final-revision wheel
+rebuild remain required. Remaining risks to audit include bounded relative-add
+layout, full schema edge cases, restore metadata compatibility, failure-state
+reporting and acceptance coverage against every numbered specification item.

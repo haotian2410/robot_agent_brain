@@ -21,12 +21,19 @@ class SceneBootstrapper:
         else:
             plan = turn.scene_edit
             if not isinstance(plan, SceneEditPlan):
-                if plan.reference:
-                    raise ValueError("bootstrap_reference_selector_required")
                 target = TaskEntity(entity_id="edit_target", semantic_name=plan.semantic_name,
                                     category=plan.category, count=plan.count,
                                     quantity_mode="all" if plan.count > 1 else "single")
-                plan = SceneEditPlan(entities=[target], operations=[plan.model_copy(update={"target": target.entity_id})])
+                values = {"target":target.entity_id}
+                entities = [target]
+                if plan.reference:
+                    # Legacy name-only references can be completed only by a
+                    # unique catalog name/alias, never guessed from a category.
+                    model = self.resolver.resolve(TaskEntity(entity_id="edit_reference", semantic_name=plan.reference,
+                                                              category="unspecified")).model
+                    entities.append(TaskEntity(entity_id="edit_reference", semantic_name=plan.reference, category=model.category))
+                    values["reference"] = "edit_reference"
+                plan = SceneEditPlan(entities=entities, operations=[plan.model_copy(update=values)])
             if all(op.operation == "remove" for op in plan.operations):
                 raise ValueError("scene_required: cannot create objects only to remove them")
             defined, needed = set(), set()
@@ -63,6 +70,8 @@ class SceneBootstrapper:
             raise ValueError("bootstrap_origin_metadata_missing: table")
         specs, candidates, bindings = [], {}, {}
         assumptions = ["source=system_default: tabletop grid placement; x right, y front, z up"]
+        if self.assets.metadata.demo_assets:
+            assumptions.append("demo_assets: metadata only; no real mesh or rendered material")
         for entity in entities:
             binding = self.resolver.resolve(entity)
             model = binding.model

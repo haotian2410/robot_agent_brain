@@ -6,8 +6,82 @@ semantics, grounding, task decomposition, vague-motion distance resolution,
 Atomic Skill ordering, and `commands.json` v2 export.
 
 It intentionally does **not** depend on MuJoCo, `robot_agent_control`, MJCF,
-IK, collision checking, reachability, path/trajectory planning, gripper
+IK, robot collision checking, reachability, path/trajectory planning, gripper
 simulation, runtime playback, or execution verification.
+
+## 安装与自测
+
+Python 3.11/3.12，当前 CLI 会话锁使用 Linux/POSIX 文件锁。
+
+```bash
+cd /home/cscvlab/lht/robot_agent_brain
+python -m pip install -e '.[dev]'
+robot-brain --help
+```
+
+这不是旧仓库的 `robot-agent run/chat`。本仓库入口是 **`robot-brain`**，
+默认只生成 Brain 原生场景 JSON 和语义命令，不打开 MuJoCo，也不执行机器人。
+
+真实 Qwen：先由部署端启动兼容 `/v1/chat/completions` 的服务，并确认实际模型名。
+下面的 `QWEN_MODEL` 应替换为服务 `/v1/models` 返回的名称，不能仅凭本地模型目录推断。
+
+```bash
+curl --noproxy '*' http://127.0.0.1:8080/v1/models
+export ROBOT_BRAIN_MODEL="$QWEN_MODEL"
+export ROBOT_BRAIN_BASE_URL=http://127.0.0.1:8080/v1
+robot-brain run '把两个苹果放进篮子' --output-dir var/manual-tests
+robot-brain chat --output-dir var/manual-tests
+```
+
+不传 `--scene` 时，首轮根据一次任务理解生成对象和初始布局，然后继续处理同一个
+BrainTurn。苹果不会预先放进篮子，首轮 add 不会重复新增。已有场景则复用确认快照，
+缺对象会报错，不会悄悄补造。
+
+没有模型服务时，可以明确选择 **Replay 回放**，它只接受夹具中完全相同的输入：
+
+```bash
+robot-brain run '增加一个苹果' --provider replay \
+  --replay-file examples/replay/add_apple.json --output-dir var/replay
+robot-brain run '把两个苹果放进篮子' --provider replay \
+  --replay-file examples/replay/manual.json --output-dir var/replay
+robot-brain batch --provider replay --replay-file examples/replay/manual.json \
+  --cases examples/cases/manual_cases.jsonl --output-dir var/batch
+robot-brain schemas --output-dir var/schemas
+```
+
+Replay 验证工程链路，不证明真实 Qwen 理解质量。模型连接失败不会自动切换 Replay。
+2026-10-07 本机 `8080` 服务连接失败，真实 Qwen 验收未运行；测试与 wheel 验收记录见
+[implementation_report](docs/implementation_report.md)。
+
+## 配置与产物
+
+优先级：命令行 > `ROBOT_BRAIN_*` 环境变量 > `--config` JSON > 包内默认值。
+模型名没有猜测默认值；真实模型必须配置。API key 仅通过 `ROBOT_BRAIN_API_KEY`
+传入，不写入配置文件。`--assets` 和 `--defaults` 可覆盖资产索引和布局配置。
+默认资产是标注为 demo 的尺寸/类别/属性元数据，不包含真实 mesh，也不声称完成渲染。
+
+每轮生成新目录：
+
+```text
+OUTPUT/SESSION/session_state.json
+OUTPUT/SESSION/REQUEST/result.json
+OUTPUT/SESSION/REQUEST/request_record.json
+OUTPUT/SESSION/REQUEST/scene_config.json   # 本轮确认场景（若存在）
+OUTPUT/SESSION/REQUEST/scene_patch.json    # 场景编辑时
+OUTPUT/SESSION/REQUEST/commands.json       # 合法机器人计划时
+OUTPUT/SESSION/REQUEST/query_result.json   # 查询时
+```
+
+机器人报告明确显示“尚未执行”，`executed=false`。场景和 commands 的 ID/版本匹配。
+`scene_config.json` 是 **Brain JSON，不是 scene.xml/MJCF**；不能直接交给旧 Control
+就声称接口已经兼容。团队 components/taskStep 格式尚未冻结，需要独立适配与联调。
+
+导入现有 Brain 原生场景使用 `--scene PATH`；原文件不被修改。恢复会话使用同一
+输出根目录和 `--session SESSION_ID`。chat 支持 `/help`、`/status`、`/load PATH`、
+`/exit`；`/exit` 仅退出客户端，语义 close 则关闭会话。
+
+详细参数、错误与可复制流程见 [手动测试](docs/manual_testing.md)；协议和反馈接口见
+[契约说明](docs/contracts.md)。
 
 ## Architecture invariant
 

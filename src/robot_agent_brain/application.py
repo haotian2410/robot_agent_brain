@@ -2,6 +2,7 @@
 import time
 import uuid
 import json
+import traceback
 from pathlib import Path
 from pydantic import ValidationError
 from .config import BrainConfig
@@ -15,6 +16,7 @@ from .adapters.artifact_writer import ArtifactWriter, safe_identifier
 from .contracts.run_report import BrainRunReport
 from .errors import BrainIssue, BrainError
 from .models.qwen_http import QwenHTTPProvider, QwenProviderError
+from .diagnostics import configuration_summary, fingerprint, redact
 
 
 class BrainApplication:
@@ -22,6 +24,8 @@ class BrainApplication:
         self.config = config or BrainConfig.load()
         self.assets = self.config.load_assets()
         self.defaults = self.config.load_defaults()
+        self.config_summary = configuration_summary(self.config, self.assets, self.defaults)
+        self.config_fingerprint = fingerprint(self.config_summary)
         if provider is None:
             if self.config.provider != "qwen" or not self.config.model:
                 raise BrainError("config_missing", "configuration", "Configure a model or supply a replay provider")
@@ -44,6 +48,7 @@ class BrainApplication:
         if session_id not in self.sessions or state is not None and state.revision > self.revisions.get(session_id, 0):
             session = BrainSession(None, self.pipeline, self.platform_factory())
             self.sessions[session_id] = self.store.restore(state, session) if state else session
+            self.sessions[session_id].restored_config_fingerprint = state.config_fingerprint if state else None
             self.revisions[session_id] = state.revision if state else 0
         return self.sessions[session_id]
 
@@ -66,7 +71,7 @@ class BrainApplication:
 
     def _save_session(self, session_id):
         self.revisions[session_id] = self.store.save(session_id, self.sessions[session_id],
-                                                    revision=self.revisions.get(session_id, 0) + 1)
+            revision=self.revisions.get(session_id, 0) + 1, config_fingerprint=self.config_fingerprint)
 
     def mark_dispatched(self, session_id, commands):
         with self.store.lock(session_id):
@@ -94,6 +99,8 @@ class BrainApplication:
         report = BrainRunReport(session_id=session_id, request_id=request_id, run_status="failed",
                                 provider=self.config.provider)
         result = None
+        turn = None
+        debug = {}
         stage = "session"
         before = session.scene
         calls_start = len(getattr(self.provider, "calls", []))
@@ -118,6 +125,7 @@ class BrainApplication:
                 report.run_status = "blocked"
                 report.reply = "需要澄清任务。" if turn.status == "clarification_required" else "不支持该任务。"
             else:
+                session.check_turn(turn)
                 bindings = None
                 if session.scene is None and turn.turn_kind not in {"scene_query", "session_control"}:
                     stage = "bootstrap"
@@ -152,6 +160,8 @@ class BrainApplication:
                     report.delivery_status = "session_controlled"
                     report.reply = "会话状态：" + result.session_action.action
         except Exception as exc:
+            if self.config.debug:
+                debug["traceback"] = traceback.format_exc()
             report.error = self._issue(exc, stage)
             report.run_status = "blocked" if report.error.code.startswith(("scene_required", "grounding_", "bootstrap_", "asset_", "holding_", "plan_", "capability_", "dialogue_", "motion_", "execution_pending", "session_paused", "scene_sync_")) else "failed"
             report.reply = report.error.message
@@ -162,12 +172,34 @@ class BrainApplication:
         report.metrics = {"understanding_calls":understanding_calls, "vision_calls":0,
                           "elapsed_seconds":time.monotonic()-started,
                           "model_calls":getattr(self.provider,"calls",[])[calls_start:]}
+        previous_config = getattr(session, "restored_config_fingerprint", None)
+        if previous_config and previous_config != self.config_fingerprint:
+            report.assumptions.append("configuration_changed_since_restore: confirmed scene retained; review deployment metadata")
         record = {"instruction":instruction, "provider":self.config.provider,
+                  "turn_kind":report.turn_kind, "turn_status":report.turn_status,
+                  "config":self.config_summary, "config_fingerprint":self.config_fingerprint,
+                  "restored_config_fingerprint":previous_config,
                   "scene_source":report.scene_source, "before_version":before.scene_version if before else None,
                   "after_version":report.scene_version}
+        secret = self.config.api_key.get_secret_value() if self.config.api_key else None
+        if self.config.debug:
+            debug["model_calls"] = report.metrics["model_calls"]
+            if len(getattr(self.provider, "calls", [])) > calls_start:
+                debug["raw_model_response"] = json.dumps(getattr(self.provider, "last_raw_text", {}), ensure_ascii=False)
+            if turn is not None:
+                debug["brain_turn"] = turn.model_dump(mode="json")
+                if turn.task_intent is not None:
+                    debug["task_intent"] = turn.task_intent.model_dump(mode="json")
+            if result is not None:
+                for key in ("grounded_task", "skill_plan"):
+                    value = getattr(result, key)
+                    if value is not None:
+                        debug[key] = value.model_dump(mode="json")
+        report = BrainRunReport.model_validate(redact(report.model_dump(mode="json"), secret))
         try:
             self._save_session(session_id)
-            return self.writer.publish(report, scene=session.scene, result=result, request_record=record)
+            return self.writer.publish(report, scene=session.scene, result=result,
+                                       request_record=redact(record, secret), debug=redact(debug, secret))
         except Exception as exc:
             report.run_status = "failed"
             report.delivery_status = "none"

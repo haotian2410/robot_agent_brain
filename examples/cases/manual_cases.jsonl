@@ -1,0 +1,3 @@
+{"case_id":"generate","session_group":"apples","instruction":"把两个苹果放进篮子","expected":{"turn_kind":"robot_task","run_status":"success","artifacts":["scene_config","commands"],"assertions":{"scene_source":"generated","executed":false}}}
+{"case_id":"query","session_group":"apples","instruction":"有几个苹果","expected":{"turn_kind":"scene_query","run_status":"success","artifacts":["query_result"],"absent_artifacts":["commands"],"assertions":{"scene_source":"session","reply":"匹配对象共 2 个。"}}}
+{"case_id":"control","session_group":"independent","instruction":"暂停","expected":{"turn_kind":"session_control","run_status":"success","absent_artifacts":["commands","scene_config"],"assertions":{"scene_source":"none"}}}

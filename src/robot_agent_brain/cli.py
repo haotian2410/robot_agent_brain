@@ -20,7 +20,10 @@ def parser():
             cmd.add_argument("instruction")
         if name == "batch":
             cmd.add_argument("--cases", required=True)
-        for option in ("config", "scene", "assets", "defaults", "base-url", "model", "output-dir", "session", "replay-file"):
+        options = ["config", "assets", "defaults", "base-url", "model", "output-dir", "replay-file"]
+        if name != "batch":
+            options.extend(["scene", "session"])
+        for option in options:
             cmd.add_argument("--" + option)
         cmd.add_argument("--provider", choices=["qwen", "replay"])
         cmd.add_argument("--structured-output", choices=["json_schema", "off"])

@@ -1,0 +1,24 @@
+[
+  {
+    "instruction": "把两个苹果放进篮子",
+    "turn": {
+      "status": "accepted", "turn_kind": "robot_task", "instruction": "把两个苹果放进篮子",
+      "task_intent": {
+        "instruction": "把两个苹果放进篮子",
+        "entities": [
+          {"entity_id": "a", "semantic_name": "apple", "category": "fruit", "count": 2, "quantity_mode": "all"},
+          {"entity_id": "b", "semantic_name": "basket", "category": "container"}
+        ],
+        "operations": [{"operation_id": "op-1", "task_type": "pick_and_place", "source": "a", "destination": "b", "placement_target": {"kind": "container_interior", "reference": "b", "relation": "inside"}}]
+      }
+    }
+  },
+  {
+    "instruction": "有几个苹果",
+    "turn": {"status": "accepted", "turn_kind": "scene_query", "instruction": "有几个苹果", "scene_query": {"query_type": "count", "semantic_name": "apple", "category": "fruit"}}
+  },
+  {
+    "instruction": "暂停",
+    "turn": {"status": "accepted", "turn_kind": "session_control", "instruction": "暂停", "session_control": {"action": "pause"}}
+  }
+]

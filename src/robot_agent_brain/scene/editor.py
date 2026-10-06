@@ -42,8 +42,14 @@ class SceneEditor:
                 reference = refs[0]
             if edit.operation == "add" and edit.target:
                 entity = next(e for e in intent.entities if e.entity_id == edit.target)
+                count = entity.count
+                if entity.all_available:
+                    model = AssetResolver(self.assets).resolve(entity).model
+                    count = defaults.initial_counts.get(model.semantic_name) if defaults else None
+                    if count is None:
+                        raise ValueError("bootstrap_quantity_unspecified: " + model.semantic_name)
                 edit = edit.model_copy(update={"semantic_name": entity.semantic_name, "category": entity.category,
-                                               "count": entity.count, "properties": {**edit.properties, **({"color":entity.color} if entity.color else {})}})
+                                               "count": count, "properties": {**edit.properties, **({"color":entity.color} if entity.color else {})}})
             patch = self._edit_one(edit, preview.scene, matches=matches, reference=reference, defaults=defaults)
             preview.apply_patch(patch)
             if edit.operation == "add" and edit.target:
@@ -56,7 +62,7 @@ class SceneEditor:
         if intent.reference and reference is None:
             refs = [o for o in scene.objects if o.scene_object_id == intent.reference]
             if not refs:
-                refs = [o for o in scene.objects if o.semantic_name.casefold() == intent.reference.casefold()]
+                refs = [o for o in scene.objects if self._matches_name(o, intent.reference)]
             if len(refs) != 1:
                 raise ValueError("scene_edit_reference_missing" if not refs else "scene_edit_reference_ambiguous")
             reference = refs[0]
@@ -95,7 +101,7 @@ class SceneEditor:
             if matches is None:
                 matches = [o for o in scene.objects if o.scene_object_id == intent.semantic_name]
                 if not matches:
-                    matches = [o for o in scene.objects if o.semantic_name.casefold() == intent.semantic_name.casefold()
+                    matches = [o for o in scene.objects if self._matches_name(o, intent.semantic_name)
                                and o.category.casefold() == intent.category.casefold()]
                 if len(matches) != intent.count:
                     raise ValueError("scene_edit_object_missing" if len(matches) < intent.count else "scene_edit_object_ambiguous")
@@ -141,6 +147,11 @@ class SceneEditor:
             if obj.scene_object_id in affected and self._collides(obj.transform, obj, candidate):
                 raise ValueError("scene_edit_transform_collision")
         return patch
+
+    @staticmethod
+    def _matches_name(obj, name):
+        aliases = obj.properties.get("aliases", [])
+        return name.casefold() in {value.casefold() for value in [obj.semantic_name, *aliases] if isinstance(value, str)}
 
     def _default_placement(self, obj, scene, model, defaults, operations):
         table = next((o for o in scene.objects if o.scene_object_id == defaults.table_object_id), None)

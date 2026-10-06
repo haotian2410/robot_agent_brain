@@ -18,6 +18,7 @@ class SessionState(BaseModel):
     version: Literal["1.0"] = "1.0"
     session_id: str
     revision: int = Field(ge=1)
+    config_fingerprint: str | None = None
     scene: SceneConfig | None = None
     dialogue: DialogueState = Field(default_factory=DialogueState)
     session_action: Literal["pause", "resume", "close"] | None = None
@@ -96,9 +97,9 @@ class SessionStore:
             raise ValueError("session_state_identity_mismatch")
         return state
 
-    def save(self, session_id, session, *, revision):
+    def save(self, session_id, session, *, revision, config_fingerprint=None):
         """Caller holds lock across restore, processing, and this checkpoint."""
-        state = SessionState(session_id=session_id, revision=revision, scene=session.scene,
+        state = SessionState(session_id=session_id, revision=revision, config_fingerprint=config_fingerprint, scene=session.scene,
             dialogue=session.dialogue, session_action=session.session_action, sync_state=session.sync_state,
             holding_object=session.holding_object, last_exported_request=session.last_exported_request,
             exported_commands=session.exported_commands, dispatched_requests=session.dispatched_requests,

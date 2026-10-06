@@ -1,0 +1,116 @@
+# 手动测试：Brain 原生规划应用
+
+## 环境与模型
+
+在仓库安装 `python -m pip install -e '.[dev]'`。只需要 Python 3.11/3.12、
+Pydantic、httpx、jsonschema；不要为了此应用安装 MuJoCo/Control。
+本地持久化锁目前针对 Linux/POSIX，不宣称支持分布式文件系统。
+
+Qwen 服务必须由部署端先启动。本仓库不负责模型权重下载或服务启动。
+用 `curl --noproxy '*' http://127.0.0.1:8080/v1/models` 确认服务和模型名。
+若 Connection refused，先修复服务，不是更换 prompt 或使用 fake。
+
+```bash
+export ROBOT_BRAIN_MODEL='服务实际返回的模型名'
+export ROBOT_BRAIN_BASE_URL=http://127.0.0.1:8080/v1
+robot-brain run '把两个苹果放进篮子' --provider qwen \
+  --structured-output json_schema --output-dir var/qwen-manual --json
+```
+
+如果代理会截获 localhost，请按自己的部署配置设置 `NO_PROXY=127.0.0.1,localhost`
+或在该命令前清除代理变量。服务不支持 JSON Schema 时可以显式选择
+`--structured-output off`，返回内容仍必须通过契约校验；不会自动降级。
+
+## 常用参数
+
+| 参数 | 含义与可选值 |
+|---|---|
+| `--config PATH` | 配置 JSON；资产/defaults/replay 相对路径以配置文件目录为基准 |
+| `--scene PATH` | run/chat 可选的 Brain 原生场景；不传则生成或恢复，不能传 MJCF |
+| `--assets PATH` | `AssetDocument` JSON；省略使用演示元数据 |
+| `--defaults PATH` | 桌面、工作区、布局次数、默认初始数量配置 |
+| `--provider qwen/replay` | 默认 qwen；Replay 不是任意自然语言解析器 |
+| `--replay-file PATH` | Replay 必填，内容是原始输入和已解析 BrainTurn 列表 |
+| `--base-url URL` | 兼容接口根地址，默认 `http://127.0.0.1:8080/v1` |
+| `--model NAME` | Qwen 服务的模型 ID，必须配置 |
+| `--structured-output json_schema/off` | 默认 json_schema；off 仍校验响应 |
+| `--timeout SECONDS` | 正数，默认 120 秒 |
+| `--output-dir PATH` | 默认 `var/manual-tests`，持久化会话也位于此目录 |
+| `--session ID` | run/chat 恢复同一输出根目录下的会话；只允许安全字母数字、`_`、`-` |
+| `--seed INTEGER` | 初始布局随机种子，默认 0 |
+| `--json` | run 输出一个 JSON；chat 每轮一行 JSON，提示在 stderr |
+| `--debug` | 保存脱敏的本轮原始响应、语义、绑定、技能计划、调用记录及失败 traceback |
+| `batch --cases PATH` | JSONL 用例文件，组内共享会话，独立组互不污染 |
+| `schemas --output-dir PATH` | 不访问模型；输出公开协议 Schema |
+
+同名配置字段可使用 `ROBOT_BRAIN_` 大写环境变量，例如 `ROBOT_BRAIN_TIMEOUT`。
+机器人型号当前通过配置 `robot` 或 `ROBOT_BRAIN_ROBOT` 设置，默认 ur5e；
+CLI 不接收旧系统的 `--planner`、`--viewer-mode`、`--interaction-registry`。
+
+## 不依赖模型服务的完整回放
+
+以下输入必须保持与夹具一致：
+
+```bash
+robot-brain run '把两个苹果放进篮子' --provider replay \
+  --replay-file examples/replay/manual.json --session demo01 \
+  --output-dir var/demo --json
+
+robot-brain run '有几个苹果' --provider replay \
+  --replay-file examples/replay/manual.json --session demo01 \
+  --output-dir var/demo --json
+
+robot-brain chat --provider replay --replay-file examples/replay/manual.json \
+  --session demo01 --output-dir var/demo
+```
+
+首轮应为 `generated`，含两个苹果和一个篮子，输出 commands，但没有真实执行。
+第二轮应为 `session`，回答两个苹果，场景版本不变。chat 可以输入 `/status`、
+`有几个苹果`、`/exit`。已经导出两份计划不会产生假 pending。
+
+需要新场景时使用新的 session ID，或 chat 的 `/load PATH` 显式替换场景。
+真实 pending 时禁止替换。`--scene` 不能隐式覆盖一个已经恢复的会话。
+
+批处理：
+
+```bash
+robot-brain batch --cases examples/cases/manual_cases.jsonl \
+  --provider replay --replay-file examples/replay/manual.json --output-dir var/batch --json
+```
+
+每行包含 `case_id`、`session_group`、`instruction`、可选 `scene` 和 `expected`。
+scene 相对路径以 JSONL 文件目录为基准。expected 支持 turn_kind、run_status、
+artifacts、absent_artifacts 和报告字段的点分路径 assertions。组内失败后后续默认
+skipped，`continue_after_failure=true` 才继续；独立组继续。summary 标记 provider，
+不会把回放结果称为真实模型测试。
+
+## 查看结果与常见阻止原因
+
+查看本轮 `result.json` 的 turn_kind、run_status、reply、artifacts。
+request_record.json 含非秘密配置摘要与指纹；debug 目录含 brain_turn.json、
+task_intent.json、grounded_task.json、skill_plan.json（仅对应阶段完成时）、
+model_calls.json、raw_model_response.txt（本轮实际模型调用时）以及失败 traceback.txt。
+默认不保存原始模型响应；调试文件仍可能含用户任务内容，请按内部数据保管。
+机器人交付需要同目录的 scene_config.json + commands.json；不是取最近一个旧文件。
+scene_query 的回复来自确认快照，导出计划本身不会移动对象。编辑提交成功但保存失败
+会返回 artifact_write_failed，并保留真实 scene_commit_status，不要盲目重复编辑。
+
+常见错误：`scene_required`（无可查询/删除场景），`grounding_missing`（已有场景缺对象），
+`asset_missing/asset_ambiguous`，`bootstrap_quantity_unspecified`（所有对象初始数量未知），
+`bootstrap_layout_failed`（放不下），`motion_distance_evidence_missing`（未说距离/幅度），
+`holding_conflict`，`execution_pending`，`scene_sync_unknown`，`provider_error`，
+`artifact_write_failed`。不能把模型连接失败归因于用户任务不受支持。
+
+run 退出码：0=交付成功，2=澄清/缺事实/能力阻止，3=不支持任务，4=运行失败。
+chat 单轮失败继续交互；EOF、`/exit` 正常退出，Ctrl-C 返回 130。
+batch 返回 4（失败）、2（仅跳过）、0（全部通过）。
+
+## 测试与反馈
+
+`python -m pytest -q brain_tests` 运行单元/回放/CLI/HTTP 注入测试，不要求本地 Qwen。
+`scripts/wheel_smoke.py` 必须用安装 wheel 的新 venv 从仓库外执行；不设置源码 PYTHONPATH。
+
+真实执行集成先调用 `BrainApplication.mark_dispatched(session_id, commands)`，再调用
+`apply_execution_feedback(session_id, feedback, confirmed_scene=..., feedback_source="external")`。
+演示反馈必须显式改为 `feedback_source="simulated"`；提供外部确认的新版本快照，不由
+Brain 从计划猜执行后位姿。详见 contracts.md。CLI 本身没有仿真执行命令。

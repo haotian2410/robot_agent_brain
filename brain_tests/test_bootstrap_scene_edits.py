@@ -48,3 +48,30 @@ def test_no_default_context_does_not_guess_add_position():
         [SceneEditIntent(operation="add", target="a")])
     with pytest.raises(ValueError, match="scene_edit_reference_missing"):
         editor.edit(turn.scene_edit, initial.scene)
+
+
+def test_all_available_add_never_defaults_to_one():
+    turn, initial, editor, defaults = prepare([TaskEntity(entity_id="a", semantic_name="apple", category="fruit",
+                                                        quantity_mode="all", all_available=True)],
+                                             [SceneEditIntent(operation="add", target="a")])
+    with pytest.raises(ValueError, match="bootstrap_quantity_unspecified"):
+        editor.edit(turn.scene_edit, initial.scene, defaults=defaults)
+    defaults.initial_counts["apple"] = 3
+    patch = editor.edit(turn.scene_edit, initial.scene, defaults=defaults)
+    assert len(patch.operations) == 3
+
+
+def test_legacy_reference_add_bootstraps_reference_only():
+    config = BrainConfig()
+    assets, defaults = config.load_assets(), config.load_defaults()
+    turn = BrainTurn(status="accepted", turn_kind="scene_edit", instruction="在苹果右边增加香蕉",
+        scene_edit=SceneEditIntent(operation="add", semantic_name="banana", category="fruit", reference="apple", relation="right_of"))
+    initial = SceneBootstrapper(assets, defaults).prepare(turn, scene_id="s")
+    assert [o.semantic_name for o in initial.scene.objects].count("apple") == 1
+    assert not any(o.semantic_name == "banana" for o in initial.scene.objects)
+    patch = SceneEditor(assets).edit(turn.scene_edit, initial.scene, defaults=defaults)
+    final = SceneManager(initial.scene).apply_patch(patch)
+    assert [o.semantic_name for o in final.objects].count("banana") == 1
+    apple = next(o for o in final.objects if o.semantic_name == "apple")
+    banana = next(o for o in final.objects if o.semantic_name == "banana")
+    assert banana.transform.position[0] > apple.transform.position[0]

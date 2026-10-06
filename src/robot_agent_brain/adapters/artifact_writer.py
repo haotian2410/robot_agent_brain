@@ -32,7 +32,7 @@ class ArtifactWriter:
         if readback != value:
             raise ValueError("artifact_readback_mismatch")
 
-    def publish(self, report, *, scene=None, result=None, request_record=None):
+    def publish(self, report, *, scene=None, result=None, request_record=None, debug=None):
         parent = self.root / safe_identifier(report.session_id)
         parent.mkdir(parents=True, exist_ok=True)
         if parent.resolve().parent != self.root:
@@ -59,6 +59,17 @@ class ArtifactWriter:
                         self._write(staged / (name + ".json"), value.model_dump(mode="json"), type(value).model_json_schema())
                         artifacts[name] = str(destination / (name + ".json"))
             self._write(staged / "request_record.json", request_record or {})
+            if debug:
+                directory = staged / "debug"
+                directory.mkdir()
+                for name, value in debug.items():
+                    if name not in {"brain_turn", "task_intent", "grounded_task", "skill_plan", "model_calls", "raw_model_response", "traceback"}:
+                        raise ValueError("artifact_debug_name_invalid")
+                    if isinstance(value, str):
+                        (directory / (name + ".txt")).write_text(value, encoding="utf-8")
+                    else:
+                        self._write(directory / (name + ".json"), value)
+                artifacts["debug"] = str(destination / "debug")
             published = report.model_copy(update={"artifacts": artifacts})
             self._write(staged / "result.json", published.model_dump(mode="json"), BrainRunReport.model_json_schema())
             staged.rename(destination)

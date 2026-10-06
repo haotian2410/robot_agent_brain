@@ -100,3 +100,13 @@ def test_store_rejects_path_escape_and_symlinks(tmp_path):
     (store.root / "alias").symlink_to(target, target_is_directory=True)
     with pytest.raises(ValueError, match="session_path_escape"):
         store.load("alias")
+
+
+def test_paused_empty_session_does_not_bootstrap_before_refusal(tmp_path):
+    app = application(tmp_path, BrainTurn(status="accepted", turn_kind="session_control", instruction="pause",
+                                         session_control={"action":"pause"}))
+    assert app.handle("pause", session_id="empty-paused").run_status == "success"
+    app.provider.turn = robot()
+    report = app.handle("two apples", session_id="empty-paused")
+    assert report.error.code == "session_paused" and report.run_status == "blocked"
+    assert report.scene_created is False and app.get_session("empty-paused").scene is None
