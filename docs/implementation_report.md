@@ -190,3 +190,13 @@ add motion or reference missing objects. Three existing export fixtures now
 include their actual target objects instead of an empty scene; all original
 wire-format assertions are retained. This is semantic validation, not collision,
 IK or actual execution verification. Quantity expansion still needs final audit.
+
+## Collection pairing regression
+
+Latest suite: **150 passed**. A single pairwise operation with two collection
+roles now expands every corresponding pair instead of retaining only the first.
+Separate scalar-destination operations still allocate distinct source members
+in language order. Incomplete distributed pairing and unequal cardinalities are
+blocked without dropping objects. Existing red-box/blue-box pairing tests remain
+unchanged and pass. Full specification acceptance, packaging and final docs
+remain pending; these local commits have not been pushed.
