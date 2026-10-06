@@ -1,0 +1,11 @@
+[
+  {
+    "instruction":"增加一个苹果",
+    "turn":{
+      "status":"accepted",
+      "turn_kind":"scene_edit",
+      "instruction":"增加一个苹果",
+      "scene_edit":{"operation":"add","semantic_name":"apple","category":"fruit","count":1}
+    }
+  }
+]

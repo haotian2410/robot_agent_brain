@@ -17,6 +17,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8.3,<9"]
 
+[project.scripts]
+robot-brain = "robot_agent_brain.cli:main"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/robot_agent_brain"]
 

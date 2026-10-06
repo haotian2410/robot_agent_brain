@@ -135,5 +135,14 @@ using LOCATE. This implements P03 without silently changing the user task.
 - T11 B01–C03 acceptance matrix and optional real Qwen tests.
 - T12 README/manual/contracts, clean wheel CLI acceptance and CI expansion.
 
-There is not yet a usable `robot-brain` CLI. Brain-native scene/commands formats
+The initial `robot-brain run/chat/schemas` CLI exists; batch and persisted recovery
+are still pending. Brain-native scene/commands formats
 remain distinct from the team's unfinalized components/taskStep interfaces.
+
+## Initial CLI verification
+
+Latest suite: **118 passed**. Four new subprocess tests validate scene-optional
+replay run, clean JSON stdout, exact-input replay refusal and schemas without a
+model. These source-tree tests do NOT constitute wheel outside-source acceptance.
+`--session` currently selects only an in-process session, not disk recovery.
+Real Qwen has not been run; replay fixtures are explicitly labeled.
