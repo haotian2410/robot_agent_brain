@@ -31,7 +31,7 @@ Command:
 /home/cscvlab/miniconda3/envs/robot_agent_integ/bin/python -m pytest -q brain_tests
 ```
 
-Result after query/focus stage: **92 passed**. `git diff --check` passed.
+Result after dispatch/feedback stage: **97 passed**. `git diff --check` passed.
 Installed independent schema validator: jsonschema 4.26.0.
 
 Real Qwen: **not run**. Wheel outside-source acceptance: **not yet run**.
@@ -68,6 +68,15 @@ No frontend/Control integration or robot execution was performed.
   stage alone does not yet make the CLI or all B01–B17 cases usable.
 
 ## Remaining specification work
+
+Session migration: exporting commands now updates `last_exported_request` (and
+legacy `last_request_id`) but does NOT set pending. External integration must call
+`mark_dispatched(commands)` with an unchanged, version-matched plan exported by
+this session. Confirmed holding changes only on validated feedback. Feedback
+without a newer confirmed snapshot marks geometry unknown, including partial or
+failed execution. Source is explicitly `external` or `simulated`. Empty sessions
+support pause/resume/close without constructing a scene. Persistence and full
+feedback/refresh adapter documentation are still pending.
 
 Query/focus stage: `SceneQueryIntent` accepts shared entities/selection relations;
 legacy fields remain supported, mixed selector formats fail explicitly. Query
