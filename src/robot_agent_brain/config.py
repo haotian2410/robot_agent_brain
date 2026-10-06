@@ -5,7 +5,7 @@ import os
 from importlib.resources import files
 from pathlib import Path
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 
 class LayoutDefaults(BaseModel):
@@ -19,6 +19,14 @@ class LayoutDefaults(BaseModel):
     max_attempts: int = Field(default=400, ge=1, le=10000)
     coordinate_convention: Literal["x_right_y_front_z_up"] = "x_right_y_front_z_up"
     initial_counts: dict[str, int] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def valid_workspace(self):
+        if any(a >= b for a, b in zip(self.workspace_min, self.workspace_max)):
+            raise ValueError("workspace bounds must increase")
+        if any(count < 1 for count in self.initial_counts.values()):
+            raise ValueError("initial counts must be positive")
+        return self
 
 
 class BrainConfig(BaseModel):

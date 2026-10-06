@@ -31,7 +31,7 @@ Command:
 /home/cscvlab/miniconda3/envs/robot_agent_integ/bin/python -m pytest -q brain_tests
 ```
 
-Result after configuration/assets stage: **72 passed**. Original tests retained. `git diff --check` passed.
+Result after initial bootstrap stage: **79 passed**. Original tests retained. `git diff --check` passed.
 Installed independent schema validator: jsonschema 4.26.0.
 
 Real Qwen: **not run**. Wheel outside-source acceptance: **not yet run**.
@@ -49,6 +49,23 @@ No frontend/Control integration or robot execution was performed.
   implemented rendering materials. No task objects are instantiated by loading
   these resources. Real asset file errors do not fall back to demo resources.
 - Added `brain_tests/test_config_assets.py` (9 cases). Bootstrap does not yet exist.
+
+## Initial bootstrap stage
+
+- Added pure `SceneBootstrapper.prepare` and `BootstrapResult` with version-scoped
+  generated candidate IDs, assumptions and asset bindings. It neither calls a
+  provider nor writes/loads a platform or executes the task.
+- Generation uses task identities/counts, configured base table and bounded seeded
+  layout; placement goals are not used as initial relations. Initial inside/on
+  geometry is explicitly unsupported until corresponding metadata support exists.
+- Candidate-pool generation still selects through the shared relation resolver;
+  generated binding overrides now validate names/colors/exclusions before use.
+- Editor lifecycle analysis excludes add targets from the initial scene and
+  identifies pre-existing references; pure removal without a scene is blocked.
+- Tests prove two-candidate selection, non-fixed objects, deterministic geometry,
+  no second understanding, explicit unsupported relation/quantity errors.
+- The application/first-add placement-context connection remains pending. This
+  stage alone does not yet make the CLI or all B01–B17 cases usable.
 
 ## Remaining specification work
 

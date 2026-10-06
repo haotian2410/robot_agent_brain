@@ -43,6 +43,9 @@ class SceneGrounder:
                 ids = overrides[entity_id]
                 if not ids or any(i not in by_object for i in ids):
                     raise ValueError("grounding_missing: stale binding")
+                eligible = {o.scene_object_id for o in discover_candidates(entity, scene)}
+                if len(ids) != len(set(ids)) or not set(ids) <= eligible:
+                    raise ValueError("grounding_binding_invalid: " + entity_id)
                 candidates = [by_object[i] for i in ids]
             else:
                 candidates = discover_candidates(entity, scene)
