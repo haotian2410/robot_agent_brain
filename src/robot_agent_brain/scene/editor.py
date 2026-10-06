@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from ..contracts.scene import PatchAction, SceneObject, ScenePatch, ScenePatchOperation, Transform
-from ..contracts.task_intent import PlacementTarget
+from ..contracts.task_intent import PlacementTarget, TaskEntity
+from .asset_resolver import AssetResolver
+import random
 from ..ports.asset_catalog import AssetCatalogPort
 from .scene_layout import SceneLayoutPolicy
 from .transform_editor import translate, rotate
@@ -20,33 +22,36 @@ class SceneEditor:
         self.layout = layout or SceneLayoutPolicy()
         self.motion_policy = MotionPolicy()
 
-    def edit(self, intent, scene, *, dialogue=None) -> ScenePatch:
+    def edit(self, intent, scene, *, dialogue=None, defaults=None, bindings_override=None) -> ScenePatch:
         if not isinstance(intent, SceneEditPlan):
-            return self._edit_one(intent, scene)
+            return self._edit_one(intent, scene, defaults=defaults)
         # Preview every step locally; publish one atomic patch only on success.
         preview = SceneManager(scene)
         operations = []
         selector = SceneObjectSelector()
+        local_bindings = dict(bindings_override or {})
         for edit in intent.operations:
             matches = None
             reference = None
             if edit.target and edit.operation != "add":
-                matches = selector.resolve(edit.target, intent.entities, intent.relations, preview.scene, dialogue)
+                matches = selector.resolve(edit.target, intent.entities, intent.relations, preview.scene, dialogue, local_bindings)
             if edit.reference and edit.target:
-                refs = selector.resolve(edit.reference, intent.entities, intent.relations, preview.scene, dialogue)
+                refs = selector.resolve(edit.reference, intent.entities, intent.relations, preview.scene, dialogue, local_bindings)
                 if len(refs) != 1:
                     raise ValueError("scene_edit_reference_ambiguous")
                 reference = refs[0]
             if edit.operation == "add" and edit.target:
                 entity = next(e for e in intent.entities if e.entity_id == edit.target)
                 edit = edit.model_copy(update={"semantic_name": entity.semantic_name, "category": entity.category,
-                                               "count": entity.count})
-            patch = self._edit_one(edit, preview.scene, matches=matches, reference=reference)
+                                               "count": entity.count, "properties": {**edit.properties, **({"color":entity.color} if entity.color else {})}})
+            patch = self._edit_one(edit, preview.scene, matches=matches, reference=reference, defaults=defaults)
             preview.apply_patch(patch)
+            if edit.operation == "add" and edit.target:
+                local_bindings[edit.target] = [op.scene_object_id for op in patch.operations if op.action == "add"]
             operations.extend(patch.operations)
         return ScenePatch(scene_id=scene.scene_id, base_scene_version=scene.scene_version, operations=operations)
 
-    def _edit_one(self, intent, scene, *, matches=None, reference=None) -> ScenePatch:
+    def _edit_one(self, intent, scene, *, matches=None, reference=None, defaults=None) -> ScenePatch:
         """Resolve names to assets/instances before producing a versioned patch."""
         if intent.reference and reference is None:
             refs = [o for o in scene.objects if o.scene_object_id == intent.reference]
@@ -57,12 +62,14 @@ class SceneEditor:
             reference = refs[0]
         updated_transforms = []
         if intent.operation == "add":
-            models = self.assets.find_models(intent.semantic_name, intent.category)
-            if len(models) != 1:
-                raise ValueError("scene_edit_asset_missing" if not models else "scene_edit_asset_ambiguous")
-            if reference is None:
+            binding = AssetResolver(self.assets).resolve(TaskEntity(entity_id="add", semantic_name=intent.semantic_name,
+                category=intent.category, color=intent.properties.get("color")))
+            model = binding.model
+            for key in intent.properties:
+                if key not in self.assets.metadata.overridable_properties.get(model.asset_id, []) and binding.properties.get(key) != intent.properties[key]:
+                    raise ValueError("asset_property_unsupported: " + key)
+            if reference is None and defaults is None:
                 raise ValueError("scene_edit_reference_missing: specify the initial placement reference")
-            model = models[0]
             used = {o.scene_object_id for o in scene.objects}
             operations = []
             for _ in range(intent.count):
@@ -73,13 +80,16 @@ class SceneEditor:
                 used.add(object_id)
                 patch = self.add_object(
                     scene, object_id, model.asset_id, model.semantic_name, model.category,
-                    relation=PlacementTarget(kind="relative_object", reference=reference.scene_object_id, relation=intent.relation),
+                    relation=PlacementTarget(kind="relative_object", reference=reference.scene_object_id, relation=intent.relation) if reference else None,
                     reference_object=reference,
                 )
                 obj = patch.operations[0].object
-                obj.transform = self._separate(obj, scene, model, extra=updated_transforms)
+                if reference is None:
+                    obj.transform = self._default_placement(obj, scene, model, defaults, operations)
+                else:
+                    obj.transform = self._separate(obj, scene, model, extra=updated_transforms)
                 updated_transforms.append((obj.transform, model))
-                obj.properties.update(intent.properties)
+                obj.properties.update({**binding.properties, **intent.properties, "aliases":[intent.semantic_name]})
                 operations.extend(patch.operations)
         else:
             if matches is None:
@@ -129,6 +139,31 @@ class SceneEditor:
                 if reference is None and intent.operation not in {"translate", "move_relative", "rotate"} and not intent.properties:
                     raise ValueError("scene_edit_update_missing")
         return ScenePatch(scene_id=scene.scene_id, base_scene_version=scene.scene_version, operations=operations)
+
+    def _default_placement(self, obj, scene, model, defaults, operations):
+        table = next((o for o in scene.objects if o.scene_object_id == defaults.table_object_id), None)
+        if table is None:
+            raise ValueError("scene_edit_default_surface_missing")
+        table_model = self.assets.get_model_property(table.asset_id)
+        def vertical_bound(m, upper):
+            if m.aabb_m is not None:
+                return m.aabb_m[5 if upper else 2]
+            if m.asset_id not in self.assets.metadata.center_origin_assets:
+                raise ValueError("bootstrap_origin_metadata_missing")
+            return m.dimensions_m[2] / (2 if upper else -2)
+        z = table.transform.position[2] + vertical_bound(table_model, True) - vertical_bound(model, False)
+        xmin,ymin = defaults.workspace_min
+        xmax,ymax = defaults.workspace_max
+        dx,dy,_ = model.dimensions_m
+        if dx >= xmax-xmin or dy >= ymax-ymin:
+            raise ValueError("bootstrap_layout_failed")
+        candidate_scene = scene.model_copy(update={"objects": [*scene.objects, *[op.object for op in operations if op.action == "add"]]})
+        rng = random.Random(len(candidate_scene.objects))
+        for _ in range(defaults.max_attempts):
+            transform = Transform(position=(rng.uniform(xmin+dx/2,xmax-dx/2), rng.uniform(ymin+dy/2,ymax-dy/2),z))
+            if not self._collides(transform, obj, candidate_scene):
+                return transform
+        raise ValueError("bootstrap_layout_failed")
 
     def _separate(self, obj, scene, model, excluded=None, extra=None):
         excluded = excluded or set()

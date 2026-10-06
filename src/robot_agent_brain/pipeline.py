@@ -90,7 +90,7 @@ class BrainPipeline:
         return turn
 
     def process_turn(self, request_id: str, turn: BrainTurn, scene: SceneConfig | None, *,
-                     dialogue=None, bindings_override=None,
+                     dialogue=None, bindings_override=None, edit_defaults=None,
                      capture: Callable[[], CameraFrame] | None = None,
                      held_object: str | None = None) -> BrainResult:
         """Consume an understood turn without another provider call or normalization."""
@@ -101,7 +101,8 @@ class BrainPipeline:
         if scene is None:
             raise ValueError("scene_required")
         if turn.turn_kind == TurnKind.SCENE_EDIT:
-            patch = self.scene_editor.edit(turn.scene_edit, scene, dialogue=dialogue)
+            patch = self.scene_editor.edit(turn.scene_edit, scene, dialogue=dialogue, defaults=edit_defaults,
+                                           bindings_override=bindings_override)
             deleted = [op.scene_object_id for op in patch.operations if op.action == "remove"]
             focus = list(dict.fromkeys(op.scene_object_id for op in patch.operations if op.action != "remove" and op.scene_object_id not in deleted))
             return BrainResult(turn_kind=turn.turn_kind, scene_patch=patch, focus_object_ids=focus or None, deleted_object_ids=deleted)

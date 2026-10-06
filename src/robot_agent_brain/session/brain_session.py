@@ -85,7 +85,7 @@ class BrainSession:
         turn = self.pipeline.understand_turn(instruction, scene=self.scene, dialogue=self.dialogue)
         return self.process_turn(request_id, turn)
 
-    def process_turn(self, request_id, turn, *, bindings_override=None):
+    def process_turn(self, request_id, turn, *, bindings_override=None, edit_defaults=None):
         if self.session_action == "close":
             raise ValueError("session_closed")
         if self.sync_state != "synchronized" and turn.turn_kind != "session_control":
@@ -96,7 +96,7 @@ class BrainSession:
             raise ValueError("session_paused")
         result = self.pipeline.process_turn(request_id, turn, self.scene,
                                            dialogue=self.dialogue, capture=self.capture,
-                                           held_object=self.holding_object, bindings_override=bindings_override)
+                                           held_object=self.holding_object, bindings_override=bindings_override, edit_defaults=edit_defaults)
         if self.session_action == "pause":
             if result.session_action is None or result.session_action.action not in {"resume", "close"}:
                 raise ValueError("session_paused")

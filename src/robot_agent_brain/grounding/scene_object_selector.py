@@ -5,7 +5,7 @@ from .scene_grounder import SceneGrounder
 class SceneObjectSelector:
     """Scene edits use robot grounding, including relation and dialogue rules."""
 
-    def resolve(self, target, entities, relations, scene, dialogue=None):
+    def resolve(self, target, entities, relations, scene, dialogue=None, bindings_override=None):
         needed = {target}
         while True:
             refs = {rel.reference for rel in relations
@@ -18,7 +18,10 @@ class SceneObjectSelector:
             entities=[e for e in entities if e.entity_id in needed], operations=[],
             spatial_relations=[r for r in relations if r.scope == "selection" and r.subject in needed],
         )
-        overrides = dialogue.bindings(intent, scene) if dialogue else {}
+        local = {key: value for key, value in (bindings_override or {}).items() if key in needed}
+        dialogue_intent = intent.model_copy(update={"entities": [e for e in intent.entities if e.entity_id not in local]})
+        overrides = dialogue.bindings(dialogue_intent, scene) if dialogue else {}
+        overrides.update(local)
         task = SceneGrounder().ground(intent, scene, overrides)
         ids = next(e.scene_object_ids for e in task.entities if e.entity_id == target)
         by_id = {obj.scene_object_id: obj for obj in scene.objects}

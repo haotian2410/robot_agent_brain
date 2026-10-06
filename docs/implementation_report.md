@@ -31,7 +31,7 @@ Command:
 /home/cscvlab/miniconda3/envs/robot_agent_integ/bin/python -m pytest -q brain_tests
 ```
 
-Result after codec/artifact foundation: **107 passed**. `git diff --check` passed.
+Result after first-add editor integration: **110 passed**. `git diff --check` passed.
 Installed independent schema validator: jsonschema 4.26.0.
 
 Real Qwen: **not run**. Wheel outside-source acceptance: **not yet run**.
@@ -68,6 +68,14 @@ No frontend/Control integration or robot execution was performed.
   stage alone does not yet make the CLI or all B01–B17 cases usable.
 
 ## Remaining specification work
+
+First-add integration: explicit `edit_defaults` is passed through Session/Pipeline;
+the editor does not infer initialization from version zero. Add uses asset color
+declarations and preserves aliases. New instance bindings are held within the
+ordered preview for add-then-move, before dialogue bindings are considered.
+Tests cover multiple add counts, same-turn stable identity and refusal to invent
+a placement when no default context is supplied. Application wiring, richer
+layout constraints and legacy bootstrap-reference adaptation remain pending.
 
 Artifact foundation: added BrainIssue/BrainError, BrainRunReport, strict flat scene
 codec, and LocalScenePlatform (capture explicitly unsupported). ArtifactWriter
