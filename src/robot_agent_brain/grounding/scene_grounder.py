@@ -49,6 +49,8 @@ class SceneGrounder:
                 candidates = [by_object[i] for i in ids]
             else:
                 candidates = discover_candidates(entity, scene)
+            if entity.quantity_mode == QuantityMode.CANDIDATE_POOL and len(candidates) != entity.count:
+                raise ValueError("grounding_candidate_pool_count_mismatch: " + entity_id)
             relations = []
             for rel in intent.spatial_relations:
                 if rel.scope != "selection" or rel.subject != entity_id:

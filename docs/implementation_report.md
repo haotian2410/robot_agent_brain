@@ -298,3 +298,21 @@ editor outcome. Restored asset IDs are checked against the configured catalog;
 Application lock/restore failures return a complete non-delivery report with
 zero model calls instead of escaping before report construction. Regression
 tests cover corrupt checkpoints and concurrent writer refusal.
+
+## Requirement-indexed acceptance expansion
+
+Latest suite: **200 passed**. Added `docs/acceptance_matrix.md`, mapping every
+B01–C03 behavioral item and T01–T12 work item to concrete evidence and identifying
+remaining final gates. New tests check initial non-overlap rather than relying
+only on absence of containment properties, first-turn movement exactly once,
+invalid upload refusal before model calls, bounded workspace failure, world/local
+rotation numerical results, query snapshot preservation, and success-then-failure
+artifact isolation.
+
+Grounding now validates candidate-pool cardinality before relation filtering, so
+an override cannot shrink two candidates to the wrong single object and then
+claim it is rightmost. Collection editing followed by plural editing preserves
+both IDs. Feedback duplicate/foreign IDs, incomplete success, unknown holding and
+old confirmed snapshots are tested as no-state-change failures. Local CLI vision
+configuration is rejected without a rendering/detection adapter, rather than
+ignored or supplied mock image data. Real Qwen remains untested/unavailable.

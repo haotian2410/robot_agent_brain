@@ -46,6 +46,8 @@ robot-brain run '把两个苹果放进篮子' --provider qwen \
 同名配置字段可使用 `ROBOT_BRAIN_` 大写环境变量，例如 `ROBOT_BRAIN_TIMEOUT`。
 机器人型号当前通过配置 `robot` 或 `ROBOT_BRAIN_ROBOT` 设置，默认 ur5e；
 CLI 不接收旧系统的 `--planner`、`--viewer-mode`、`--interaction-registry`。
+`vision` 默认 false。LocalScenePlatform 没有图像；将 `ROBOT_BRAIN_VISION=true`
+用于本地 CLI 会明确拒绝，不会给 VLM 传假图片。真实视觉需通过 Python 注入渲染平台。
 
 ## 不依赖模型服务的完整回放
 

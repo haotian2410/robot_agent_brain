@@ -1,6 +1,6 @@
 import pytest
 from robot_agent_brain.contracts.scene import SceneConfig, SceneObject, Transform
-from robot_agent_brain.contracts.turn import SceneQueryIntent, BrainTurn, SceneEditIntent
+from robot_agent_brain.contracts.turn import SceneQueryIntent, BrainTurn, SceneEditIntent, SceneEditPlan
 from robot_agent_brain.contracts.task_intent import TaskEntity
 from robot_agent_brain.scene.query import SceneQueryEngine
 from robot_agent_brain.session.dialogue_state import DialogueState
@@ -66,3 +66,22 @@ def test_collection_query_preserves_plural_focus():
     with pytest.raises(ValueError, match="dialogue_reference_ambiguous"):
         dialogue.contextualize("抓起它", scene())
     assert "dialogue_ref_set" in dialogue.contextualize("移动它们", scene())
+
+
+def test_edit_collection_then_plural_edit_keeps_same_instances():
+    session = BrainSession(scene(), BrainPipeline(None, BrainConfig().load_assets()), MockScenePlatform())
+    first = BrainTurn(status="accepted", turn_kind="scene_edit", instruction="两个苹果右移五厘米",
+        scene_edit=SceneEditPlan(entities=[TaskEntity(entity_id="apples", semantic_name="apple", category="fruit", count=2, quantity_mode="all")],
+            operations=[SceneEditIntent(operation="translate", target="apples", direction="right", distance_m=.05)]))
+    session.process_turn("first", first)
+    assert session.dialogue.last_entity_ids == ["a", "b"]
+    assert "dialogue_ref_set" in session.dialogue.contextualize("把它们向前移动五厘米", session.scene)
+    second = first.model_copy(deep=True)
+    second.scene_edit.entities[0].dialogue_ref_set = True
+    second.scene_edit.operations[0].direction = "front"
+    result = session.process_turn("second", second)
+    assert [op.scene_object_id for op in result.scene_patch.operations] == ["a", "b"]
+    assert [o.transform.position for o in session.scene.objects] == [(-.25,.05,0),(.35,.05,0)]
+    assert session.scene.scene_version == 2
+    with pytest.raises(ValueError, match="dialogue_reference_ambiguous"):
+        session.dialogue.contextualize("把它右移五厘米", session.scene)

@@ -1,4 +1,5 @@
 import json
+import pytest
 from pathlib import Path
 from robot_agent_brain.application import BrainApplication
 from robot_agent_brain.config import BrainConfig
@@ -74,3 +75,9 @@ def test_platform_commit_survives_publication_failure(tmp_path, monkeypatch):
     assert report.error.code == "artifact_write_failed"
     assert report.scene_commit_status == "committed" and report.artifacts == {}
     assert len(app.sessions[report.session_id].scene.objects) == 2
+
+
+def test_local_platform_does_not_silently_enable_fake_vision(tmp_path):
+    from robot_agent_brain.errors import BrainError
+    with pytest.raises(BrainError, match="Vision requires"):
+        BrainApplication(BrainConfig(provider="replay", vision=True, output_dir=str(tmp_path)), provider=Provider(robot()))

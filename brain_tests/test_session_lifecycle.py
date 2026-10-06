@@ -82,3 +82,27 @@ def test_empty_session_control_no_scene_and_close_while_paused():
             instruction=action, session_control=SessionControlIntent(action=action)))
         assert result.session_action.action == action
         assert value.scene is None
+
+
+@pytest.mark.parametrize("invalid", ["duplicate", "foreign", "incomplete", "holding", "old_snapshot"])
+def test_invalid_feedback_is_transactional(invalid):
+    value = session()
+    commands = value.process_turn("r", turn()).commands
+    value.mark_dispatched(commands)
+    incoming = feedback(commands)
+    snapshot = value.scene.model_copy(update={"scene_version":1})
+    if invalid == "duplicate":
+        incoming.commands.append(incoming.commands[0])
+    elif invalid == "foreign":
+        incoming.commands[0].command_id = "not-declared"
+    elif invalid == "incomplete":
+        incoming.commands.pop()
+    elif invalid == "holding":
+        incoming.holding_object = "not-present"
+    else:
+        snapshot.scene_version = 0
+    before = value.scene.model_dump()
+    with pytest.raises(ValueError):
+        value.apply_execution_feedback(incoming, confirmed_scene=snapshot)
+    assert value.pending_execution_request == "r" and value.holding_object is None
+    assert value.sync_state == "synchronized" and value.scene.model_dump() == before

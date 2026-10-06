@@ -33,7 +33,10 @@ class BrainApplication:
                 api_key=self.config.api_key.get_secret_value() if self.config.api_key else "",
                 timeout=self.config.timeout, structured_output=self.config.structured_output)
         self.provider = provider
-        self.pipeline = BrainPipeline(provider, self.assets)
+        if self.config.vision and (platform_factory is LocalScenePlatform or not hasattr(provider, "detect")):
+            raise BrainError("vision_requires_rendering_platform", "configuration",
+                             "Vision requires an explicit rendering platform and a detection provider; LocalScenePlatform has no images")
+        self.pipeline = BrainPipeline(provider, self.assets, vision_provider=provider if self.config.vision else None)
         self.bootstrapper = SceneBootstrapper(self.assets, self.defaults, robot=self.config.robot, seed=self.config.seed)
         self.codec = SceneFileCodec(self.assets)
         self.writer = ArtifactWriter(self.config.output_dir)
@@ -186,9 +189,11 @@ class BrainApplication:
                 report.scene_commit_status = "unknown"
         if session.scene is not None:
             report.scene_id, report.scene_version = session.scene.scene_id, session.scene.scene_version
-        report.metrics = {"understanding_calls":understanding_calls, "vision_calls":0,
+        current_calls = getattr(self.provider,"calls",[])[calls_start:]
+        report.metrics = {"understanding_calls":understanding_calls,
+                          "vision_calls":sum(call.get("stage") == "vision_grounding" for call in current_calls),
                           "elapsed_seconds":time.monotonic()-started,
-                          "model_calls":getattr(self.provider,"calls",[])[calls_start:]}
+                          "model_calls":current_calls}
         previous_config = getattr(session, "restored_config_fingerprint", None)
         if previous_config and previous_config != self.config_fingerprint:
             report.assumptions.append("configuration_changed_since_restore: confirmed scene retained; review deployment metadata")
