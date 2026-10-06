@@ -44,7 +44,8 @@ def test_grasp_commands_have_regions_but_no_physical_pose():
         operations=[Operation(operation_id="op-1", task_type=TaskType.GRASP, target="apple")],
     )
     plan = RecipePlanner().plan(task)
-    commands = CommandExporter().export("req-001", task, plan, SceneConfig(scene_id="scene", scene_version=0, robot="ur5e"))
+    commands = CommandExporter().export("req-001", task, plan, SceneConfig(scene_id="scene", scene_version=0, robot="ur5e", objects=[
+        SceneObject(scene_object_id="apple_01", asset_id="apple_basic", semantic_name="apple", category="fruit")]))
     assert [item.skill_name for item in commands.commands] == ["locate", "move", "grasp"]
     assert commands.commands[1].parameters["region"] == "grasp_region"
     assert all("pose" not in item.parameters and "anchor" not in item.parameters for item in commands.commands)
@@ -62,7 +63,8 @@ def test_relative_placement_exports_semantics_without_xyz_or_anchor():
             placement_target=PlacementTarget(kind="relative_object", reference="apple", relation="near"),
         )],
     )
-    commands = CommandExporter().export("req-002", task, RecipePlanner().plan(task), SceneConfig(scene_id="scene", scene_version=4, robot="ur5e"))
+    commands = CommandExporter().export("req-002", task, RecipePlanner().plan(task), SceneConfig(scene_id="scene", scene_version=4, robot="ur5e", objects=[
+        SceneObject(scene_object_id=e.scene_object_id, asset_id=e.asset_id, semantic_name=e.semantic_name, category=e.category) for e in task.entities]))
     assert commands.operations[0].placement_target.relation == "near"
     assert commands.operations[0].placement_target.reference == "apple_01"
     payload = commands.model_dump_json()

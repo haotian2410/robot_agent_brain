@@ -5,12 +5,14 @@ from ..contracts.grounded_task import GroundedTask
 from ..contracts.scene import SceneConfig
 from ..contracts.skill_plan import SkillName, SkillPlan
 from ..contracts.task_intent import TaskType
+from .plan_validator import PlanValidator
 
 
 class CommandExporter:
     """Translate semantic skill steps to commands v2 without physical compilation."""
 
-    def export(self, request_id: str, task: GroundedTask, plan: SkillPlan, scene: SceneConfig) -> CommandsFile:
+    def export(self, request_id: str, task: GroundedTask, plan: SkillPlan, scene: SceneConfig, *, held_object=None) -> CommandsFile:
+        PlanValidator().validate(task, plan, scene, held_object=held_object)
         bindings = {item.entity_id: item.scene_object_ids for item in task.entities}
         if any(len(ids) != 1 for ids in bindings.values()):
             raise ValueError("command_export_requires_concrete_entity")

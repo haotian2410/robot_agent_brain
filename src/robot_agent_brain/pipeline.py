@@ -131,7 +131,7 @@ class BrainPipeline:
         grounded = self.expander.expand(grounded, scene)
         grounded = self.motion.resolve(grounded)
         plan = self.planner.plan(grounded, held_object=held_object)
-        commands = self.exporter.export(request_id, grounded, plan, scene)
+        commands = self.exporter.export(request_id, grounded, plan, scene, held_object=held_object)
         by_entity = {e.entity_id:e.scene_object_id for e in grounded.entities}
         focus = list(dict.fromkeys(by_entity[op.source or op.target] for op in grounded.operations))
         return BrainResult(task_intent=intent, grounded_task=grounded, skill_plan=plan, commands=commands, focus_object_ids=focus)

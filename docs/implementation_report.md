@@ -178,3 +178,15 @@ before parsing; normal metrics do not contain raw response bodies. API-key text
 is redacted from diagnostic messages. Twelve tests cover success, malformed JSON,
 empty/non-text choices, truncation, validation, HTTP errors, timeout and per-turn
 log slicing. They use MockTransport, **not a real Qwen service**.
+
+## Independent plan gate
+
+Latest suite: **147 passed**. `PlanValidator` now guards `CommandExporter` itself,
+including direct callers: concrete existing targets, scene version, operation
+coverage/order/dependencies, effect counts, grasp/move/release preconditions and
+placement roles. Confirmed holding is an explicit optional exporter input; plans
+do not update it. Tests mutate otherwise valid plans to remove steps, alter roles,
+add motion or reference missing objects. Three existing export fixtures now
+include their actual target objects instead of an empty scene; all original
+wire-format assertions are retained. This is semantic validation, not collision,
+IK or actual execution verification. Quantity expansion still needs final audit.

@@ -67,7 +67,8 @@ def test_task_expansion_produces_concrete_commands_for_all_members():
     # Keep the original concrete-target export coverage with a supported action.
     concrete = concrete.model_copy(update={"operations": [
         op.model_copy(update={"task_type": TaskType.LOCATE}) for op in concrete.operations]})
-    commands = CommandExporter().export("r", concrete, RecipePlanner().plan(concrete), SceneConfig(scene_id="s", robot="ur5e"))
+    commands = CommandExporter().export("r", concrete, RecipePlanner().plan(concrete), SceneConfig(scene_id="s", robot="ur5e", objects=[
+        SceneObject(scene_object_id=e.scene_object_id, asset_id=e.asset_id, semantic_name=e.semantic_name, category=e.category) for e in concrete.entities]))
     assert [item.parameters["target"] for item in commands.commands] == ["apple_01", "apple_02"]
 
 
