@@ -31,7 +31,7 @@ Command:
 /home/cscvlab/miniconda3/envs/robot_agent_integ/bin/python -m pytest -q brain_tests
 ```
 
-Result after first-add editor integration: **110 passed**. `git diff --check` passed.
+Result after application integration: **114 passed**. `git diff --check` passed.
 Installed independent schema validator: jsonschema 4.26.0.
 
 Real Qwen: **not run**. Wheel outside-source acceptance: **not yet run**.
@@ -68,6 +68,14 @@ No frontend/Control integration or robot execution was performed.
   stage alone does not yet make the CLI or all B01–B17 cases usable.
 
 ## Remaining specification work
+
+Application stage: `BrainApplication.handle` connects one understanding call to
+import/generated/session scene routes, parsed processing, report and validated
+artifact publication. Tests inject a deterministic Provider (not real Qwen) and
+verify matching snapshot/commands, repeated export, no-scene query versus uploaded
+empty scene, missing objects not generated, and committed scene retained on disk
+failure. CLI, persistence, richer error mapping/debug redaction, configuration
+fingerprints and final failure matrix are still pending.
 
 First-add integration: explicit `edit_defaults` is passed through Session/Pipeline;
 the editor does not infer initialization from version zero. Add uses asset color
