@@ -31,7 +31,7 @@ Command:
 /home/cscvlab/miniconda3/envs/robot_agent_integ/bin/python -m pytest -q brain_tests
 ```
 
-Result after scene invariants/recipe state stage: **88 passed**. `git diff --check` passed.
+Result after query/focus stage: **92 passed**. `git diff --check` passed.
 Installed independent schema validator: jsonschema 4.26.0.
 
 Real Qwen: **not run**. Wheel outside-source acceptance: **not yet run**.
@@ -68,6 +68,14 @@ No frontend/Control integration or robot execution was performed.
   stage alone does not yet make the CLI or all B01–B17 cases usable.
 
 ## Remaining specification work
+
+Query/focus stage: `SceneQueryIntent` accepts shared entities/selection relations;
+legacy fields remain supported, mixed selector formats fail explicitly. Query
+aggregation permits zero/multiple matches and returns matched IDs for every kind.
+Pipeline exposes focus/deleted IDs and dialogue observes successful edit/query
+results as well as robot tasks. Added `test_query_focus.py` for color, empty/no
+scene distinction, edit/query/delete focus and singular/plural ambiguity.
+Same-turn add identity and query Prompt examples remain to be integrated.
 
 Latest foundation fixes: SceneManager revalidates incoming patches and complete
 candidate scenes before committing. Retired IDs cannot be revived within or

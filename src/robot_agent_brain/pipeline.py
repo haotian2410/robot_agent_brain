@@ -33,6 +33,8 @@ class BrainResult(BaseModel):
     scene_patch: ScenePatch | None = None
     scene_query_result: SceneQueryResult | None = None
     session_action: SessionControlIntent | None = None
+    focus_object_ids: list[str] | None = None
+    deleted_object_ids: list[str] = Field(default_factory=list)
 
     @property
     def intent(self):
@@ -99,9 +101,14 @@ class BrainPipeline:
         if scene is None:
             raise ValueError("scene_required")
         if turn.turn_kind == TurnKind.SCENE_EDIT:
-            return BrainResult(turn_kind=turn.turn_kind, scene_patch=self.scene_editor.edit(turn.scene_edit, scene, dialogue=dialogue))
+            patch = self.scene_editor.edit(turn.scene_edit, scene, dialogue=dialogue)
+            deleted = [op.scene_object_id for op in patch.operations if op.action == "remove"]
+            focus = list(dict.fromkeys(op.scene_object_id for op in patch.operations if op.action != "remove" and op.scene_object_id not in deleted))
+            return BrainResult(turn_kind=turn.turn_kind, scene_patch=patch, focus_object_ids=focus or None, deleted_object_ids=deleted)
         if turn.turn_kind == TurnKind.SCENE_QUERY:
-            return BrainResult(turn_kind=turn.turn_kind, scene_query_result=SceneQueryEngine().query(turn.scene_query, scene))
+            query = SceneQueryEngine().query(turn.scene_query, scene, dialogue)
+            explicit = any(getattr(turn.scene_query, key) is not None for key in ("target", "semantic_name", "category", "referent_scene_object_id"))
+            return BrainResult(turn_kind=turn.turn_kind, scene_query_result=query, focus_object_ids=query.object_ids if explicit else None)
         intent = turn.task_intent
         overrides = dialogue.bindings(intent, scene) if dialogue else {}
         for entity_id, ids in (bindings_override or {}).items():
@@ -124,7 +131,9 @@ class BrainPipeline:
         grounded = self.motion.resolve(grounded)
         plan = self.planner.plan(grounded, held_object=held_object)
         commands = self.exporter.export(request_id, grounded, plan, scene)
-        return BrainResult(task_intent=intent, grounded_task=grounded, skill_plan=plan, commands=commands)
+        by_entity = {e.entity_id:e.scene_object_id for e in grounded.entities}
+        focus = list(dict.fromkeys(by_entity[op.source or op.target] for op in grounded.operations))
+        return BrainResult(task_intent=intent, grounded_task=grounded, skill_plan=plan, commands=commands, focus_object_ids=focus)
 
     def run(self, request_id: str, instruction: str, scene: SceneConfig, *,
             dialogue=None, capture: Callable[[], CameraFrame] | None = None,

@@ -96,6 +96,23 @@ class SceneQueryIntent(BaseModel):
     semantic_name: str | None = None
     category: str | None = None
     referent_scene_object_id: str | None = None
+    entities: list[TaskEntity] = Field(default_factory=list)
+    relations: list[SpatialRelation] = Field(default_factory=list)
+    target: str | None = None
+
+    @model_validator(mode="after")
+    def query_selectors(self):
+        if self.target is not None:
+            if any(value is not None for value in (self.semantic_name, self.category, self.referent_scene_object_id)):
+                raise ValueError("query_selector_formats_conflict")
+            TaskIntent(instruction="query", entities=self.entities, operations=[], spatial_relations=self.relations)
+            if self.target not in {e.entity_id for e in self.entities}:
+                raise ValueError("query_target_missing")
+            if any(r.scope != "selection" for r in self.relations):
+                raise ValueError("query_requires_selection_relations")
+        elif self.entities or self.relations:
+            raise ValueError("query_target_missing")
+        return self
 
 class SessionControlIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")

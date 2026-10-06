@@ -45,6 +45,18 @@ class DialogueState(BaseModel):
         return result
 
     def observe(self, result):
+        if result.status != "accepted":
+            return
+        deleted = set(result.deleted_object_ids)
+        if deleted:
+            ids = [i for i in (self.last_entity_ids or ([self.last_entity_id] if self.last_entity_id else [])) if i not in deleted]
+            self.last_entity_ids = ids
+            self.last_entity_id = ids[0] if len(ids) == 1 else None
+        if result.focus_object_ids is not None:
+            ids = list(dict.fromkeys(i for i in result.focus_object_ids if i not in deleted))
+            self.last_entity_ids = ids
+            self.last_entity_id = ids[0] if len(ids) == 1 else None
+            return
         if result.grounded_task is None:
             return
         by_id = {e.entity_id: e for e in result.grounded_task.entities}
