@@ -4,6 +4,7 @@ from ..contracts.scene import PatchAction, SceneObject, ScenePatch, ScenePatchOp
 from ..contracts.task_intent import PlacementTarget, TaskEntity
 from .asset_resolver import AssetResolver
 import random
+from dataclasses import dataclass, field
 from ..ports.asset_catalog import AssetCatalogPort
 from .scene_layout import SceneLayoutPolicy
 from .transform_editor import translate, rotate
@@ -12,6 +13,15 @@ from ..contracts.turn import SceneEditPlan
 from ..grounding.scene_object_selector import SceneObjectSelector
 from .scene_manager import SceneManager
 from .geometry import world_extents
+
+
+@dataclass
+class SceneEditResult:
+    patch: ScenePatch
+    focus_object_ids: list[str] = field(default_factory=list)
+    created_object_ids: list[str] = field(default_factory=list)
+    deleted_object_ids: list[str] = field(default_factory=list)
+    entity_bindings: dict[str, list[str]] = field(default_factory=dict)
 
 
 class SceneEditor:
@@ -23,8 +33,14 @@ class SceneEditor:
         self.motion_policy = MotionPolicy()
 
     def edit(self, intent, scene, *, dialogue=None, defaults=None, bindings_override=None) -> ScenePatch:
+        """Compatibility entry point for callers consuming only the patch."""
+        return self.edit_result(intent, scene, dialogue=dialogue, defaults=defaults,
+                                bindings_override=bindings_override).patch
+
+    def edit_result(self, intent, scene, *, dialogue=None, defaults=None, bindings_override=None) -> SceneEditResult:
         if not isinstance(intent, SceneEditPlan):
-            return self._edit_one(intent, scene, defaults=defaults)
+            patch = self._edit_one(intent, scene, defaults=defaults)
+            return self._result(patch, {})
         # Preview every step locally; publish one atomic patch only on success.
         preview = SceneManager(scene)
         operations = []
@@ -55,7 +71,19 @@ class SceneEditor:
             if edit.operation == "add" and edit.target:
                 local_bindings[edit.target] = [op.scene_object_id for op in patch.operations if op.action == "add"]
             operations.extend(patch.operations)
-        return ScenePatch(scene_id=scene.scene_id, base_scene_version=scene.scene_version, operations=operations)
+        patch = ScenePatch(scene_id=scene.scene_id, base_scene_version=scene.scene_version, operations=operations)
+        return self._result(patch, local_bindings)
+
+    @staticmethod
+    def _result(patch, bindings):
+        # These operations are emitted only for each edit's semantic target;
+        # references are never mutated or selected as focus by the editor.
+        created = list(dict.fromkeys(op.scene_object_id for op in patch.operations if op.action == PatchAction.ADD))
+        deleted = list(dict.fromkeys(op.scene_object_id for op in patch.operations if op.action == PatchAction.REMOVE))
+        focus = list(dict.fromkeys(op.scene_object_id for op in patch.operations
+                                  if op.action != PatchAction.REMOVE and op.scene_object_id not in deleted))
+        live_bindings = {key:[i for i in ids if i not in deleted] for key,ids in bindings.items()}
+        return SceneEditResult(patch, focus, created, deleted, live_bindings)
 
     def _edit_one(self, intent, scene, *, matches=None, reference=None, defaults=None) -> ScenePatch:
         """Resolve names to assets/instances before producing a versioned patch."""
@@ -93,7 +121,8 @@ class SceneEditor:
                 if reference is None:
                     obj.transform = self._default_placement(obj, scene, model, defaults, operations)
                 else:
-                    obj.transform = self._separate(obj, scene, model, extra=updated_transforms)
+                    obj.transform = self._separate(obj, scene, model, extra=updated_transforms,
+                                                   defaults=defaults, relation=intent.relation)
                 updated_transforms.append((obj.transform, model))
                 obj.properties.update({**binding.properties, **intent.properties, "aliases":[intent.semantic_name]})
                 operations.extend(patch.operations)
@@ -178,26 +207,36 @@ class SceneEditor:
                 return transform
         raise ValueError("bootstrap_layout_failed")
 
-    def _separate(self, obj, scene, model, excluded=None, extra=None):
+    def _separate(self, obj, scene, model, excluded=None, extra=None, *, defaults=None, relation=None):
         excluded = excluded or set()
         x, y, z = obj.transform.position
         candidates = [(o.transform, self.assets.get_model_property(o.asset_id), o.transform.scale)
                       for o in scene.objects if o.scene_object_id not in excluded]
         candidates += [(transform, other, transform.scale) for transform, other in (extra or [])]
-        for _ in range(len(candidates) + 1):
-            changed = False
+        sx, sy, sz = world_extents(model.dimensions_m, obj.transform)
+        # Search perpendicular to the specified direction. Never repair a
+        # collision by reversing the requested front/behind/left/right relation.
+        axis = 0 if relation in {"front_of", "behind"} else 1
+        spacing = (sx if axis == 0 else sy) + self.layout.clearance_m
+        limit = defaults.max_attempts if defaults else 2 * len(candidates) + 3
+        for attempt in range(limit):
+            offset = 0 if attempt == 0 else ((attempt + 1) // 2) * spacing * (1 if attempt % 2 else -1)
+            cx, cy = (x + offset, y) if axis == 0 else (x, y + offset)
+            if defaults and not (defaults.workspace_min[0] <= cx-sx/2 and cx+sx/2 <= defaults.workspace_max[0]
+                                 and defaults.workspace_min[1] <= cy-sy/2 and cy+sy/2 <= defaults.workspace_max[1]):
+                continue
+            collision = False
             for other_transform, other, other_scale in candidates:
                 ox, oy, oz = other_transform.position
-                sx, sy, sz = world_extents(model.dimensions_m, obj.transform)
                 osx, osy, osz = world_extents(other.dimensions_m, other_transform)
-                if (abs(x - ox) < (sx + osx) / 2 + self.layout.clearance_m
-                        and abs(y - oy) < (sy + osy) / 2 + self.layout.clearance_m
-                        and abs(z - oz) < (sz + osz) / 2 + self.layout.clearance_m):
-                    y = oy + (sy + osy) / 2 + self.layout.clearance_m
-                    changed = True
-            if not changed:
-                break
-        return Transform(position=(x, y, z), quaternion_xyzw=obj.transform.quaternion_xyzw, scale=obj.transform.scale)
+                if (abs(cx - ox) < (sx + osx) / 2 + self.layout.clearance_m
+                        and abs(cy - oy) < (sy + osy) / 2 + self.layout.clearance_m
+                        and abs(z - oz) < (sz + osz) / 2 - 1e-9):
+                    collision = True
+                    break
+            if not collision:
+                return Transform(position=(cx, cy, z), quaternion_xyzw=obj.transform.quaternion_xyzw, scale=obj.transform.scale)
+        raise ValueError("bootstrap_layout_failed" if defaults else "scene_edit_layout_collision")
 
     def _collides(self, transform, obj, scene):
         model = self.assets.get_model_property(obj.asset_id)

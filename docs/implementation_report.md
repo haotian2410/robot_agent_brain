@@ -277,3 +277,24 @@ missing features. Final audit/document consolidation and final-revision wheel
 rebuild remain required. Remaining risks to audit include bounded relative-add
 layout, full schema edge cases, restore metadata compatibility, failure-state
 reporting and acceptance coverage against every numbered specification item.
+
+## Layout and restore edge audit
+
+Latest suite: **181 passed**. Relative add now uses a bounded perpendicular
+search, preserving the requested directional relation and configured initial
+workspace bounds. Failed placement does not shrink counts or mutate the source
+scene. Supporting surface contact is not treated as clearance penetration.
+`SceneConfig.schema_version` is now a Literal 1.0; recursive finite-JSON checks
+reject NaN/Infinity in nested scene properties before platform commit.
+
+Numeric wire tests independently reject non-JSON NaN/Infinity at decoding, then
+use the public JSON Schema for JSON-domain values. Python's permissive default
+JSON decoder is not evidence that those tokens are valid JSON; no claim is made
+that a standard schema alone defines behavior on Python NaN objects.
+
+Added `SceneEditResult` with patch, focus, created/deleted IDs and local bindings;
+the legacy `edit()` method still returns its patch. Pipeline consumes the explicit
+editor outcome. Restored asset IDs are checked against the configured catalog;
+Application lock/restore failures return a complete non-delivery report with
+zero model calls instead of escaping before report construction. Regression
+tests cover corrupt checkpoints and concurrent writer refusal.

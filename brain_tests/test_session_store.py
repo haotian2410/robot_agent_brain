@@ -88,6 +88,9 @@ def test_corrupt_state_never_silently_starts_fresh(tmp_path):
     path.write_text(json.dumps(payload))
     with pytest.raises(ValueError, match="session_state_unknown_object"):
         application(tmp_path).get_session("broken")
+    report = application(tmp_path).handle("two apples", session_id="broken")
+    assert report.run_status == "failed" and report.artifacts == {}
+    assert report.metrics["understanding_calls"] == 0
 
 
 def test_store_rejects_path_escape_and_symlinks(tmp_path):
@@ -110,3 +113,11 @@ def test_paused_empty_session_does_not_bootstrap_before_refusal(tmp_path):
     report = app.handle("two apples", session_id="empty-paused")
     assert report.error.code == "session_paused" and report.run_status == "blocked"
     assert report.scene_created is False and app.get_session("empty-paused").scene is None
+
+
+def test_application_busy_is_structured_and_does_not_call_model(tmp_path):
+    app = application(tmp_path)
+    with SessionStore(tmp_path).lock("busy"):
+        report = app.handle("two apples", session_id="busy")
+    assert report.error.code == "session_busy" and report.run_status == "blocked"
+    assert report.artifacts == {} and app.provider.count == 0

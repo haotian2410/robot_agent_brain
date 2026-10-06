@@ -2,12 +2,21 @@ from __future__ import annotations
 
 from enum import StrEnum
 import math
-from typing import Any
+import json
+from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def json_values_only(self):
+        try:
+            json.dumps(self.model_dump(), allow_nan=False)
+        except (ValueError, TypeError) as exc:
+            raise ValueError("scene values must be finite JSON data") from exc
+        return self
 
 
 class Transform(StrictModel):
@@ -36,7 +45,7 @@ class SceneObject(StrictModel):
 
 
 class SceneConfig(StrictModel):
-    schema_version: str = "1.0"
+    schema_version: Literal["1.0"] = "1.0"
     scene_id: str
     scene_version: int = Field(default=0, ge=0)
     robot: str | None = None

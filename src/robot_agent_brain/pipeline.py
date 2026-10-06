@@ -128,11 +128,11 @@ class BrainPipeline:
         if scene is None:
             raise ValueError("scene_required")
         if turn.turn_kind == TurnKind.SCENE_EDIT:
-            patch = self.scene_editor.edit(turn.scene_edit, scene, dialogue=dialogue, defaults=edit_defaults,
-                                           bindings_override=bindings_override)
-            deleted = [op.scene_object_id for op in patch.operations if op.action == "remove"]
-            focus = list(dict.fromkeys(op.scene_object_id for op in patch.operations if op.action != "remove" and op.scene_object_id not in deleted))
-            return BrainResult(turn_kind=turn.turn_kind, scene_patch=patch, focus_object_ids=focus or None, deleted_object_ids=deleted)
+            edited = self.scene_editor.edit_result(turn.scene_edit, scene, dialogue=dialogue, defaults=edit_defaults,
+                                                  bindings_override=bindings_override)
+            return BrainResult(turn_kind=turn.turn_kind, scene_patch=edited.patch,
+                               focus_object_ids=edited.focus_object_ids or None,
+                               deleted_object_ids=edited.deleted_object_ids)
         if turn.turn_kind == TurnKind.SCENE_QUERY:
             query = SceneQueryEngine().query(turn.scene_query, scene, dialogue)
             explicit = any(getattr(turn.scene_query, key) is not None for key in ("target", "semantic_name", "category", "referent_scene_object_id"))

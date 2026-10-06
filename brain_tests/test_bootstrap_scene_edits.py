@@ -41,6 +41,11 @@ def test_add_then_move_same_turn_identity():
     assert moved.transform.position[0] == pytest.approx(added.object.transform.position[0] + .1)
     final = SceneManager(initial.scene).apply_patch(patch)
     assert len(final.objects) == 2 and final.scene_version == 1
+    outcome = editor.edit_result(turn.scene_edit, initial.scene, defaults=defaults)
+    assert outcome.patch == patch
+    assert outcome.created_object_ids == outcome.focus_object_ids == [added.scene_object_id]
+    assert outcome.entity_bindings["a"] == [added.scene_object_id]
+    assert outcome.deleted_object_ids == []
 
 
 def test_no_default_context_does_not_guess_add_position():

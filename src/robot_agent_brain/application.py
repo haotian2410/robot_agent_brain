@@ -46,6 +46,12 @@ class BrainApplication:
         safe_identifier(session_id)
         state = self.store.load(session_id)
         if session_id not in self.sessions or state is not None and state.revision > self.revisions.get(session_id, 0):
+            if state is not None and state.scene is not None:
+                for obj in state.scene.objects:
+                    try:
+                        self.assets.get_model_property(obj.asset_id)
+                    except LookupError as exc:
+                        raise ValueError("session_asset_missing: " + obj.asset_id) from exc
             session = BrainSession(None, self.pipeline, self.platform_factory())
             self.sessions[session_id] = self.store.restore(state, session) if state else session
             self.sessions[session_id].restored_config_fingerprint = state.config_fingerprint if state else None
@@ -66,8 +72,19 @@ class BrainApplication:
 
     def handle(self, instruction, *, session_id=None, scene_path=None):
         session_id = session_id or uuid.uuid4().hex
-        with self.store.lock(session_id):
-            return self._handle(instruction, session_id=session_id, scene_path=scene_path)
+        try:
+            with self.store.lock(session_id):
+                return self._handle(instruction, session_id=session_id, scene_path=scene_path)
+        except Exception as exc:
+            # Lock/restore failures happen before a safe request directory can
+            # be published. Still return a complete report, never old artifacts.
+            issue = self._issue(exc, "session_restore")
+            secret = self.config.api_key.get_secret_value() if self.config.api_key else None
+            issue = BrainIssue.model_validate(redact(issue.model_dump(), secret))
+            return BrainRunReport(session_id=session_id, request_id=uuid.uuid4().hex,
+                run_status="blocked" if issue.code == "session_busy" else "failed",
+                provider=self.config.provider, error=issue, reply=issue.message,
+                metrics={"understanding_calls":0, "vision_calls":0, "model_calls":[]})
 
     def _save_session(self, session_id):
         self.revisions[session_id] = self.store.save(session_id, self.sessions[session_id],
