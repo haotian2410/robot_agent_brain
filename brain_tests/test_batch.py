@@ -9,7 +9,7 @@ class Provider:
     def understand_turn(self, request):
         if request.instruction == "query":
             return BrainTurn(status="accepted", turn_kind="scene_query", instruction="query",
-                             scene_query=SceneQueryIntent(query_type="count", semantic_name="apple"))
+                             scene_query=SceneQueryIntent(query_type="count", target="apple", entities=[dict(entity_id="apple", semantic_name="apple", category="fruit")]))
         return BrainTurn(status="accepted", turn_kind="session_control", instruction="pause",
                          session_control=SessionControlIntent(action="pause"))
 

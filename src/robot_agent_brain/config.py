@@ -16,6 +16,7 @@ class LayoutDefaults(BaseModel):
     workspace_min: tuple[float, float] = (-.75, -.55)
     workspace_max: tuple[float, float] = (.75, .55)
     clearance_m: float = Field(default=.04, gt=0)
+    support_contact_tolerance_m: float = Field(default=.001, gt=0)
     max_attempts: int = Field(default=400, ge=1, le=10000)
     coordinate_convention: Literal["x_right_y_front_z_up"] = "x_right_y_front_z_up"
     initial_counts: dict[str, int] = Field(default_factory=dict)

@@ -151,8 +151,10 @@ def test_scene_edit_add_uses_asset_and_commits_through_session():
         ModelProperty(asset_id="banana", semantic_name="banana", category="fruit", dimensions_m=(.1, .1, .1)),
     ])
     scene = SceneConfig(scene_id="s", objects=[SceneObject(scene_object_id="apple_01", asset_id="apple", semantic_name="apple", category="fruit")])
+    from support_fixtures import add_table
+    add_table(scene, assets)
     session = BrainSession(scene, BrainPipeline(Provider(), assets), MockScenePlatform())
     result = session.run_task("r", "在苹果右边增加香蕉")
     assert result.scene_patch is not None
     assert session.scene.scene_version == 1
-    assert len(session.scene.objects) == 2
+    assert len(session.scene.objects) == 3

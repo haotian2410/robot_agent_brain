@@ -35,8 +35,9 @@ def test_add_then_move_same_turn_identity():
         SceneEditIntent(operation="add", target="a"),
         SceneEditIntent(operation="translate", target="a", direction="right", distance_m=.1)])
     patch = editor.edit(turn.scene_edit, initial.scene, defaults=defaults)
-    assert len(patch.operations) == 2
-    added, moved = patch.operations
+    assert [op.action for op in patch.operations] == ["add", "update_property", "update_transform", "update_property"]
+    added, _, moved, facts = patch.operations
+    assert facts.properties["support"] == "table_01"
     assert added.scene_object_id == moved.scene_object_id
     assert moved.transform.position[0] == pytest.approx(added.object.transform.position[0] + .1)
     final = SceneManager(initial.scene).apply_patch(patch)
@@ -63,7 +64,8 @@ def test_all_available_add_never_defaults_to_one():
         editor.edit(turn.scene_edit, initial.scene, defaults=defaults)
     defaults.initial_counts["apple"] = 3
     patch = editor.edit(turn.scene_edit, initial.scene, defaults=defaults)
-    assert len(patch.operations) == 3
+    assert len([op for op in patch.operations if op.action == "add"]) == 3
+    assert len([op for op in patch.operations if op.action == "update_property" and op.properties["support"] == "table_01"]) == 3
 
 
 def test_legacy_reference_add_bootstraps_reference_only():

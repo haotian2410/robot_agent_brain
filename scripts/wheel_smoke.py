@@ -43,6 +43,11 @@ def main():
                         {"entity_id":"b", "semantic_name":"basket", "category":"container"}],
             "operations":[{"operation_id":"op-1", "task_type":"pick_and_place", "source":"a", "destination":"b",
                 "placement_target":{"kind":"container_interior", "reference":"b", "relation":"inside"}}]}}}]
+    plural = "它们有几个？"
+    fixture.append({"instruction": plural + " [dialogue_ref_set=apple]", "turn": {
+        "status":"accepted", "turn_kind":"scene_query", "instruction":plural,
+        "scene_query":{"query_type":"count", "entities":[{"entity_id":"a", "semantic_name":"apple", "category":"fruit",
+            "dialogue_ref_set":True, "quantity_mode":"all", "all_available":True}], "relations":[], "target":"a"}}})
     replay = directory / "replay.json"
     replay.write_text(json.dumps(fixture, ensure_ascii=False), encoding="utf-8")
     common = ["--provider", "replay", "--replay-file", str(replay), "--output-dir", str(directory / "out"), "--session", "wheel-session", "--json"]
@@ -59,6 +64,10 @@ def main():
     assert second["scene_source"] == "session" and second["scene_id"] == first["scene_id"]
     assert second["scene_version"] == first["scene_version"]
     assert second["run_status"] == "success" and second["request_id"] != first["request_id"]
+    third = json.loads(run("run", plural, *common))
+    assert third["run_status"] == "success" and "commands" not in third["artifacts"]
+    query = json.loads(Path(third["artifacts"]["query_result"]).read_text())
+    assert query["count"] == 2 and len(query["object_ids"]) == 2
     print(json.dumps({"wheel_smoke":"passed", "installed_module":str(installed), "artifacts":str(directory),
                       "provider":"replay", "real_qwen_tested":False}, ensure_ascii=False))
 

@@ -1,4 +1,5 @@
 import pytest
+from support_fixtures import add_table
 from robot_agent_brain.adapters.local_asset_catalog import LocalAssetCatalog
 from robot_agent_brain.contracts.scene import ModelProperty, SceneConfig, SceneObject
 from robot_agent_brain.contracts.turn import BrainTurn, SceneEditPlan, SceneEditIntent
@@ -21,10 +22,11 @@ def test_understanding_allows_local_add_reference_without_previous_focus():
     assets = LocalAssetCatalog([ModelProperty(asset_id=name, semantic_name=name, category="fruit", dimensions_m=(.1,.1,.1)) for name in ("apple","banana")])
     scene = SceneConfig(scene_id="s", objects=[SceneObject(scene_object_id="a1", asset_id="apple", semantic_name="apple", category="fruit")])
     provider = Provider()
+    add_table(scene, assets)
     result = BrainPipeline(provider, assets).run("r", "在苹果右边添加香蕉，然后把它右移十厘米", scene, dialogue=DialogueState())
     assert provider.count == 1
-    assert len(result.scene_patch.operations) == 2
-    assert result.scene_patch.operations[0].scene_object_id == result.scene_patch.operations[1].scene_object_id
+    assert [op.action for op in result.scene_patch.operations] == ["add", "update_property", "update_transform", "update_property"]
+    assert len({op.scene_object_id for op in result.scene_patch.operations}) == 1
 
 
 def test_unresolved_cross_turn_pronoun_still_rejected():

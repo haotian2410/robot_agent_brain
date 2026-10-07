@@ -45,6 +45,8 @@ class SceneRelationResolver:
                         membership = o.properties.get(key)
                         if key in o.properties:
                             return membership == reference.scene_object_id or (isinstance(membership, list) and reference.scene_object_id in membership)
+                        if kind == "on" and o.properties.get("support_evaluated") is True:
+                            return False
                         return None
                     answers = [(o, evidence(o)) for o in selected]
                     if any(answer is None for _, answer in answers):

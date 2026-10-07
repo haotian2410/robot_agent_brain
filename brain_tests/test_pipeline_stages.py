@@ -24,7 +24,7 @@ def fixture_pipeline(kind):
             operations=[Operation(operation_id="op-1", task_type="grasp", target="apple")])),
         "scene_edit": dict(scene_edit=SceneEditIntent(operation="translate", semantic_name="apple",
                                                       category="fruit", direction="right", distance_m=.1)),
-        "scene_query": dict(scene_query=SceneQueryIntent(query_type="count", semantic_name="apple")),
+        "scene_query": dict(scene_query=SceneQueryIntent(query_type="count", target="apple", entities=[dict(entity_id="apple", semantic_name="apple", category="fruit")])),
         "session_control": dict(session_control=SessionControlIntent(action="pause")),
     }[kind]
     turn = BrainTurn(status="accepted", turn_kind=kind, instruction="provider text", **payload)

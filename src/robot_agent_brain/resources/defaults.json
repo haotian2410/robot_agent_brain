@@ -5,6 +5,7 @@
   "workspace_min":[-0.75,-0.55],
   "workspace_max":[0.75,0.55],
   "clearance_m":0.04,
+  "support_contact_tolerance_m":0.001,
   "max_attempts":400,
   "coordinate_convention":"x_right_y_front_z_up",
   "initial_counts":{}

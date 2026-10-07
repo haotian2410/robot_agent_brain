@@ -12,7 +12,8 @@ from ..models.motion_policy import MotionPolicy
 from ..contracts.turn import SceneEditPlan
 from ..grounding.scene_object_selector import SceneObjectSelector
 from .scene_manager import SceneManager
-from .geometry import world_extents
+from .geometry import world_extents, world_bounds
+from .spatial_facts import SpatialFactResolver
 
 
 @dataclass
@@ -73,6 +74,7 @@ class SceneEditor:
                 local_bindings[edit.target] = [op.scene_object_id for op in patch.operations if op.action == "add"]
             operations.extend(patch.operations)
         patch = ScenePatch(scene_id=scene.scene_id, base_scene_version=scene.scene_version, operations=operations)
+        SceneManager(scene).apply_patch(patch)
         return self._result(patch, local_bindings)
 
     @staticmethod
@@ -117,6 +119,7 @@ class SceneEditor:
                     scene, object_id, model.asset_id, model.semantic_name, model.category,
                     relation=PlacementTarget(kind="relative_object", reference=reference.scene_object_id, relation=intent.relation) if reference else None,
                     reference_object=reference,
+                    defaults=defaults,
                 )
                 obj = patch.operations[0].object
                 if reference is None:
@@ -176,7 +179,28 @@ class SceneEditor:
         for obj in candidate.objects:
             if obj.scene_object_id in affected and self._collides(obj.transform, obj, candidate):
                 raise ValueError("scene_edit_transform_collision")
+        facts = self._facts(defaults)
+        for obj in candidate.objects:
+            if obj.scene_object_id not in affected:
+                continue
+            support = facts.infer_support(obj, candidate)
+            if support is None and intent.operation == "add" and intent.relation in {"left_of", "right_of", "front_of", "behind"}:
+                raise ValueError("scene_edit_support_unknown: relative addition is outside the supported footprint")
+            if support is not None:
+                operations.append(ScenePatchOperation(action=PatchAction.UPDATE_PROPERTY,
+                    scene_object_id=obj.scene_object_id,
+                    properties={"support": support, "support_relation": "on", "support_evaluated": True}))
+            elif not facts.is_surface(obj) and facts.can_evaluate(obj, candidate):
+                # A checked but unproven on-relation is not a positive fact.
+                # Distinguish it from an uploaded snapshot without evaluation.
+                operations.append(ScenePatchOperation(action=PatchAction.UPDATE_PROPERTY,
+                    scene_object_id=obj.scene_object_id, properties={"support_evaluated": True}))
+        patch = ScenePatch(scene_id=scene.scene_id, base_scene_version=scene.scene_version, operations=operations)
+        SceneManager(scene).apply_patch(patch)
         return patch
+
+    def _facts(self, defaults=None):
+        return SpatialFactResolver(self.assets, support_contact_tolerance_m=defaults.support_contact_tolerance_m if defaults else .001)
 
     @staticmethod
     def _matches_name(obj, name):
@@ -187,14 +211,8 @@ class SceneEditor:
         table = next((o for o in scene.objects if o.scene_object_id == defaults.table_object_id), None)
         if table is None:
             raise ValueError("scene_edit_default_surface_missing")
-        table_model = self.assets.get_model_property(table.asset_id)
-        def vertical_bound(m, upper):
-            if m.aabb_m is not None:
-                return m.aabb_m[5 if upper else 2]
-            if m.asset_id not in self.assets.metadata.center_origin_assets:
-                raise ValueError("bootstrap_origin_metadata_missing")
-            return m.dimensions_m[2] / (2 if upper else -2)
-        z = table.transform.position[2] + vertical_bound(table_model, True) - vertical_bound(model, False)
+        facts = self._facts(defaults)
+        z = facts.support_transform(model, table, x=0, y=0, existing=obj.transform).position[2]
         xmin,ymin = defaults.workspace_min
         xmax,ymax = defaults.workspace_max
         dx,dy,_ = model.dimensions_m
@@ -204,7 +222,8 @@ class SceneEditor:
         rng = random.Random(f"{self.seed}:{len(candidate_scene.objects)}")
         for _ in range(defaults.max_attempts):
             transform = Transform(position=(rng.uniform(xmin+dx/2,xmax-dx/2), rng.uniform(ymin+dy/2,ymax-dy/2),z))
-            if not self._collides(transform, obj, candidate_scene, clearance=defaults.clearance_m):
+            placed = obj.model_copy(update={"transform": transform})
+            if facts.footprint_contains(placed, table) and not self._collides(transform, obj, candidate_scene, clearance=defaults.clearance_m):
                 return transform
         raise ValueError("bootstrap_layout_failed")
 
@@ -227,12 +246,12 @@ class SceneEditor:
                                  and defaults.workspace_min[1] <= cy-sy/2 and cy+sy/2 <= defaults.workspace_max[1]):
                 continue
             collision = False
-            for other_transform, other, other_scale in candidates:
-                ox, oy, oz = other_transform.position
-                osx, osy, osz = world_extents(other.dimensions_m, other_transform)
-                if (abs(cx - ox) < (sx + osx) / 2 + self.layout.clearance_m
-                        and abs(cy - oy) < (sy + osy) / 2 + self.layout.clearance_m
-                        and abs(z - oz) < (sz + osz) / 2 - 1e-9):
+            trial = obj.transform.model_copy(update={"position": (cx, cy, z)})
+            low, high = world_bounds(model, trial, center_origin=True)
+            for other_transform, other, _ in candidates:
+                other_low, other_high = world_bounds(other, other_transform, center_origin=True)
+                if all(low[i] < other_high[i] + (self.layout.clearance_m if i < 2 else -1e-9)
+                       and other_low[i] < high[i] + (self.layout.clearance_m if i < 2 else -1e-9) for i in range(3)):
                     collision = True
                     break
             if not collision:
@@ -241,17 +260,14 @@ class SceneEditor:
 
     def _collides(self, transform, obj, scene, *, clearance=0):
         model = self.assets.get_model_property(obj.asset_id)
-        sx, sy, sz = self._world_extents(model.dimensions_m, transform)
+        low, high = world_bounds(model, transform, center_origin=True)
         for other_obj in scene.objects:
             if other_obj.scene_object_id == obj.scene_object_id:
                 continue
             other = self.assets.get_model_property(other_obj.asset_id)
-            ox, oy, _ = other_obj.transform.position
-            x, y, _ = transform.position
-            osx, osy, osz = self._world_extents(other.dimensions_m, other_obj.transform)
-            oz = other_obj.transform.position[2]
-            if (abs(x - ox) < (sx + osx) / 2 + clearance and abs(y - oy) < (sy + osy) / 2 + clearance
-                    and abs(transform.position[2] - oz) < (sz + osz) / 2 - 1e-9):
+            other_low, other_high = world_bounds(other, other_obj.transform, center_origin=True)
+            if all(low[i] < other_high[i] + (clearance if i < 2 else -1e-9)
+                   and other_low[i] < high[i] + (clearance if i < 2 else -1e-9) for i in range(3)):
                 return True
         return False
 
@@ -267,6 +283,7 @@ class SceneEditor:
         *,
         relation: PlacementTarget | None = None,
         reference_object: SceneObject | None = None,
+        defaults=None,
     ) -> ScenePatch:
         model = self.assets.get_model_property(asset_id)
         transform = Transform()
@@ -274,6 +291,15 @@ class SceneEditor:
             if reference_object is None:
                 raise ValueError("scene_edit_reference_missing")
             reference_model = self.assets.get_model_property(reference_object.asset_id)
+            if relation.relation in {"left_of", "right_of", "front_of", "behind"}:
+                facts = self._facts(defaults)
+                support_id = facts.infer_support(reference_object, scene)
+                if support_id is None and defaults is not None:
+                    support_id = defaults.table_object_id
+                support = next((o for o in scene.objects if o.scene_object_id == support_id), None)
+                if support is None:
+                    raise ValueError("scene_edit_support_unknown")
+                transform = facts.support_transform(model, support, x=0, y=0)
             transform = self.layout.relative_transform(
                 relation.relation or "free_space",
                 reference_object.transform,

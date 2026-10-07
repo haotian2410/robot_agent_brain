@@ -85,7 +85,7 @@ def test_q03_query_reads_confirmed_snapshot_without_increment(tmp_path, kind):
     first = app.handle("two apples", session_id="query")
     snapshot = app.get_session("query").scene.model_dump()
     app.provider.turn = BrainTurn(status="accepted", turn_kind="scene_query", instruction="query",
-                                 scene_query=SceneQueryIntent(query_type=kind, semantic_name="apple"))
+                                 scene_query=SceneQueryIntent(query_type=kind, target="apple", entities=[dict(entity_id="apple", semantic_name="apple", category="fruit")]))
     report = app.handle("query", session_id="query")
     assert report.run_status == "success" and report.scene_version == first.scene_version
     assert app.get_session("query").scene.model_dump() == snapshot

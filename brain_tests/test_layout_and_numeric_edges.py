@@ -1,6 +1,7 @@
 import json
 import math
 import pytest
+from support_fixtures import add_table
 from jsonschema import Draft202012Validator
 from robot_agent_brain.config import BrainConfig
 from robot_agent_brain.contracts.scene import SceneConfig, SceneObject, Transform
@@ -44,6 +45,7 @@ def test_relative_add_exhausts_workspace_without_changing_reference():
     defaults.max_attempts = 4
     scene = SceneConfig(scene_id="s", objects=[SceneObject(scene_object_id="a", semantic_name="apple", category="fruit",
         asset_id="demo_apple", transform=Transform(position=(defaults.workspace_max[0]-.01,0,.1)))])
+    add_table(scene, assets)
     original = scene.model_dump()
     with pytest.raises(ValueError, match="bootstrap_layout_failed"):
         SceneEditor(assets).edit(SceneEditIntent(operation="add", semantic_name="banana", category="fruit",
@@ -56,8 +58,10 @@ def test_collision_resolution_preserves_behind_relation():
     assets = config.load_assets()
     scene = SceneConfig(scene_id="s", objects=[SceneObject(scene_object_id="a", semantic_name="apple", category="fruit",
         asset_id="demo_apple", transform=Transform(position=(0,0,.1)))])
+    add_table(scene, assets)
     patch = SceneEditor(assets).edit(SceneEditIntent(operation="add", semantic_name="banana", category="fruit", count=3,
                                                    relation="behind", reference="a"), scene)
-    assert len(patch.operations) == 3
-    assert all(op.object.transform.position[1] < 0 for op in patch.operations)
-    assert len({op.object.transform.position for op in patch.operations}) == 3
+    added = [op for op in patch.operations if op.action == "add"]
+    assert len(added) == 3
+    assert all(op.object.transform.position[1] < 0 for op in added)
+    assert len({op.object.transform.position for op in added}) == 3

@@ -55,10 +55,9 @@ motion direction 仅允许 left/right/front/back/up/down；东=right、西=left�
 ## 9. Scene Edit / Query / Control
 “增加一个香蕉”返回 accepted scene_edit，relation=null、reference=null，不得猜位置；是否澄清由 Python Session 决定。“在篮子右边增加一个香蕉”写 relation=right_of、reference=basket。relation/reference 必须同时存在或同时为 null。“桌子/桌面/台面”可作为 reference。
 scene_query 只描述 count/existence/position/state，不生成 object_id。
-有颜色、关系、集合或指代筛选的查询，必须使用 scene_query.entities、relations 和 target。
+所有查询只有一种格式，必须使用 scene_query.entities、relations 和 target。
 这些 entities 使用 TaskEntity 字段 entity_id/semantic_name/category，不是顶层 ParseEntity 的 id/name。
-查询不要因为未说明数量而只数第一个；Python 会聚合匹配结果。legacy semantic_name/category
-仅用于没有额外筛选条件的简单查询，不得与 entities/target 混用。
+查询不要因为未说明数量而只数第一个；Python 会聚合匹配结果。禁止将 semantic_name/category/referent_scene_object_id 作为 scene_query 顶层选择字段。
 
 任务域边界必须先按用户意图判断：直接改变场景状态的普通移动、相对移动、旋转、增加、删除和属性修改输出 `scene_edit`，不输出 robot operations；要求机器人抓取、拿起、放置、释放、按压、推拉、开关，或明确说“用机械臂/机器人”，输出 `robot_task`。例如“把苹果右移10厘米”是 scene_edit translate；“把苹果移到香蕉右边”是 scene_edit move_relative；“把苹果放到香蕉右边”是 robot_task pick_and_place；“用机械臂把苹果右移10厘米”是 robot_task move；“抓起苹果，右移后放下”整体是 robot_task。明确说“直接修改场景”时优先 scene_edit。混合“增加香蕉然后把它放进盒子”必须返回 clarification_required，不得只执行一半。
 
@@ -66,7 +65,7 @@ scene_query 只描述 count/existence/position/state，不生成 object_id。
 
 ## 10. 对话指代
 输入中的 [dialogue_ref=苹果] 是系统注入的稳定单对象指代：建立独立 entity，dialogue_ref=true，不得与同名普通 entity 合并。
-输入中的 [dialogue_ref_set=苹果] 是稳定多对象集合：建立一个集合 entity，dialogue_ref_set=true、quantity_mode=all，不得缩减为其中一个对象。operation 和 relation 可引用该集合。
+输入中的 [dialogue_ref_set=苹果] 是稳定多对象集合：建立一个集合 entity，dialogue_ref_set=true、quantity_mode=all、all_available=true，不得缩减为其中一个对象。operation 和 relation 可引用该集合。
 同轮“添加苹果，然后把它右移十厘米”中，“它”优先引用本轮 add 的 target 实体 ID，
 而不是上轮焦点。scene_edit 使用有序 operations：add 与 translate 复用同一 target。
 同轮尚未创建的实体不能在 add 之前被使用。无本轮先行词才使用上轮指代。
@@ -99,12 +98,12 @@ scene_edit 必须把编辑意图放在 scene_edit 对象中，不能把 operatio
 没有参照物时 relation 和 reference 同时为 null：
 {"status":"accepted","turn_kind":"scene_edit","scene_edit":{"operation":"add","semantic_name":"banana","category":"fruit","count":1,"relation":null,"reference":null},"entities":[],"operations":[],"relations":[],"scene_query":null,"session_control":null}
 scene_query 和 session_control 也必须分别嵌套在 scene_query/session_control 中，并且不要生成 robot operations。例如：
-{"status":"accepted","turn_kind":"scene_query","scene_edit":null,"scene_query":{"query_type":"count","semantic_name":"apple","category":"fruit"},"session_control":null,"entities":[],"operations":[],"relations":[]}
+{"status":"accepted","turn_kind":"scene_query","scene_edit":null,"scene_query":{"query_type":"count","entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit"}],"relations":[],"target":"apple"},"session_control":null,"entities":[],"operations":[],"relations":[]}
 {"status":"accepted","turn_kind":"session_control","scene_edit":null,"scene_query":null,"session_control":{"action":"pause"},"entities":[],"operations":[],"relations":[]}
 
 实体 id 使用简短稳定 snake_case。source/destination/target/reference 必须引用 entities 中的 id。禁止输出 explanation、operation_id、XYZ、object_id、模型信息、Atomic Skill 步骤和 task_types。
 
-Schema约定：status 只能 accepted/clarification_required/unsupported_task。需要澄清或不支持时所有 payload 均为空；unsupported_task 使用同名 turn_kind。relations.scope 只能 selection/goal/state；一元 left/right/front/back/up/down 不带 reference，按桌面坐标正负半区筛选；极值词用 leftmost 等。all_available=true 仅用于“所有”，明确数量 count=N 必须完整保留。没有明确距离时，只有用户确实表达幅度才填写 motion_scale，否则澄清。scene_edit update 可以给 properties，缺少位置参照时不得猜测。机器人任务实体可写 aliases；dialogue_ref/dialogue_ref_set 引用上轮稳定对象，不能重新选择。placement_target.reference 必须与 destination 一致（free_space 无参照除外）。实体和操作的语言顺序必须保留。
+Schema约定：status 只能 accepted/clarification_required/unsupported_task。需要澄清或不支持时所有 payload 均为空；unsupported_task 使用同名 turn_kind。relations.scope 只能 selection/goal/state；一元 left/right/front/back/up/down 不带 reference，按桌面坐标正负半区筛选；极值词用 leftmost 等。all_available=true 用于“所有”或系统 dialogue_ref_set 集合，明确数量 count=N 必须完整保留。没有明确距离时，只有用户确实表达幅度才填写 motion_scale，否则澄清。scene_edit update 可以给 properties，缺少位置参照时不得猜测。机器人任务实体可写 aliases；dialogue_ref/dialogue_ref_set 引用上轮稳定对象，不能重新选择。placement_target.reference 必须与 destination 一致（free_space 无参照除外）。实体和操作的语言顺序必须保留。
 
 颜色查询示例：“红色苹果有几个”：
 {"status":"accepted","turn_kind":"scene_query","scene_query":{"query_type":"count","entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit","color":"red"}],"relations":[],"target":"apple"}}

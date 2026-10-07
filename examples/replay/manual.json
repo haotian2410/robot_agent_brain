@@ -15,7 +15,11 @@
   },
   {
     "instruction": "有几个苹果",
-    "turn": {"status": "accepted", "turn_kind": "scene_query", "instruction": "有几个苹果", "scene_query": {"query_type": "count", "semantic_name": "apple", "category": "fruit"}}
+    "turn": {"status": "accepted", "turn_kind": "scene_query", "instruction": "有几个苹果", "scene_query": {"query_type": "count", "entities": [{"entity_id": "apple", "semantic_name": "apple", "category": "fruit"}], "relations": [], "target": "apple"}}
+  },
+  {
+    "instruction": "它们有几个？ [dialogue_ref_set=apple]",
+    "turn": {"status": "accepted", "turn_kind": "scene_query", "instruction": "它们有几个？", "scene_query": {"query_type": "count", "entities": [{"entity_id": "apple", "semantic_name": "apple", "category": "fruit", "dialogue_ref_set": true, "quantity_mode": "all", "all_available": true}], "relations": [], "target": "apple"}}
   },
   {
     "instruction": "暂停",

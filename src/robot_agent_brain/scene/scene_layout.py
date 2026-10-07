@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from ..contracts.scene import ModelProperty, Transform
-from .geometry import world_extents
+from .geometry import world_bounds
 
 
 @dataclass(frozen=True)
@@ -20,18 +20,24 @@ class SceneLayoutPolicy:
         object_transform: Transform | None = None,
     ) -> Transform:
         rx, ry, rz = reference.position
+        if object_transform is None and relation in {"left_of", "right_of", "front_of", "behind"}:
+            raise ValueError("scene_layout_support_transform_required")
         object_transform = object_transform or Transform()
-        ref_x, ref_y, ref_z = world_extents(reference_model.dimensions_m, reference)
-        obj_x, obj_y, obj_z = world_extents(object_model.dimensions_m, object_transform)
+        # Explicit AABBs retain offset origins; dimensions-only layout keeps
+        # its centered-extent convention (support inference is stricter).
+        ref_min, ref_max = world_bounds(reference_model, reference, center_origin=True)
+        origin_transform = object_transform.model_copy(update={"position": (0, 0, 0)})
+        obj_min, obj_max = world_bounds(object_model, origin_transform, center_origin=True)
         offsets = {
-            "left_of": (-(ref_x + obj_x) / 2 - self.clearance_m, 0.0, 0.0),
-            "right_of": ((ref_x + obj_x) / 2 + self.clearance_m, 0.0, 0.0),
-            "front_of": (0.0, (ref_y + obj_y) / 2 + self.clearance_m, 0.0),
-            "behind": (0.0, -(ref_y + obj_y) / 2 - self.clearance_m, 0.0),
-            "above": (0.0, 0.0, (ref_z + obj_z) / 2 + self.clearance_m),
-            "free_space": (0.0, 0.0, (ref_z + obj_z) / 2 + self.clearance_m),
+            "left_of": (ref_min[0] - obj_max[0] - self.clearance_m - rx, 0.0, 0.0),
+            "right_of": (ref_max[0] - obj_min[0] + self.clearance_m - rx, 0.0, 0.0),
+            "front_of": (0.0, ref_max[1] - obj_min[1] + self.clearance_m - ry, 0.0),
+            "behind": (0.0, ref_min[1] - obj_max[1] - self.clearance_m - ry, 0.0),
+            "above": (0.0, 0.0, ref_max[2] - obj_min[2] + self.clearance_m - rz),
+            "below": (0.0, 0.0, ref_min[2] - obj_max[2] - self.clearance_m - rz),
         }
         if relation not in offsets:
             raise ValueError(f"unsupported_scene_layout_relation: {relation}")
         dx, dy, dz = offsets[relation]
-        return object_transform.model_copy(update={"position": (rx + dx, ry + dy, rz + dz)})
+        z = object_transform.position[2] if relation in {"left_of", "right_of", "front_of", "behind"} else rz + dz
+        return object_transform.model_copy(update={"position": (rx + dx, ry + dy, z)})

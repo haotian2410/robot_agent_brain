@@ -1,4 +1,25 @@
-# 附件验收追踪 — 最终代码 d427bc5
+# Query 收口与场景连续性验收
+
+本轮基线 `ba7678c3581a3ec1b22bbb8fd9656c43c381ceab`。新增专项文件
+`brain_tests/test_query_scene_continuity.py`，28 个参数化测试实例；原有测试迁移至 canonical
+Query 和显式支撑场景。全量 233 passed；批处理 4/4。提交和远程 CI 见 implementation_report。
+
+| 验收项 | 实际回归证据 |
+|---|---|
+| Q-C01/C02 | test_q_c01_c02_legacy_fields_are_removed_not_adapted：旧字段单独输入和混入 canonical 均拒绝 |
+| Q-C03/Q-A01/A02/A03 | test_q_c03_q_a01_a03_queries_share_alias_category_color_rules：canonical、中文别名、类别别名、红/绿/零匹配；与 Grounder 对照 |
+| Query 结构/候选池 | test_query_validates_target_entities_and_selection_scope、test_query_candidate_pool_validates_before_relation_filter |
+| D-C01/C02 | test_d_c01_c02_plural_query_focus_then_edit_preserves_entire_set：query→focus→edit 两实例，单数 ambiguous，无实例 ID marker |
+| L-Z01/Z02/Z03 | test_l_z01_z03_planar_relative_moves_preserve_support_height：高矮双向、scale.z=2、底部贴桌、单版本 |
+| L-Z04 | test_l_z04_relative_add_uses_verified_support_and_own_bottom：相对新增底部高度和支撑 |
+| F-S01/S02/S03/S04 | test_f_s01_s04_support_continuity_and_no_guessed_membership：水平/抬升/出界，on 查询和 Grounding、membership 清理 |
+| 几何边界 | world_bounds offset AABB/scale/quaternion、yaw footprint/倾斜拒绝、未知原点拒绝、可配置 tolerance、offset support_transform |
+| 禁止猜测 | free_space 不当 above、planar caller 必须给 Z、相对新增 unknown support 拒绝、显式默认面回退 |
+| 打包/端到端 | scripts/wheel_smoke.py：新 venv、仓库外导入、两轮 robot 导出后集合 query=2；manual_cases 四轮回放 |
+
+真实 Qwen 本轮未运行（8080 拒绝连接）；上述为契约/几何/Replay 验收。
+
+## 上阶段历史验收 — 代码 d427bc5
 
 基线 `266ebcc94fd5b433ebe1000f4d04c7356b747faa`。下表指向实际源码测试，
 不是以总测试数替代逐项验收。`brain_tests/` 下测试使用注入 provider/Replay；

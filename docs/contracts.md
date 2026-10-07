@@ -20,7 +20,46 @@ LocalScenePlatform 只维护元数据并确认版本，不渲染；capture 明�
 一次正式编辑 Patch 只增加一个版本。初始场景不实现机器人目标；scene_query 和
 commands 导出不改变版本/位姿。执行后必须有外部确认快照才能恢复几何可信状态。
 
-## CommandsFile 2.0
+## SceneQueryIntent：单一查询契约
+
+Query 唯一输入为 `query_type + entities + relations + target`。`query_type` 为
+count/existence/position/state，entities 至少一个，target 必须引用实体 ID；relations
+仅允许 selection，subject/reference 必须引用已有实体。例：
+
+```json
+{"query_type":"count","entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit","color":"red"}],"relations":[],"target":"apple"}
+```
+
+REMOVED（不提供兼容转换）：查询顶层 semantic_name、category、referent_scene_object_id。
+旧 JSON 明确报 extra_forbidden，不会静默转换。TaskEntity 内的名称/类别字段继续存在。
+QueryResult 也不再携带冗余 semantic_name；结果以 object_ids 为准。
+Query、Robot Grounding、Scene Edit 复用 SemanticEntitySelector 的名称、别名、类别别名、
+颜色、排除、绑定和 selection relation 规则。count/existence 可返回 0/N；机器人唯一性
+和集合数量仍在 Grounder 校验；candidate_pool 在关系筛选前检查数量。
+
+REMOVED：dialogue_scene_object_id marker 和 Provider 单对象 referent 注入。
+`[dialogue_ref=apple]` 只提供语义名；`[dialogue_ref_set=apple]` 必须对应
+dialogue_ref_set=true、quantity_mode=all、all_available=true。实际实例集合由 Python
+DialogueState.bindings 注入。集合后的单数“它”返回 dialogue_reference_ambiguous。
+
+## 布局高度与支撑事实
+
+left_of/right_of/front_of/behind 保留已有对象 Z；新增对象先确定可验证支撑面，
+按自身几何底部计算高度，再设置 XY。支撑未知时只允许显式 defaults 桌面回退，
+否则 scene_edit_support_unknown。free_space 不再是 above 的别名。
+
+SpatialFactResolver 使用 AABB（优先）或明确 center_origin_assets 元数据，考虑 scale
+和 xyzw 四元数；只推导 category=surface 的水平、朝上的支撑面，允许任意 yaw。
+这是包围盒语义事实，不是物理接触检测。倾斜面、未知原点不推断支撑。
+布局配置 support_contact_tolerance_m 默认为 0.001 米，可配置，不作为补偿位移。
+
+UPDATE_TRANSFORM 先清除 support/support_relation/container_membership/support_evaluated，
+Editor 在 prospective scene 中校验后追加 UPDATE_PROPERTY，整个 patch 只提交一个版本。
+`support_evaluated=true` 表示本轮完成受支持几何范围内的支撑检查；无可证明支撑时
+on 查询不匹配，但不写入伪造的 support。缺少可检查几何仍保留 unknown 行为。
+没有容器内部几何，永不自动重建 container_membership。
+
+## CommandsFile 2.0 wire
 
 顶层包含 schema_version、request_id、scene_id、scene_version、robot、operations、commands。
 每条 command 通过 operation_id 引用高层目标，通过 source_skill_step_id 引用技能步骤。

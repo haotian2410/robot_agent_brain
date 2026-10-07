@@ -48,7 +48,7 @@ def test_query_and_edit_focus_then_delete_invalidation():
     session.process_turn("e", BrainTurn(status="accepted", turn_kind="scene_edit", instruction="move",
         scene_edit=SceneEditIntent(operation="translate", semantic_name="b", category="fruit", direction="right", distance_m=.1)))
     assert session.dialogue.last_entity_id == "b"
-    assert "dialogue_scene_object_id=b" in session.dialogue.contextualize("移动它", session.scene)
+    assert "[dialogue_ref=apple]" in session.dialogue.contextualize("移动它", session.scene)
     session.process_turn("d", BrainTurn(status="accepted", turn_kind="scene_edit", instruction="remove",
         scene_edit=SceneEditIntent(operation="remove", semantic_name="b", category="fruit")))
     assert session.dialogue.last_entity_id is None
@@ -60,7 +60,7 @@ def test_collection_query_preserves_plural_focus():
     pipeline = BrainPipeline(None, BrainConfig().load_assets())
     dialogue = DialogueState()
     result = pipeline.process_turn("q", BrainTurn(status="accepted", turn_kind="scene_query", instruction="apples?",
-                                                  scene_query=SceneQueryIntent(query_type="count", semantic_name="apple")), scene())
+                                                  scene_query=SceneQueryIntent(query_type="count", target="apple", entities=[dict(entity_id="apple", semantic_name="apple", category="fruit")])), scene())
     dialogue.observe(result)
     assert dialogue.last_entity_ids == ["a", "b"]
     with pytest.raises(ValueError, match="dialogue_reference_ambiguous"):

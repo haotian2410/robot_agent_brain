@@ -35,7 +35,7 @@ class SceneManager:
                 properties = dict(current.properties)
                 # A direct transform edit invalidates derived containment/support
                 # facts; they must be re-established by the next grounding pass.
-                for key in ("container_membership", "support", "support_relation"):
+                for key in ("container_membership", "support", "support_relation", "support_evaluated"):
                     properties.pop(key, None)
                 objects[object_id] = current.model_copy(update={"transform": operation.transform, "properties": properties})
             elif operation.action == PatchAction.UPDATE_PROPERTY:

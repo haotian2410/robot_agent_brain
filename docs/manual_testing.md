@@ -86,7 +86,47 @@ artifacts、absent_artifacts 和报告字段的点分路径 assertions。组内�
 skipped，`continue_after_failure=true` 才继续；独立组继续。summary 标记 provider，
 不会把回放结果称为真实模型测试。
 
-## 查看结果与常见阻止原因
+## 查询与场景连续性专项
+
+已存在的同一会话可运行（先按上文配置真实 Qwen 的 model）：
+
+```bash
+robot-brain run '红色苹果有几个' --provider qwen --session demo01 --output-dir var/demo --debug
+robot-brain chat --provider qwen --session query-continuity --output-dir var/qwen --debug
+```
+
+新 chat 中依次输入：
+
+```text
+把两个苹果放进篮子
+它们有几个？
+把它们向右移动五厘米
+桌上的苹果有几个？
+把它们向上移动十厘米
+桌上的苹果有几个？
+```
+
+首轮仅导出机器人计划，不表示苹果已进入篮子。第二轮应返回 2，焦点保留两个实例。
+水平编辑仍贴桌时 on 查询应为 2；抬离桌面后为 0，不恢复旧 support。
+若要检验集合后的单数歧义，在第二轮后另输入“它在哪里？”，应澄清而非选择第一个。
+“把苹果移到香蕉右边”为直接编辑；“把苹果放到香蕉右边”为机器人规划。
+编辑测试先确保场景有香蕉、目标唯一；不要把无参照物自动补造当成验收通过。
+
+Query 与 Robot 共用 semantic entity selection。查看 debug/brain_turn.json：
+scene_query 只能有 query_type/entities/relations/target，不能有旧顶层名称或 referent ID。
+复数实体应为 dialogue_ref_set=true、quantity_mode=all、all_available=true。
+查看 query_result.json.object_ids 和编辑后的 scene_config.json，而非只看成功提示。
+真实服务恢复后的专项还需记录中文别名、颜色、rightmost、TaskEntity、relations、
+模型调用次数及最终 Query/Commands Schema。本轮未运行真实模型，详见交付报告。
+
+默认支撑接触容差在 defaults JSON 的 support_contact_tolerance_m 设置（米，默认 .001）。
+这是几何判定容差，不是给位姿加固定补偿；只推断水平表面，不推断容器内部。
+缺少可验证支撑面的相对新增会返回 scene_edit_support_unknown。
+
+Replay 的 manual.json 也包含“它们有几个？”；夹具内部带语义 marker，CLI 用户只输原句。
+批处理现有 4 条用例，包括集合查询，不调用真实 Qwen。
+
+## 查看本轮产物
 
 查看本轮 `result.json` 的 turn_kind、run_status、reply、artifacts。
 request_record.json 含非秘密配置摘要与指纹；debug 目录含 brain_turn.json、

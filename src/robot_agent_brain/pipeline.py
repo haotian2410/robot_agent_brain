@@ -136,8 +136,7 @@ class BrainPipeline:
                                deleted_object_ids=edited.deleted_object_ids)
         if turn.turn_kind == TurnKind.SCENE_QUERY:
             query = SceneQueryEngine(category_aliases=self.category_aliases).query(turn.scene_query, scene, dialogue)
-            explicit = any(getattr(turn.scene_query, key) is not None for key in ("target", "semantic_name", "category", "referent_scene_object_id"))
-            return BrainResult(turn_kind=turn.turn_kind, scene_query_result=query, focus_object_ids=query.object_ids if explicit else None)
+            return BrainResult(turn_kind=turn.turn_kind, scene_query_result=query, focus_object_ids=query.object_ids)
         intent = turn.task_intent
         overrides = dialogue.bindings(intent, scene) if dialogue else {}
         for entity_id, ids in (bindings_override or {}).items():

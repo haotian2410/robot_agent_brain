@@ -5,6 +5,7 @@ from robot_agent_brain.contracts.scene import ModelProperty
 from robot_agent_brain.contracts.task_intent import PlacementTarget
 from robot_agent_brain.scene.editor import SceneEditor
 from robot_agent_brain.adapters.local_asset_catalog import LocalAssetCatalog
+from support_fixtures import add_table
 
 
 def base_scene():
@@ -51,6 +52,7 @@ def test_scene_editor_computes_initial_layout_but_not_robot_placement():
         ModelProperty(asset_id="apple_basic", semantic_name="apple", category="fruit", dimensions_m=(0.08, 0.08, 0.09)),
         ModelProperty(asset_id="box_basic", semantic_name="box", category="container", dimensions_m=(0.30, 0.25, 0.12)),
     ])
+    add_table(scene, assets)
     patch = SceneEditor(assets).add_object(
         scene, "box_01", "box_basic", "box", "container",
         relation=PlacementTarget(kind="relative_object", reference="apple_01", relation="right_of"),

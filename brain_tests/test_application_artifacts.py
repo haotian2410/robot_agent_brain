@@ -42,7 +42,7 @@ def test_no_scene_robot_publishes_matching_snapshot_and_commands(tmp_path):
 
 def test_no_scene_query_blocked_but_uploaded_empty_returns_zero(tmp_path):
     provider = Provider(BrainTurn(status="accepted", turn_kind="scene_query", instruction="count",
-                                  scene_query=SceneQueryIntent(query_type="count", semantic_name="apple")))
+                                  scene_query=SceneQueryIntent(query_type="count", target="apple", entities=[dict(entity_id="apple", semantic_name="apple", category="fruit")])))
     app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path / "out")), provider=provider)
     report = app.handle("有几个苹果")
     assert report.run_status == "blocked" and report.error.code == "scene_required"

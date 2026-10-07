@@ -25,7 +25,8 @@ class DialogueState(BaseModel):
         if not plural and len(ids) != 1:
             raise ValueError("dialogue_reference_ambiguous")
         marker = "dialogue_ref_set" if plural else "dialogue_ref"
-        return instruction + f" [{marker}={by_id[ids[0]].semantic_name}] [dialogue_scene_object_id={ids[0]}]"
+        names = list(dict.fromkeys(by_id[i].semantic_name for i in ids))
+        return instruction + f" [{marker}={','.join(names)}]"
 
     def bindings(self, intent, scene):
         known = {o.scene_object_id for o in scene.objects}
