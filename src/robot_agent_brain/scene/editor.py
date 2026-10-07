@@ -46,7 +46,7 @@ class SceneEditor:
         # Preview every step locally; publish one atomic patch only on success.
         preview = SceneManager(scene)
         operations = []
-        selector = SceneObjectSelector(category_aliases=self.assets.metadata.category_aliases)
+        selector = SceneObjectSelector(aliases=self.assets.metadata.aliases, category_aliases=self.assets.metadata.category_aliases)
         local_bindings = dict(bindings_override or {})
         for edit in intent.operations:
             matches = None

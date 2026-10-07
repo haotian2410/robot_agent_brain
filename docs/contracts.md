@@ -37,6 +37,10 @@ Query、Robot Grounding、Scene Edit 复用 SemanticEntitySelector 的名称、�
 颜色、排除、绑定和 selection relation 规则。count/existence 可返回 0/N；机器人唯一性
 和集合数量仍在 Grounder 校验；candidate_pool 在关系筛选前检查数量。
 
+其中 AssetCatalog.aliases 是全局名称映射（例如 苹果→apple），请求名称和场景名称均先
+canonicalize；SceneObject.properties.aliases 则是实例级附加名称。无需在上传场景中复制
+资产别名，导入和查询不会为此改写场景。未声明的名称不会仅因同类别而匹配。
+
 REMOVED：dialogue_scene_object_id marker 和 Provider 单对象 referent 注入。
 `[dialogue_ref=apple]` 只提供语义名；`[dialogue_ref_set=apple]` 必须对应
 dialogue_ref_set=true、quantity_mode=all、all_available=true。实际实例集合由 Python

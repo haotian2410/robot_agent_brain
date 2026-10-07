@@ -61,8 +61,9 @@ class BrainResult(BaseModel):
 class BrainPipeline:
     def __init__(self, understanding, assets, scene_editor=None, vision_provider=None):
         self.understanding = understanding
+        self.aliases = getattr(getattr(assets, "metadata", None), "aliases", {})
         self.category_aliases = getattr(getattr(assets, "metadata", None), "category_aliases", {})
-        self.grounder = SceneGrounder(category_aliases=self.category_aliases)
+        self.grounder = SceneGrounder(aliases=self.aliases, category_aliases=self.category_aliases)
         self.motion = MotionScaleResolver(assets)
         self.planner = RecipePlanner()
         self.expander = TaskExpander()
@@ -135,7 +136,7 @@ class BrainPipeline:
                                focus_object_ids=edited.focus_object_ids or None,
                                deleted_object_ids=edited.deleted_object_ids)
         if turn.turn_kind == TurnKind.SCENE_QUERY:
-            query = SceneQueryEngine(category_aliases=self.category_aliases).query(turn.scene_query, scene, dialogue)
+            query = SceneQueryEngine(aliases=self.aliases, category_aliases=self.category_aliases).query(turn.scene_query, scene, dialogue)
             return BrainResult(turn_kind=turn.turn_kind, scene_query_result=query, focus_object_ids=query.object_ids)
         intent = turn.task_intent
         overrides = dialogue.bindings(intent, scene) if dialogue else {}
