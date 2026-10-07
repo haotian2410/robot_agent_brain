@@ -1,7 +1,8 @@
 # Optional 第二阶段 Qwen Atomic Skill Planner — 2026-10-07
 
 基线：`ab434b24e61f3ceca0ea7365b307c821d7e3602b`。
-代码提交及 GitHub Actions 证据在推送验证后补充；最终文档提交 SHA 以 Git HEAD/交付消息为准，
+验收代码提交：`fd4d245685341bb4f82202a669ee56775db3ccc6`，已实际 push 到 main。
+最终文档提交 SHA 以 Git HEAD/交付消息为准，
 不在提交中写不可实现的自身 SHA。
 
 ## 实现与边界
@@ -69,6 +70,17 @@ SHA256：`16984a5f10f2fe4ba5993f5d784e86d6c272e8bb8bd8c93f6e89f4b5cb745fdf`。
 scripts/wheel_smoke.py → **passed**。实际导入 site-packages；保持 recipe 回放，不伪造二次 Qwen。
 验证包内两类 prompt、Registry、默认配置、Schema、命令和查询/编辑；产物：
 `/tmp/brain-wheel-smoke-_ghpkz5q`。临时 wheel/产物不提交到仓库。
+
+## GitHub Actions 实测
+
+[本轮代码 CI](https://github.com/haotian2410/robot_agent_brain/actions/runs/37621201197)
+已通过 GitHub API 核对 head_sha 与上述代码提交一致：
+
+- [Python 3.11](https://github.com/haotian2410/robot_agent_brain/actions/runs/37621201197/job/112791627968)：completed / success。
+- [Python 3.12](https://github.com/haotian2410/robot_agent_brain/actions/runs/37621201197/job/112791627687)：completed / success。
+
+两项均包括全量 pytest、wheel 打包、新 venv 安装、仓库外 smoke；不是仅声明工作流存在。
+本地及 remote main 的代码 SHA 通过 git ls-remote 对照，后续只提交此验收证据。
 
 ## 真实服务与限制
 
