@@ -30,6 +30,8 @@ robot-brain run '把两个苹果放进篮子' --provider qwen \
 | `--assets PATH` | `AssetDocument` JSON；省略使用演示元数据 |
 | `--defaults PATH` | 桌面、工作区、布局次数、默认初始数量配置 |
 | `--provider qwen/replay` | 默认 qwen；Replay 不是任意自然语言解析器 |
+| `--planner recipe/qwen/auto` | 默认 recipe；qwen 仅对机器人任务进行第二次模型调用；auto 只根据 supports 路由 |
+| `--planner-max-completion-tokens N` | 默认 1024，范围 128–4096；实际第二次预算 min(N, 384 + 128 × max(展开后操作数, 1)) |
 | `--replay-file PATH` | Replay 必填，内容是原始输入和已解析 BrainTurn 列表 |
 | `--base-url URL` | 兼容接口根地址，默认 `http://127.0.0.1:8080/v1` |
 | `--model NAME` | Qwen 服务的模型 ID，必须配置 |
@@ -45,7 +47,7 @@ robot-brain run '把两个苹果放进篮子' --provider qwen \
 
 同名配置字段可使用 `ROBOT_BRAIN_` 大写环境变量，例如 `ROBOT_BRAIN_TIMEOUT`。
 机器人型号当前通过配置 `robot` 或 `ROBOT_BRAIN_ROBOT` 设置，默认 ur5e；
-CLI 不接收旧系统的 `--planner`、`--viewer-mode`、`--interaction-registry`。
+CLI 不接收旧系统的 `--viewer-mode`、`--interaction-registry`；本版 `--planner` 定义见上表。
 `vision` 默认 false。LocalScenePlatform 没有图像；将 `ROBOT_BRAIN_VISION=true`
 用于本地 CLI 会明确拒绝，不会给 VLM 传假图片。真实视觉需通过 Python 注入渲染平台。
 
@@ -161,3 +163,47 @@ batch 返回 4（失败）、2（仅跳过）、0（全部通过）。
 `apply_execution_feedback(session_id, feedback, confirmed_scene=..., feedback_source="external")`。
 演示反馈必须显式改为 `feedback_source="simulated"`；提供外部确认的新版本快照，不由
 Brain 从计划猜执行后位姿。详见 contracts.md。CLI 本身没有仿真执行命令。
+
+## 第二次 Qwen 专项
+
+配置也可用 `ROBOT_BRAIN_PLANNER`、`ROBOT_BRAIN_PLANNER_MAX_COMPLETION_TOKENS`；
+优先级仍是 CLI > 环境 > JSON > 默认。第一和第二次共用 base-url/model/key/timeout/
+structured-output。首版默认保持 recipe，不会因模型失败自动切换其他 planner。
+
+服务可用后，用不同的输出目录对照：
+
+```bash
+robot-brain run '把苹果放进篮子' --provider qwen --planner recipe \
+  --model "$ROBOT_BRAIN_MODEL" --output-dir var/recipe-check --debug --json
+robot-brain run '把苹果放进篮子' --provider qwen --planner qwen \
+  --model "$ROBOT_BRAIN_MODEL" --planner-max-completion-tokens 1024 \
+  --output-dir var/qwen-check --debug --json
+```
+
+检查本轮 result.json：无视觉回退时，recipe 是 understanding_calls=1、
+skill_planning_calls=0；qwen 是 1、1。`vision_calls` 单独计数，不能笼统把所有
+流程都称为“两次调用”。scene_edit/query/control/clarification 的 skill_planning_calls=0。
+
+debug 文件：
+
+- `planner_context.json`：实例展开后的语义角色、顺序、依赖、目标与初始持物状态。
+- `planner_skill_catalog.txt`：本次实际发送的 7 个原子技能摘要，不是 Control 完整 SKILL.md。
+- `raw_skill_plan.json`：原始第二次 JSON；无法解析则保留 text；连接失败则 available=false。
+- `normalized_skill_plan.json`：Python 绑定角色并产生 step-N 后的计划（若成功走到此阶段）。
+- `skill_plan_validation.json`：valid 及失败原因。
+- `model_calls.json`、`traceback.txt`：调用记录与失败堆栈；不把失败当执行成功。
+
+合法的重复 locate/区域 approach 可以通过；缺少抓取接近、未持有就 release、放置角色
+交换、多抓一次、重复位移等仍拒绝。Planner 不能补救第一阶段误解的对象或数量。
+失败错误阶段为 skill_planning，常见 code：skill_planning_provider_missing、
+planner_operation_order_mismatch、planner_role_invalid、planner_region_invalid、
+planner_unknown_skill、skill_plan_output_invalid、holding_conflict、plan_precondition_failed。
+
+真实验收逐项记录 instruction、operation_count、recipe_steps、qwen_steps、qwen_valid、
+semantic_validation、prompt_tokens、completion_tokens、latency、commands_count。
+应覆盖抓住苹果、放进篮子、按按钮、开/关门、开门→放入→关门、抓起→移动五厘米→放下、
+先开门→两个苹果放入→关门。按钮/柜子/把手等需真实资产元数据与合法场景，不能用 demo
+资产假装支持。当前既有 domain policy 将“把苹果向右移动五厘米”判为直接 scene_edit，
+所以它是“零次第二规划”的对照项；要测机器人 MOVE 请说“抓起苹果，向右移动五厘米后放下”。
+
+本轮服务 8080 不可达，以上是真实验收流程，不是真实模型通过记录。

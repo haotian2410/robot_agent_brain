@@ -33,6 +33,8 @@ class LayoutDefaults(BaseModel):
 class BrainConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     provider: Literal["qwen", "replay"] = "qwen"
+    planner: Literal["recipe", "qwen", "auto"] = "recipe"
+    planner_max_completion_tokens: int = Field(default=1024, ge=128, le=4096)
     base_url: str = "http://127.0.0.1:8080/v1"
     model: str | None = None
     timeout: float = Field(default=120, gt=0)

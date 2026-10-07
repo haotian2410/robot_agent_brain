@@ -1,4 +1,27 @@
-# Query 收口与场景连续性验收
+# 二次 Atomic Skill Planner 验收
+
+基线 `ab434b24e61f3ceca0ea7365b307c821d7e3602b`。四个新测试文件覆盖下表；
+真实 Qwen、Control、前端未联调，不以 MockTransport 代替真实验收。
+
+| 附件项 | 测试证据（brain_tests/） |
+|---|---|
+| A01/A02 | test_skill_planning_end_to_end：recipe/auto 一次 HTTP，qwen 两次；逐阶段 metrics |
+| A03–A06 | 同文件 test_nonrobot_never_calls_skill_planner：edit/query/control/clarification |
+| B01–B03 | test_skill_planner_router：supports 路由，unsupported stub 调用，holding 不 fallback |
+| C | test_skill_planning_context：role/order/goals/外部持物/物理字段投影 |
+| D | test_skill_planning_qwen：HTTP schema/stage/temp/model/key、token cap 和预算 |
+| E | 同文件：重复/缺失/额外/调序 operation、unknown skill、非法 role/region、空内容、物理字段拒绝 |
+| F | test_skill_planner_router：有效放置、重复 locate/approach、无接近抓取/未持有释放/角色交换/缺接触/额外抓取/外部实体 |
+| G | 同文件：已持有 source 省略抓取前缀、其他持物 holding_conflict |
+| H | test_skill_planning_end_to_end：两响应 HTTP、Commands 模型及公开 Schema、版本和 source_skill_step_id |
+| 集合/预算 | 同文件 test_collection_expands_before_second_call_and_keeps_dependencies：2操作/2实例/12命令/640预算 |
+| 失败隔离 | 同文件：成功→第二规划失败→控制，旧命令不复用、raw/validation/traceback，首轮失败不提交场景 |
+| 网络失败 | 同文件 test_second_call_timeout_keeps_failure_record_and_no_false_scene：两次尝试、失败记录、无场景提交 |
+| Search/Replay | router Search 三模式拒绝；e2e 使用真实 ReplayProvider，qwen 缺接口明确报错 |
+| CLI/config | e2e：run/chat/batch 参数、环境优先级、cap 边界、planner/prompt/catalog 指纹 |
+| 包与 CI | scripts/wheel_smoke.py：独立安装、仓库外 recipe 回放、prompt/catalog 资源、零次第二规划；远程矩阵见报告 |
+
+## 上阶段：Query 收口与场景连续性验收
 
 本轮基线 `ba7678c3581a3ec1b22bbb8fd9656c43c381ceab`。新增专项文件
 `brain_tests/test_query_scene_continuity.py`，28 个参数化测试实例；原有测试迁移至 canonical

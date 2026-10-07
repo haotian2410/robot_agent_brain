@@ -1,5 +1,88 @@
 # Brain 原生协议与迁移
 
+## Optional Atomic Skill Planner（本轮新增）
+
+冻结的 Query、SceneEditPlan、CommandsFile 2.0 wire 不变。第二阶段仅组合原子技能，
+不是第二次任务理解，也不执行物理仿真。完整路径为 Grounding → TaskExpander →
+MotionScaleResolver → SkillPlannerRouter → PlanValidator → CommandExporter。
+Exporter 保留同一 PlanValidator 门禁。
+
+`recipe` 默认；`qwen` 对合法 robot_task 调用第二模型；`auto` 只在 supports=false 时调用。
+RecipePlanner.supports 检查所有操作属于 locate/move/grasp/release/pick_and_place/press/
+open/close。Search 虽属于 TaskType，但不属于 SkillName/Registry，提前 capability_unsupported，
+没有新增 Search wire、generic/other TaskType 或异常 fallback。
+
+### 第二次输入：SkillPlanningRequest / PlannerContext
+
+| 字段 | 唯一允许的数据 |
+|---|---|
+| instruction | 原始用户任务文本，不拼接物理场景快照 |
+| semantic_summary | Python 按操作顺序确定性生成的语义摘要 |
+| operations[] | id、type、semantic_intent、role_bindings、valid_roles、depends_on、placement_target、motion_direction |
+| role_bindings | source/destination/target/reference → 第一阶段语义 entity ID 或 null |
+| entities[] | id、name、category（仅相关语义实体） |
+| goals[] | goal relation 的 relation、subject、reference |
+| initial_state | held_entity（语义 ID 或 null）、gripper_occupied |
+| skill_catalog | 当前 Registry 的可见技能摘要；HTTP 中键名为 skills |
+
+所有上下文模型 extra=forbid；不 dump GroundedTask，不发送 scene_object_id、asset_id、
+Transform、XYZ、quaternion、scale、bbox、mesh、distance_m、关节、IK、碰撞、路径或轨迹。
+集合先展开为语义 a__01/a__02 等，不用实例 ID 替代语义 ID。夹爪持有任务外对象时
+held_entity=null 且 gripper_occupied=true；null 不是空夹爪证明。
+原始 instruction 可能包含用户主动写入的距离文字，但无 Python 解析后的物理字段。
+
+### 第二次输出：SkillPlanLLMOutput
+
+```json
+{"operations":[{"id":"op-1","intent":"将 source 放到 destination","steps":[
+  {"skill":"locate","target_role":"source"},
+  {"skill":"move","target_role":"source","region":"grasp_region"},
+  {"skill":"grasp","target_role":"source"},
+  {"skill":"locate","target_role":"destination"},
+  {"skill":"move","target_role":"destination","reference_role":"source","region":"placement_region"},
+  {"skill":"release","target_role":"source","reference_role":"destination","region":"placement_region"}
+]}]}
+```
+
+顶层只允许 operations。每项只允许 id、intent（1–300 字符）、steps（至少一个）。
+每步只允许 skill（SkillName 枚举）、target_role/reference_role（四种角色或 null）、region。
+所有层级拒绝额外字段；operation ID 唯一，ID 列表和顺序必须与输入完全相同。
+enrich_skill_plan 再检查当前 operation 的 valid_roles、必需 target、注册且可见的 skill、
+allowed_regions，严格映射回 TaskEntity 并生成 step-1、step-2…，不静默修复 role。
+模型不生成 entity/object、step_id/command_id、XYZ、distance_m、依赖或物理动作参数。
+
+Registry 的七项：locate、move、grasp、release、press、pull、push；每项有 signature、
+description、requires_target、allowed_regions、preconditions、effects、planner_visible。
+move 可用 grasp_region/placement_region/button_surface；release 可用 placement_region；
+其他 skill 不接受 region。目录只描述技能，不内嵌高层 recipe，不依赖 Control 源码。
+
+### HTTP、校验和失败边界
+
+第二次仍 POST 同一 `/chat/completions`，model/key/timeout 共用；temperature=0。
+默认 response_format={type:json_schema,json_schema:{name:skill_planning,strict:true,schema:…}}。
+user message 是 context 各字段加 skills 的 JSON，system message 来自包内 skill_planning_v2.txt。
+max_completion_tokens=min(配置上限,384+128×max(operation_count,1))，默认上限1024，范围128–4096。
+显式 structured_output=off 仅关闭服务端 Schema 请求，本地仍严格校验。记录 stage、usage、
+finish_reason、耗时、原始文本与 JSON；失败不 retry/fallback 为另一个 planner。
+
+PlanValidator 从固定步数/Counter 改为状态与效果：located、当前 reached、held、
+pressed/pulled/pushed/directional_move/placement_release。保留 operation 覆盖/顺序/依赖、
+step ID 唯一、真实实例/场景版本、当前角色、接近/接触、握持、放置及最终状态检查。
+重复 locate 和合法 approach 可通过；重复 displacement 会重复实际距离，仍拒绝。
+初始已持有 source 的放置允许省略抓取前缀；持有其他对象不能抓新对象。
+语义校验通过不等于物理可执行或抓取成功。
+
+失败不发布 commands、不链接上一轮 commands、不改已有场景、不猜执行后持物状态。
+无场景首轮 robot_task 先对候选场景规划，通过后才调用平台加载初始场景；失败不加载。
+平台已确认加载后的磁盘失败仍如实报告 committed，不能假装撤销外部提交。
+Query/SceneEdit 原有提交协议保持不变。executed 始终 false。
+
+报告 metrics 增加 skill_planning_calls、planner_requested、planner_used；保留
+understanding_calls、vision_calls、model_calls。计数包含失败尝试；缺 provider 是零次。
+Replay 不实现 plan，qwen 模式明确 provider_missing；MockTransport 只用于工程验收。
+配置指纹包含 planner、token 上限、skill prompt 和 catalog 的 SHA256（统一 JSON 编码后散列）。
+debug 保存 context/catalog/raw/normalized/validation 与调用日志；未完成阶段不伪造 normalized。
+
 ## 边界
 
 本版输出 Brain 原生 SceneConfig、ScenePatch、CommandsFile，不是 MJCF/XML。

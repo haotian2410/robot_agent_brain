@@ -102,6 +102,22 @@ class BrainSession:
         result = self.pipeline.process_turn(request_id, turn, self.scene,
                                            dialogue=self.dialogue, capture=self.capture,
                                            held_object=self.holding_object, bindings_override=bindings_override, edit_defaults=edit_defaults)
+        return self._accept_result(request_id, result)
+
+    def process_initial_robot_turn(self, request_id, turn, scene, *, bindings_override):
+        """Plan against a prospective bootstrap; load it only after validation.
+
+        Bootstrap supplies complete instance bindings, so this path needs no
+        rendered vision fallback. Never load a scene for a failed planner.
+        """
+        self.check_turn(turn)
+        if self.scene is not None or turn.turn_kind != "robot_task" or turn.status != "accepted":
+            raise ValueError("initial_robot_turn_required")
+        result = self.pipeline.process_turn(request_id, turn, scene, bindings_override=bindings_override)
+        self.initialize_scene(scene)
+        return self._accept_result(request_id, result)
+
+    def _accept_result(self, request_id, result):
         if self.session_action == "pause":
             if result.session_action is None or result.session_action.action not in {"resume", "close"}:
                 raise ValueError("session_paused")

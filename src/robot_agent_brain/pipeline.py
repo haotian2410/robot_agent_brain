@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .contracts.camera import CameraFrame
@@ -19,6 +20,8 @@ from .models.task_understanding import TaskUnderstandingRequest, normalize_motio
 from .planning.command_exporter import CommandExporter
 from .planning.motion_scale import MotionScaleResolver
 from .planning.recipe_planner import RecipePlanner
+from .planning.skill_planner_router import SkillPlannerRouter
+from .skills.registry import REGISTRY
 from .planning.task_expander import TaskExpander
 from .semantics.task_domain_policy import TaskDomainPolicy
 
@@ -35,6 +38,8 @@ class BrainResult(BaseModel):
     session_action: SessionControlIntent | None = None
     focus_object_ids: list[str] | None = None
     deleted_object_ids: list[str] = Field(default_factory=list)
+    planner_used: Literal["recipe", "qwen"] | None = None
+    planner_trace: dict | None = Field(default=None, exclude=True)
 
     @property
     def intent(self):
@@ -59,13 +64,16 @@ class BrainResult(BaseModel):
         return self
 
 class BrainPipeline:
-    def __init__(self, understanding, assets, scene_editor=None, vision_provider=None):
+    def __init__(self, understanding, assets, scene_editor=None, vision_provider=None,
+                 skill_planning_provider=None, planner_mode="recipe"):
         self.understanding = understanding
         self.aliases = getattr(getattr(assets, "metadata", None), "aliases", {})
         self.category_aliases = getattr(getattr(assets, "metadata", None), "category_aliases", {})
         self.grounder = SceneGrounder(aliases=self.aliases, category_aliases=self.category_aliases)
         self.motion = MotionScaleResolver(assets)
         self.planner = RecipePlanner()
+        self.skill_planner = SkillPlannerRouter(mode=planner_mode, recipe_planner=self.planner,
+                                               model_provider=skill_planning_provider, registry=REGISTRY)
         self.expander = TaskExpander()
         self.scene_editor = scene_editor or SceneEditor(assets)
         self.exporter = CommandExporter()
@@ -123,6 +131,7 @@ class BrainPipeline:
                      capture: Callable[[], CameraFrame] | None = None,
                      held_object: str | None = None) -> BrainResult:
         """Consume an understood turn without another provider call or normalization."""
+        self.skill_planner.last_trace = None
         if turn.status != TurnStatus.ACCEPTED:
             return BrainResult(status=turn.status, turn_kind=turn.turn_kind)
         if turn.turn_kind == TurnKind.SESSION_CONTROL:
@@ -158,11 +167,14 @@ class BrainPipeline:
                 overrides[exc.entity.entity_id] = ids
         grounded = self.expander.expand(grounded, scene)
         grounded = self.motion.resolve(grounded)
-        plan = self.planner.plan(grounded, held_object=held_object)
+        planning = self.skill_planner.plan(grounded, held_object=held_object, scene=scene)
+        plan = planning.plan
         commands = self.exporter.export(request_id, grounded, plan, scene, held_object=held_object)
         by_entity = {e.entity_id:e.scene_object_id for e in grounded.entities}
         focus = list(dict.fromkeys(by_entity[op.source or op.target] for op in grounded.operations))
-        return BrainResult(task_intent=intent, grounded_task=grounded, skill_plan=plan, commands=commands, focus_object_ids=focus)
+        return BrainResult(task_intent=intent, grounded_task=grounded, skill_plan=plan, commands=commands,
+                           focus_object_ids=focus, planner_used=planning.trace.used_planner,
+                           planner_trace=planning.trace.debug_payload())
 
     def run(self, request_id: str, instruction: str, scene: SceneConfig, *,
             dialogue=None, capture: Callable[[], CameraFrame] | None = None,

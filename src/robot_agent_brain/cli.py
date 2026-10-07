@@ -26,6 +26,8 @@ def parser():
         for option in options:
             cmd.add_argument("--" + option)
         cmd.add_argument("--provider", choices=["qwen", "replay"])
+        cmd.add_argument("--planner", choices=["recipe", "qwen", "auto"])
+        cmd.add_argument("--planner-max-completion-tokens", type=int)
         cmd.add_argument("--structured-output", choices=["json_schema", "off"])
         cmd.add_argument("--timeout", type=float)
         cmd.add_argument("--seed", type=int)

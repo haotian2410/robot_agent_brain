@@ -1,4 +1,122 @@
-# Query 契约收口与场景连续性返修报告 — 2026-10-07
+# Optional 第二阶段 Qwen Atomic Skill Planner — 2026-10-07
+
+基线：`ab434b24e61f3ceca0ea7365b307c821d7e3602b`。
+代码提交及 GitHub Actions 证据在推送验证后补充；最终文档提交 SHA 以 Git HEAD/交付消息为准，
+不在提交中写不可实现的自身 SHA。
+
+## 实现与边界
+
+- `planner=recipe|qwen|auto`，默认 recipe；run/chat/batch 和同名环境/JSON 配置均支持。
+- recipe：仅确定性规划；qwen：已接受 robot_task 在 grounding/展开/距离解析后调用第二模型。
+- auto：仅依据 supports=false 选 Qwen，recipe 前置条件失败不 fallback；Qwen 失败也不回退。
+- supports 集合：locate/move/grasp/release/pick_and_place/press/open/close。所有现有可执行
+  类型已有 recipe，所以 auto 当前通常仍是 recipe；未来新能力仍须同步第一阶段契约和校验器。
+- Search：supports=false，但 Registry 没有 Search，所有模式提前 capability_unsupported。
+  **Search wire 未接入**，未扩展 generic/other TaskType。
+- 第二次只组合 locate/move/grasp/release/press/pull/push。Registry 记录 signature、描述、
+  前置条件、效果、region 和可见性，不读 Control SKILL.md，不含高层 recipe。
+- PlanValidator 共用：从固定 Counter/步数改为 located/reached/held 与语义效果；重复定位和
+  合法接近可通过；角色、覆盖、顺序、依赖、持物、接触、放置和最终状态仍严格验证。
+  重复位移会翻倍距离，仍拒绝；Exporter 再次走同一门禁。
+- 无场景首轮机器人任务先规划再加载候选场景，第二规划失败不留下已提交场景。
+  既有场景失败不变、无新 commands、无旧 commands 链接，executed=false。
+- 冻结 Query/SceneEditPlan 和 Commands v2 wire 未改；未加入 MuJoCo/IK/Control 依赖。
+
+## Schema / payload / 诊断
+
+`PlannerContext`：instruction、确定性 semantic_summary、operations、entities、goals、initial_state。
+operations 只含 id/type/semantic_intent/role_bindings/valid_roles/depends_on/placement_target/
+motion_direction；entities 只含语义 id/name/category；goals 为 relation/subject/reference；
+initial_state 为 held_entity/gripper_occupied。外部持物映射 null/true。无物理快照或解析后距离字段。
+
+`SkillPlanLLMOutput`：operations[]（id、非空且≤300字符 intent、非空 steps[]）；steps 只含
+skill 枚举、target_role、reference_role、region。严格拒绝 extra；操作 ID 唯一且序列完全相同。
+Python 检查当前操作角色/注册技能/region，再绑定 TaskEntity、生成 step-N；无 silent repair。
+详细 Schema 字段与完整 JSON 示例见 contracts.md。
+
+HTTP 第二请求复用相同 URL/model/key/timeout，stage=skill_planning，temperature=0，
+默认 JSON Schema strict。user payload 为 context 的 6 项加 skills；system prompt 从 txt 载入。
+completion budget=min(cap,384+128×max(展开操作数,1))，cap 默认1024、合法128–4096。
+HTTP 仍记录 usage/finish_reason/耗时/错误/原文，不自动重试或切换模型。
+
+metrics：understanding_calls、vision_calls、skill_planning_calls、planner_requested、planner_used、
+model_calls。debug：planner_context.json、planner_skill_catalog.txt、raw_skill_plan.json、
+normalized_skill_plan.json、skill_plan_validation.json，以及 model_calls/traceback。
+没有响应时 raw 标记 available=false；未完成的阶段不伪造 normalized。配置指纹含 mode/cap/
+prompt/catalog 哈希；原始响应保持 debug-only，按已有规则脱敏。
+
+## 本地实测
+
+Python 3.12：`python -m pytest -q brain_tests -o addopts=''` → **327 passed**。
+新增四个专项文件，共 **78 个参数化测试实例**；原有 249 项保持通过。`git diff --check` 通过。
+逐项 A–H、Replay、Search、失败隔离和集合展开证据见 acceptance_matrix.md。
+
+MockTransport 实际发出的 HTTP 请求计数（不是实际 Qwen 推理）：
+
+| 模式/轮次 | 理解 | 技能规划 | 无视觉时总调用 |
+|---|---:|---:|---:|
+| recipe robot_task | 1 | 0 | 1 |
+| auto supported robot_task | 1 | 0 | 1 |
+| qwen robot_task | 1 | 1 | 2 |
+| edit/query/control/clarification | 1 | 0 | 1 |
+
+测试还检查 2 个苹果先展开为 2 个 operation，第二预算为640，导出12条命令；失败调用仍记录，
+已持有 source 可以用3步放置，额外抓取/重复位移/缺接触/错误角色被拒绝。
+
+独立 wheel：`/tmp/brain-planner-wheel-Gfjki1jp/wheels/robot_agent_brain-0.1.0-py3-none-any.whl`。
+SHA256：`16984a5f10f2fe4ba5993f5d784e86d6c272e8bb8bd8c93f6e89f4b5cb745fdf`。
+新 venv：`/tmp/brain-planner-wheel-Gfjki1jp/env`；从 /tmp 清除 PYTHONPATH 运行
+scripts/wheel_smoke.py → **passed**。实际导入 site-packages；保持 recipe 回放，不伪造二次 Qwen。
+验证包内两类 prompt、Registry、默认配置、Schema、命令和查询/编辑；产物：
+`/tmp/brain-wheel-smoke-_ghpkz5q`。临时 wheel/产物不提交到仓库。
+
+## 真实服务与限制
+
+`real_qwen_tested=false`。本轮访问 `http://127.0.0.1:8080/v1/models` 连接被拒绝；
+没有启动或重配模型，没有把 Replay/Mock 当成真实模型成功记录。真实服务恢复后需按
+manual_testing.md 做 recipe/qwen 对照，并记录 token、延迟、有效率和命令数。
+
+Control/Frontend **未联调**；真实渲染、MJCF、机器人执行均未验收。Brain 原生场景仍是 JSON。
+第二 planner 不能修正第一阶段错误数量/实体/目标，也不能创造第一阶段无法表达的新高层动作。
+按既有 domain policy，纯“苹果右移五厘米”是 scene_edit，第二调用为0；机器人 MOVE 用明确
+抓起→移动→放下链验证。当前 demo 资产没有柜门/按钮，真实复合任务需要部署方提供元数据。
+视觉可选调用独立计数；不宣称任意场景都恰好两次模型调用。
+
+## 修改文件
+
+```text
+README.md
+docs/acceptance_matrix.md
+docs/contracts.md
+docs/manual_testing.md
+docs/implementation_report.md
+brain_tests/test_skill_planning_context.py
+brain_tests/test_skill_planning_qwen.py
+brain_tests/test_skill_planner_router.py
+brain_tests/test_skill_planning_end_to_end.py
+scripts/wheel_smoke.py
+src/robot_agent_brain/config.py
+src/robot_agent_brain/resources/config.json
+src/robot_agent_brain/cli.py
+src/robot_agent_brain/skills/__init__.py
+src/robot_agent_brain/skills/registry.py
+src/robot_agent_brain/planning/context_builder.py
+src/robot_agent_brain/planning/skill_planner_router.py
+src/robot_agent_brain/planning/recipe_planner.py
+src/robot_agent_brain/planning/plan_validator.py
+src/robot_agent_brain/models/skill_planning.py
+src/robot_agent_brain/models/qwen_http.py
+src/robot_agent_brain/models/prompt_templates/skill_planning_v2.txt
+src/robot_agent_brain/pipeline.py
+src/robot_agent_brain/application.py
+src/robot_agent_brain/session/brain_session.py
+src/robot_agent_brain/diagnostics.py
+src/robot_agent_brain/adapters/artifact_writer.py
+```
+
+---
+
+# 历史：Query 契约收口与场景连续性返修报告 — 2026-10-07
 
 ## 版本与范围
 

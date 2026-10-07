@@ -11,7 +11,8 @@ import robot_agent_brain
 from jsonschema import Draft202012Validator
 from robot_agent_brain.config import BrainConfig
 from robot_agent_brain.contracts.commands import CommandsFile
-from robot_agent_brain.models.prompts import TASK_UNDERSTANDING_PROMPT
+from robot_agent_brain.models.prompts import TASK_UNDERSTANDING_PROMPT, SKILL_PLANNING_PROMPT
+from robot_agent_brain.skills.registry import REGISTRY
 
 
 def main():
@@ -21,8 +22,10 @@ def main():
     assert not Path.cwd().resolve().is_relative_to(checkout), Path.cwd()
     assert installed.is_relative_to(Path(sys.prefix).resolve()), installed
     assert TASK_UNDERSTANDING_PROMPT
+    assert SKILL_PLANNING_PROMPT and REGISTRY.prompt_catalog()
     assert files("robot_agent_brain.resources").joinpath("config.json").is_file()
     config = BrainConfig()
+    assert config.planner == "recipe"
     assert config.load_assets() and config.load_defaults()
     environment = {key:value for key,value in os.environ.items() if key != "PYTHONPATH" and not key.startswith("ROBOT_BRAIN_")}
     executable = Path(sys.executable).parent / "robot-brain"
@@ -59,6 +62,8 @@ def main():
     assert first["run_status"] == "success" and first["scene_source"] == "generated"
     assert first["provider"] == "replay" and first["executed"] is False
     assert first["metrics"]["understanding_calls"] == 1
+    assert first["metrics"]["skill_planning_calls"] == 0
+    assert first["metrics"]["planner_used"] == "recipe"
     commands = json.loads(Path(first["artifacts"]["commands"]).read_text())
     scene = json.loads(Path(first["artifacts"]["scene_config"]).read_text())
     Draft202012Validator(schema).validate(commands)

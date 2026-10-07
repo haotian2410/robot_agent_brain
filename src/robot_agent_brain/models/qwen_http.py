@@ -10,10 +10,12 @@ from urllib.parse import urlsplit, urlunsplit
 from typing import Any
 
 import httpx
+from pydantic import ValidationError
 
 from ..contracts.camera import CameraFrame
 from ..contracts.task_intent import TaskIntent
-from .prompts import TASK_UNDERSTANDING_PROMPT, VISION_GROUNDING_PROMPT, prompt_payload
+from .prompts import TASK_UNDERSTANDING_PROMPT, VISION_GROUNDING_PROMPT, SKILL_PLANNING_PROMPT, prompt_payload
+from .skill_planning import SkillPlanningRequest, SkillPlanLLMOutput
 from .task_understanding import TaskParseOutput, TaskUnderstandingRequest
 from .vision_grounding import VisionEntity, VisionGroundingOutput
 
@@ -37,12 +39,14 @@ class QwenHTTPProvider:
         *,
         client: httpx.Client | None = None,
         transport: httpx.BaseTransport | None = None,
+        planner_max_completion_tokens: int = 1024,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.api_key = api_key
         self.timeout = timeout
         self.structured_output = structured_output
+        self.planner_max_completion_tokens = planner_max_completion_tokens
         if client is not None and transport is not None:
             raise ValueError("supply either client or transport")
         self.client, self.transport = client, transport
@@ -53,7 +57,7 @@ class QwenHTTPProvider:
     def _redact(self, text):
         return text.replace(self.api_key, "[REDACTED]") if self.api_key else text
 
-    def _call(self, stage: str, prompt: str, content, schema: dict[str, Any], parse=None):
+    def _call(self, stage: str, prompt: str, content, schema: dict[str, Any], parse=None, *, max_completion_tokens=None):
         payload: dict[str, Any] = {
             "model": self.model,
             "temperature": 0,
@@ -62,6 +66,8 @@ class QwenHTTPProvider:
                 {"role": "user", "content": content},
             ],
         }
+        if max_completion_tokens is not None:
+            payload["max_completion_tokens"] = max_completion_tokens
         if self.structured_output:
             payload["response_format"] = {
                 "type": "json_schema",
@@ -111,6 +117,8 @@ class QwenHTTPProvider:
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, QwenProviderError) as exc:
             record["error"] = self._redact(f"{type(exc).__name__}: {exc}")
             code = str(exc) if str(exc) in {"motion_distance_evidence_missing", "motion_clause_binding_ambiguous"} else "provider_error"
+            if stage == "skill_planning" and isinstance(exc, ValidationError):
+                code = "planner_unknown_skill" if any(e["loc"][-1:] == ("skill",) and e["type"] == "enum" for e in exc.errors()) else "skill_plan_output_invalid"
             record["error_code"] = code
             raise QwenProviderError(f"{stage}: {record['error']}", code=code) from exc
         finally:
@@ -134,6 +142,13 @@ class QwenHTTPProvider:
             return TaskParseOutput.model_validate(value).to_brain_turn(request.instruction)
         return self._call("task_understanding", TASK_UNDERSTANDING_PROMPT,
                           prompt_payload({"instruction": request.instruction}), TaskParseOutput.model_json_schema(), parse)
+
+    def plan(self, request: SkillPlanningRequest) -> SkillPlanLLMOutput:
+        content = {**request.context.model_dump(mode="json"), "skills": request.skill_catalog}
+        budget = min(self.planner_max_completion_tokens, 384 + 128 * max(len(request.context.operations), 1))
+        return self._call("skill_planning", SKILL_PLANNING_PROMPT, prompt_payload(content),
+                          SkillPlanLLMOutput.model_json_schema(), SkillPlanLLMOutput.model_validate,
+                          max_completion_tokens=budget)
 
     def detect(self, frame: CameraFrame, entities: list[VisionEntity]) -> VisionGroundingOutput:
         if frame.rgb is None:

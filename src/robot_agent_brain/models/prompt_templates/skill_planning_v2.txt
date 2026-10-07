@@ -7,3 +7,8 @@
 标准 pick_and_place：locate(source)；move(source, grasp_region)；grasp(source)；locate(destination)；move(destination, reference=source, region=placement_region)；release(source, reference=destination, region=placement_region)。placement_target 只保留语义；具体物理位置由 Control 根据 placement_target、当前 SceneConfig 和机器人执行状态解析。Brain 不输出 placement XYZ。
 
 如果 initial_state.held_entity 已经等于 source，不要重复抓取前缀。输出格式为：{"operations":[{"id":"op-...","intent":"非空语义复述","steps":[{"skill":"...","target_role":"合法role或null","reference_role":"合法role或null","region":"...或null"}]}]}。输出前检查 role 属于 valid_roles、intent 非空、placement_target 未被修改。
+
+每个 operation 只能使用自己的 valid_roles，不能跨 operation 借用角色；每个 steps 至少一项。
+initial_state.gripper_occupied=true 时不能无条件 grasp；held_entity=null 不代表夹爪空闲。
+intent 只写简短审计说明，不输出 reasoning。不得修改 placement_target、goal 或 operation 顺序。
+禁止输出 asset_id、scene_object_id、quaternion、IK、collision、path、command_id 等执行或物理字段。

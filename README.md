@@ -60,6 +60,41 @@ Replay 验证工程链路，不证明真实 Qwen 理解质量。模型连接失�
 传入，不写入配置文件。`--assets` 和 `--defaults` 可覆盖资产索引和布局配置。
 默认资产是标注为 demo 的尺寸/类别/属性元数据，不包含真实 mesh，也不声称完成渲染。
 
+### 可选第二次 Qwen：Atomic Skill Planner
+
+`run/chat/batch` 都支持 `--planner recipe|qwen|auto`，默认 **recipe**：
+
+| 模式 | 已接受的机器人任务 |
+|---|---|
+| recipe | 一次理解 + Python 固定 recipe，零次模型技能规划 |
+| qwen | 一次理解 + 一次 Qwen 技能规划；失败明确返回，不回退 recipe |
+| auto | 仅当 `RecipePlanner.supports(task)` 为 false 才用 Qwen；不是异常 fallback |
+
+```bash
+robot-brain run '把苹果放进篮子' --provider qwen --planner qwen \
+  --base-url http://127.0.0.1:8080/v1 --model "$QWEN_MODEL" \
+  --structured-output json_schema --planner-max-completion-tokens 1024 \
+  --output-dir var/qwen-planner --debug
+robot-brain chat --provider qwen --planner qwen \
+  --model "$QWEN_MODEL" --output-dir var/qwen-planner --debug
+```
+
+第二阶段复用同一模型/地址/key，只收精简语义上下文和 7 个原子技能的摘要目录，
+输出每个 operation 内的 skill/role/region 顺序。实体绑定、数量、放置目标和距离
+仍由第一阶段与 Python 确定。Python 严格校验后才生成 Commands v2。
+Query、Scene Edit、会话控制、澄清都不调用第二阶段。
+
+目前 recipe 支持 locate/move/grasp/release/pick_and_place/press/open/close，因此
+auto 对这些任务仍使用 recipe。Search 尚无 Control wire，所有模式都明确拒绝，
+不会让 Qwen 编造 search 技能。Replay 只支持理解回放；`--planner qwen` 会报
+`skill_planning_provider_missing`，而 recipe/auto 可继续回放。
+
+`result.json.metrics` 记录逐阶段调用数和实际 planner；`--debug` 额外保存
+planner_context、planner_skill_catalog、raw_skill_plan、normalized_skill_plan、
+skill_plan_validation。失败不输出本轮 commands、不链接旧 commands、不伪造执行；
+无场景首轮机器人任务在规划通过后才提交初始场景。
+完整字段与限制见 [contracts](docs/contracts.md)，验收见 [报告](docs/implementation_report.md)。
+
 每轮生成新目录：
 
 ```text
@@ -107,7 +142,8 @@ OUTPUT/SESSION/REQUEST/query_result.json   # 查询时
 ## Public flow
 
 ```text
-User request -> TaskIntent -> GroundedTask -> MotionScaleResolver
+User request -> TaskIntent -> GroundedTask -> TaskExpander -> MotionScaleResolver
+             -> SkillPlannerRouter(recipe/qwen/auto) -> PlanValidator
              -> SkillPlan -> CommandExporter -> commands.json v2
 
 SceneConfig / ScenePatch -> ScenePlatformPort
@@ -122,7 +158,7 @@ runtime settings, IK parameters, or trajectories.
 The complete Brain turn contract supports `robot_task`, `scene_edit`,
 `scene_query`, and `session_control`. Robot tasks pass through semantic
 relation grounding, concrete instance expansion, motion-scale resolution,
-recipe planning, and command export. Scene edits produce `ScenePatch`, scene
+recipe or optional Qwen skill planning, shared validation, and command export. Scene edits produce `ScenePatch`, scene
 queries read the local `SceneConfig`, and session control produces a semantic
 pause/resume/close action.
 

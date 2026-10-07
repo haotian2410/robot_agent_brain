@@ -33,14 +33,17 @@ class BrainApplication:
                 raise BrainError("config_missing", "configuration", "Configure a model or supply a replay provider")
             provider = QwenHTTPProvider(self.config.base_url, self.config.model,
                 api_key=self.config.api_key.get_secret_value() if self.config.api_key else "",
-                timeout=self.config.timeout, structured_output=self.config.structured_output)
+                timeout=self.config.timeout, structured_output=self.config.structured_output,
+                planner_max_completion_tokens=self.config.planner_max_completion_tokens)
         self.provider = provider
         if self.config.vision and (platform_factory is LocalScenePlatform or not hasattr(provider, "detect")):
             raise BrainError("vision_requires_rendering_platform", "configuration",
                              "Vision requires an explicit rendering platform and a detection provider; LocalScenePlatform has no images")
         editor = SceneEditor(self.assets, SceneLayoutPolicy(clearance_m=self.defaults.clearance_m), seed=self.config.seed)
         self.pipeline = BrainPipeline(provider, self.assets, scene_editor=editor,
-                                      vision_provider=provider if self.config.vision else None)
+                                      vision_provider=provider if self.config.vision else None,
+                                      skill_planning_provider=provider if hasattr(provider, "plan") else None,
+                                      planner_mode=self.config.planner)
         self.bootstrapper = SceneBootstrapper(self.assets, self.defaults, robot=self.config.robot, seed=self.config.seed)
         self.codec = SceneFileCodec(self.assets)
         self.writer = ArtifactWriter(self.config.output_dir)
@@ -91,7 +94,8 @@ class BrainApplication:
             return BrainRunReport(session_id=session_id, request_id=uuid.uuid4().hex,
                 run_status="blocked" if issue.code == "session_busy" else "failed",
                 provider=self.config.provider, error=issue, reply=issue.message,
-                metrics={"understanding_calls":0, "vision_calls":0, "model_calls":[]})
+                metrics={"understanding_calls":0, "vision_calls":0, "skill_planning_calls":0,
+                         "planner_requested":self.config.planner, "planner_used":None, "model_calls":[]})
 
     def _save_session(self, session_id):
         self.revisions[session_id] = self.store.save(session_id, self.sessions[session_id],
@@ -129,6 +133,7 @@ class BrainApplication:
         before = session.scene
         calls_start = len(getattr(self.provider, "calls", []))
         understanding_calls = 0
+        self.pipeline.skill_planner.last_trace = None
         try:
             if session.session_action == "close":
                 raise ValueError("session_closed")
@@ -151,18 +156,28 @@ class BrainApplication:
             else:
                 session.check_turn(turn)
                 bindings = None
+                initial_robot = None
                 if session.scene is None and turn.turn_kind not in {"scene_query", "session_control"}:
                     stage = "bootstrap"
                     initial = self.bootstrapper.prepare(turn, scene_id=uuid.uuid4().hex)
-                    session.initialize_scene(initial.scene)
                     report.scene_source = "generated"
+                    report.assumptions = initial.assumptions
+                    if turn.turn_kind == "robot_task":
+                        initial_robot = initial
+                    else:
+                        session.initialize_scene(initial.scene)
+                        report.scene_created = True
+                        report.scene_commit_status = "committed"
+                        bindings = initial.bindings_for(session.scene)
+                stage = "processing"
+                if initial_robot is not None:
+                    result = session.process_initial_robot_turn(request_id, turn, initial_robot.scene,
+                        bindings_override=initial_robot.bindings_for(initial_robot.scene))
                     report.scene_created = True
                     report.scene_commit_status = "committed"
-                    report.assumptions = initial.assumptions
-                    bindings = initial.bindings_for(session.scene)
-                stage = "processing"
-                result = session.process_turn(request_id, turn, bindings_override=bindings,
-                                              edit_defaults=self.defaults if report.scene_created else None)
+                else:
+                    result = session.process_turn(request_id, turn, bindings_override=bindings,
+                                                  edit_defaults=self.defaults if report.scene_created else None)
                 report.run_status = "success"
                 if result.commands is not None:
                     report.delivery_status = "commands_exported"
@@ -194,7 +209,11 @@ class BrainApplication:
         if session.scene is not None:
             report.scene_id, report.scene_version = session.scene.scene_id, session.scene.scene_version
         current_calls = getattr(self.provider,"calls",[])[calls_start:]
+        planning_trace = self.pipeline.skill_planner.last_trace
         report.metrics = {"understanding_calls":understanding_calls,
+                          "skill_planning_calls":planning_trace.model_calls if planning_trace else 0,
+                          "planner_requested":self.config.planner,
+                          "planner_used":planning_trace.used_planner if planning_trace else None,
                           "vision_calls":sum(call.get("stage") == "vision_grounding" for call in current_calls),
                           "elapsed_seconds":time.monotonic()-started,
                           "model_calls":current_calls}
@@ -209,6 +228,17 @@ class BrainApplication:
                   "after_version":report.scene_version}
         secret = self.config.api_key.get_secret_value() if self.config.api_key else None
         if self.config.debug:
+            if planning_trace is not None:
+                debug.update(planning_trace.debug_payload())
+                if planning_trace.model_calls and "raw_skill_plan" not in debug:
+                    raw_values = getattr(self.provider, "last_raw_values", {})
+                    raw_text = getattr(self.provider, "last_raw_text", {})
+                    if "skill_planning" in raw_values:
+                        debug["raw_skill_plan"] = raw_values["skill_planning"]
+                    elif "skill_planning" in raw_text:
+                        debug["raw_skill_plan"] = {"text": raw_text["skill_planning"]}
+                    else:
+                        debug["raw_skill_plan"] = {"available": False, "reason": "No model response received"}
             debug["model_calls"] = report.metrics["model_calls"]
             if len(getattr(self.provider, "calls", [])) > calls_start:
                 debug["raw_model_response"] = json.dumps(getattr(self.provider, "last_raw_text", {}), ensure_ascii=False)

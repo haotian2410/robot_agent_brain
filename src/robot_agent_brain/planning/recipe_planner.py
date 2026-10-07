@@ -6,6 +6,13 @@ from ..contracts.task_intent import TaskType
 
 
 class RecipePlanner:
+    SUPPORTED_TASK_TYPES = frozenset({TaskType.LOCATE, TaskType.MOVE, TaskType.GRASP, TaskType.RELEASE,
+                                    TaskType.PICK_AND_PLACE, TaskType.PRESS, TaskType.OPEN, TaskType.CLOSE})
+
+    @classmethod
+    def supports(cls, task: GroundedTask) -> bool:
+        return all(op.task_type in cls.SUPPORTED_TASK_TYPES for op in task.operations)
+
     def plan(self, task: GroundedTask, held_object: str | None = None) -> SkillPlan:
         steps: list[SkillStep] = []
         current_held = held_object
