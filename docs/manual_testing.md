@@ -88,6 +88,11 @@ skipped，`continue_after_failure=true` 才继续；独立组继续。summary �
 
 ## 查询与场景连续性专项
 
+Scene Edit 已统一为 SceneEditPlan；自定义 Replay 或模型输出中即便只“增加一个香蕉”，
+也需要 entities + relations + operations。名称/数量只放 entities，操作通过 target 引用。
+旧的直接 scene_edit.operation/semantic_name/category/count 不再接受，示例见 contracts.md
+和 examples/replay/add_apple.json。自然语言 CLI 用法不变。
+
 已存在的同一会话可运行（先按上文配置真实 Qwen 的 model）：
 
 ```bash

@@ -48,6 +48,10 @@ def main():
         "status":"accepted", "turn_kind":"scene_query", "instruction":plural,
         "scene_query":{"query_type":"count", "entities":[{"entity_id":"a", "semantic_name":"apple", "category":"fruit",
             "dialogue_ref_set":True, "quantity_mode":"all", "all_available":True}], "relations":[], "target":"a"}}})
+    add = "增加一个香蕉"
+    fixture.append({"instruction":add, "turn":{"status":"accepted", "turn_kind":"scene_edit", "instruction":add,
+        "scene_edit":{"entities":[{"entity_id":"banana", "semantic_name":"banana", "category":"fruit"}],
+            "relations":[], "operations":[{"operation":"add", "target":"banana"}]}}})
     replay = directory / "replay.json"
     replay.write_text(json.dumps(fixture, ensure_ascii=False), encoding="utf-8")
     common = ["--provider", "replay", "--replay-file", str(replay), "--output-dir", str(directory / "out"), "--session", "wheel-session", "--json"]
@@ -68,6 +72,15 @@ def main():
     assert third["run_status"] == "success" and "commands" not in third["artifacts"]
     query = json.loads(Path(third["artifacts"]["query_result"]).read_text())
     assert query["count"] == 2 and len(query["object_ids"]) == 2
+    # No-reference additions use defaults only on initial scene creation;
+    # existing sessions must supply a placement reference.
+    add_options = list(common)
+    add_options[add_options.index("--session") + 1] = "wheel-add"
+    fourth = json.loads(run("run", add, *add_options))
+    assert fourth["run_status"] == "success" and "commands" not in fourth["artifacts"]
+    assert fourth["scene_source"] == "generated" and fourth["scene_version"] == 1
+    edited = json.loads(Path(fourth["artifacts"]["scene_config"]).read_text())
+    assert sum(o["semantic_name"] == "banana" for o in edited["objects"]) == 1
     print(json.dumps({"wheel_smoke":"passed", "installed_module":str(installed), "artifacts":str(directory),
                       "provider":"replay", "real_qwen_tested":False}, ensure_ascii=False))
 

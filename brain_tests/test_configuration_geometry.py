@@ -1,7 +1,7 @@
 import pytest
 from robot_agent_brain.application import BrainApplication
 from robot_agent_brain.config import BrainConfig
-from robot_agent_brain.contracts.turn import BrainTurn, SceneEditIntent
+from robot_agent_brain.contracts.turn import BrainTurn, SceneEditIntent, SceneEditPlan
 from robot_agent_brain.contracts.task_intent import TaskEntity
 from robot_agent_brain.scene.asset_resolver import AssetResolver
 from robot_agent_brain.scene.bootstrapper import SceneBootstrapper
@@ -11,7 +11,7 @@ from test_application_artifacts import Provider, robot
 
 def test_add_layout_is_seeded_and_repeatable(tmp_path):
     turn = BrainTurn(status="accepted", turn_kind="scene_edit", instruction="添加两个苹果",
-                     scene_edit=SceneEditIntent(operation="add", semantic_name="apple", category="fruit", count=2))
+                     scene_edit=SceneEditPlan(entities=[dict(entity_id="target", semantic_name='apple', category='fruit', count=2, quantity_mode='all')], operations=[SceneEditIntent(operation='add', target="target")]))
     positions = []
     for index, seed in enumerate((0,0,17)):
         app = BrainApplication(BrainConfig(provider="replay", seed=seed, output_dir=str(tmp_path / str(index))), provider=Provider(turn))

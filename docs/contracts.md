@@ -46,6 +46,22 @@ REMOVED：dialogue_scene_object_id marker 和 Provider 单对象 referent 注入
 dialogue_ref_set=true、quantity_mode=all、all_available=true。实际实例集合由 Python
 DialogueState.bindings 注入。集合后的单数“它”返回 dialogue_reference_ambiguous。
 
+## Scene Edit：只接受 SceneEditPlan
+
+BrainTurn.scene_edit 和 TaskParseOutput.scene_edit 现在都只有 `SceneEditPlan | None`。
+一次新增也必须采用 entities/relations/operations，不再接受直接的 SceneEditIntent payload：
+
+```json
+{"entities":[{"entity_id":"banana","semantic_name":"banana","category":"fruit"}],"relations":[],"operations":[{"operation":"add","target":"banana"}]}
+```
+
+SceneEditIntent 类名保留，但它只表示 operations 数组内的一条操作；target 必填，
+target/reference 必须引用本计划实体。REMOVED：操作中的 semantic_name/category/count。
+数量、颜色、别名和指代放在 TaskEntity 中。旧格式明确拒绝，无兼容转换。
+SceneEditor.edit/edit_result 只接收计划；目标与参照统一经过 SceneObjectSelector →
+SceneGrounder → SemanticEntitySelector。删除 `_matches_name` 和 Bootstrapper 的旧编辑适配。
+新增资产仍由 AssetResolver 选择；同轮新增对象的稳定绑定、集合数量和单版本原子提交保留。
+
 ## 布局高度与支撑事实
 
 left_of/right_of/front_of/behind 保留已有对象 Z；新增对象先确定可验证支撑面，

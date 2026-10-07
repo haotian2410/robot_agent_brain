@@ -19,8 +19,7 @@ def fixture():
 def test_collection_new_poses_are_checked_against_each_other():
     editor, scene = fixture()
     original = scene.model_dump()
-    edit = SceneEditIntent(operation="move_relative", semantic_name="apple", category="fruit", count=2,
-                           reference="b", relation="right_of")
+    edit = SceneEditPlan(entities=[dict(entity_id="target", semantic_name='apple', category='fruit', count=2, quantity_mode='all'), dict(entity_id="reference", semantic_name='b', category="container")], operations=[SceneEditIntent(operation='move_relative', relation='right_of', target="target", reference="reference")])
     with pytest.raises(ValueError, match="scene_edit_transform_collision"):
         editor.edit(edit, scene)
     assert scene.model_dump() == original
@@ -28,8 +27,7 @@ def test_collection_new_poses_are_checked_against_each_other():
 
 def test_collection_translation_may_use_vacated_space():
     editor, scene = fixture()
-    patch = editor.edit(SceneEditIntent(operation="translate", semantic_name="apple", category="fruit", count=2,
-                                        direction="right", distance_m=.2), scene)
+    patch = editor.edit(SceneEditPlan(entities=[dict(entity_id="target", semantic_name='apple', category='fruit', count=2, quantity_mode='all')], operations=[SceneEditIntent(operation='translate', direction='right', distance_m=0.2, target="target")]), scene)
     result = SceneManager(scene).apply_patch(patch)
     assert [o.transform.position[0] for o in result.objects[:2]] == pytest.approx([.2,.4])
     assert result.scene_version == 1
@@ -38,9 +36,11 @@ def test_collection_translation_may_use_vacated_space():
 def test_late_plan_failure_keeps_original_scene():
     editor, scene = fixture()
     original = scene.model_dump()
-    plan = SceneEditPlan(operations=[
-        SceneEditIntent(operation="translate", semantic_name="apple", category="fruit", count=2, direction="right", distance_m=.2),
-        SceneEditIntent(operation="translate", semantic_name="missing", category="fruit", direction="right", distance_m=.2)])
-    with pytest.raises(ValueError, match="scene_edit_object_missing"):
+    plan = SceneEditPlan(entities=[
+        dict(entity_id="apples", semantic_name="apple", category="fruit", count=2, quantity_mode="all"),
+        dict(entity_id="missing", semantic_name="missing", category="fruit")], operations=[
+        SceneEditIntent(operation="translate", target="apples", direction="right", distance_m=.2),
+        SceneEditIntent(operation="translate", target="missing", direction="right", distance_m=.2)])
+    with pytest.raises(ValueError, match="grounding_missing"):
         editor.edit(plan, scene)
     assert scene.model_dump() == original

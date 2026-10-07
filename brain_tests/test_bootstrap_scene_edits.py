@@ -68,11 +68,11 @@ def test_all_available_add_never_defaults_to_one():
     assert len([op for op in patch.operations if op.action == "update_property" and op.properties["support"] == "table_01"]) == 3
 
 
-def test_legacy_reference_add_bootstraps_reference_only():
+def test_canonical_reference_add_bootstraps_reference_only():
     config = BrainConfig()
     assets, defaults = config.load_assets(), config.load_defaults()
     turn = BrainTurn(status="accepted", turn_kind="scene_edit", instruction="在苹果右边增加香蕉",
-        scene_edit=SceneEditIntent(operation="add", semantic_name="banana", category="fruit", reference="apple", relation="right_of"))
+        scene_edit=SceneEditPlan(entities=[dict(entity_id="target", semantic_name='banana', category='fruit', count=1, quantity_mode='single'), dict(entity_id="reference", semantic_name='apple', category="fruit")], operations=[SceneEditIntent(operation='add', relation='right_of', target="target", reference="reference")]))
     initial = SceneBootstrapper(assets, defaults).prepare(turn, scene_id="s")
     assert [o.semantic_name for o in initial.scene.objects].count("apple") == 1
     assert not any(o.semantic_name == "banana" for o in initial.scene.objects)

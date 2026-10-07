@@ -76,7 +76,7 @@ def test_unknown_all_count_and_unsupported_initial_relation():
 def test_pure_remove_does_not_create_objects():
     _, bootstrap = setup()
     turn = BrainTurn(status="accepted", turn_kind="scene_edit", instruction="remove",
-                     scene_edit=SceneEditIntent(operation="remove", semantic_name="apple", category="fruit"))
+                     scene_edit=SceneEditPlan(entities=[dict(entity_id="target", semantic_name='apple', category='fruit', count=1, quantity_mode='single')], operations=[SceneEditIntent(operation='remove', target="target")]))
     with pytest.raises(ValueError, match="scene_required"):
         bootstrap.prepare(turn, scene_id="s")
 

@@ -3,7 +3,7 @@ import pytest
 from robot_agent_brain.adapters.local_asset_catalog import LocalAssetCatalog
 from robot_agent_brain.contracts.scene import ModelProperty, SceneConfig, SceneObject
 from robot_agent_brain.contracts.task_intent import TaskIntent, TaskEntity, Operation
-from robot_agent_brain.contracts.turn import BrainTurn, SceneEditIntent, SceneQueryIntent, SessionControlIntent
+from robot_agent_brain.contracts.turn import BrainTurn, SceneEditIntent, SceneQueryIntent, SessionControlIntent, SceneEditPlan
 from robot_agent_brain.pipeline import BrainPipeline
 
 
@@ -22,8 +22,7 @@ def fixture_pipeline(kind):
         "robot_task": dict(task_intent=TaskIntent(instruction="抓起苹果", entities=[
             TaskEntity(entity_id="apple", semantic_name="apple", category="fruit")],
             operations=[Operation(operation_id="op-1", task_type="grasp", target="apple")])),
-        "scene_edit": dict(scene_edit=SceneEditIntent(operation="translate", semantic_name="apple",
-                                                      category="fruit", direction="right", distance_m=.1)),
+        "scene_edit": dict(scene_edit=SceneEditPlan(entities=[dict(entity_id="target", semantic_name='apple', category='fruit', count=1, quantity_mode='single')], operations=[SceneEditIntent(operation='translate', direction='right', distance_m=0.1, target="target")])),
         "scene_query": dict(scene_query=SceneQueryIntent(query_type="count", target="apple", entities=[dict(entity_id="apple", semantic_name="apple", category="fruit")])),
         "session_control": dict(session_control=SessionControlIntent(action="pause")),
     }[kind]

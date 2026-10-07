@@ -18,12 +18,10 @@ class TurnKind(StrEnum):
     UNSUPPORTED_TASK = "unsupported_task"
 
 class SceneEditIntent(BaseModel):
+    """One operation in a SceneEditPlan; never a standalone turn payload."""
     model_config = ConfigDict(extra="forbid")
     operation: Literal["add", "remove", "translate", "rotate", "move_relative", "update_properties", "update"]
-    semantic_name: str = ""
-    category: str = ""
-    target: str | None = None
-    count: int = Field(default=1, ge=1)
+    target: str = Field(min_length=1)
     relation: str | None = None
     reference: str | None = None
     properties: dict[str, str | float | bool] = Field(default_factory=dict)
@@ -38,8 +36,6 @@ class SceneEditIntent(BaseModel):
 
     @model_validator(mode="after")
     def paired_relation(self):
-        if not self.target and not (self.semantic_name and self.category):
-            raise ValueError("scene edit needs a target selector or legacy name/category")
         if (self.relation is None) != (self.reference is None):
             raise ValueError("task_semantic_invalid: scene edit relation/reference must be paired")
         if self.operation in {"translate", "move_relative"} and not (self.direction or self.relation):
@@ -56,7 +52,7 @@ class SceneEditIntent(BaseModel):
             "translate": {"direction", "distance_m", "motion_scale"},
             "move_relative": {"relation", "reference"},
             "rotate": {"axis", "angle_deg"}, "update_properties": set(),
-            "update": {"relation", "reference"},  # legacy layout/property edit
+            "update": {"relation", "reference"},  # combined layout/property operation
         }[self.operation]
         if any(value is not None and key not in allowed for key, value in fields.items()):
             raise ValueError(f"scene_edit_fields_forbidden: {self.operation}")
@@ -74,7 +70,7 @@ class SceneEditIntent(BaseModel):
 class SceneEditPlan(BaseModel):
     """Ordered edits sharing the same entity/selection contract as robot tasks."""
     model_config = ConfigDict(extra="forbid")
-    entities: list[TaskEntity] = Field(default_factory=list)
+    entities: list[TaskEntity] = Field(min_length=1)
     relations: list[SpatialRelation] = Field(default_factory=list)
     operations: list[SceneEditIntent] = Field(min_length=1)
 
@@ -84,9 +80,9 @@ class SceneEditPlan(BaseModel):
                    operations=[], spatial_relations=self.relations)
         ids = {entity.entity_id for entity in self.entities}
         for op in self.operations:
-            if op.target and op.target not in ids:
+            if op.target not in ids:
                 raise ValueError("scene_edit_unknown_selector")
-            if op.reference and op.target and op.reference not in ids:
+            if op.reference and op.reference not in ids:
                 raise ValueError("scene_edit_unknown_reference_selector")
         return self
 
@@ -116,7 +112,7 @@ class BrainTurn(BaseModel):
     turn_kind: TurnKind
     instruction: str
     task_intent: TaskIntent | None = None
-    scene_edit: SceneEditPlan | SceneEditIntent | None = None
+    scene_edit: SceneEditPlan | None = None
     scene_query: SceneQueryIntent | None = None
     session_control: SessionControlIntent | None = None
 

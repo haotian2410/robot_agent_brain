@@ -1,6 +1,6 @@
 from robot_agent_brain.contracts.scene import ModelProperty, SceneConfig, SceneObject, Transform
 from robot_agent_brain.contracts.task_intent import Direction, Operation, TaskEntity, TaskIntent, TaskType
-from robot_agent_brain.contracts.turn import BrainTurn, SceneEditIntent
+from robot_agent_brain.contracts.turn import BrainTurn, SceneEditIntent, SceneEditPlan
 from robot_agent_brain.adapters.local_asset_catalog import LocalAssetCatalog
 from robot_agent_brain.pipeline import BrainPipeline
 
@@ -41,8 +41,7 @@ def test_multiple_scene_moves_are_atomic_and_keep_transform_components():
 class NativeSceneUnderstanding:
     def understand_turn(self, request):
         return BrainTurn(status="accepted", turn_kind="scene_edit", instruction=request.instruction,
-                         scene_edit=SceneEditIntent(operation="translate", semantic_name="apple",
-                                                    category="fruit", direction="right", distance_m=0.001))
+                         scene_edit=SceneEditPlan(entities=[dict(entity_id="target", semantic_name='apple', category='fruit', count=1, quantity_mode='single')], operations=[SceneEditIntent(operation='translate', direction='right', distance_m=0.001, target="target")]))
 
 
 def test_native_scene_edit_distance_is_replaced_by_text_evidence():

@@ -46,11 +46,11 @@ def test_query_and_edit_focus_then_delete_invalidation():
     session.process_turn("q", BrainTurn(status="accepted", turn_kind="scene_query", instruction="red?", scene_query=query()))
     assert session.dialogue.last_entity_id == "a"
     session.process_turn("e", BrainTurn(status="accepted", turn_kind="scene_edit", instruction="move",
-        scene_edit=SceneEditIntent(operation="translate", semantic_name="b", category="fruit", direction="right", distance_m=.1)))
+        scene_edit=SceneEditPlan(entities=[dict(entity_id="target", semantic_name='b', category='fruit', count=1, quantity_mode='single')], operations=[SceneEditIntent(operation='translate', direction='right', distance_m=0.1, target="target")])))
     assert session.dialogue.last_entity_id == "b"
     assert "[dialogue_ref=apple]" in session.dialogue.contextualize("移动它", session.scene)
     session.process_turn("d", BrainTurn(status="accepted", turn_kind="scene_edit", instruction="remove",
-        scene_edit=SceneEditIntent(operation="remove", semantic_name="b", category="fruit")))
+        scene_edit=SceneEditPlan(entities=[dict(entity_id="target", semantic_name='b', category='fruit', count=1, quantity_mode='single')], operations=[SceneEditIntent(operation='remove', target="target")])))
     assert session.dialogue.last_entity_id is None
     with pytest.raises(ValueError, match="dialogue_reference_missing"):
         session.dialogue.contextualize("抓起它", session.scene)

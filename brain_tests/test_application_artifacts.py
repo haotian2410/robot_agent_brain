@@ -3,7 +3,7 @@ import pytest
 from pathlib import Path
 from robot_agent_brain.application import BrainApplication
 from robot_agent_brain.config import BrainConfig
-from robot_agent_brain.contracts.turn import BrainTurn, SceneQueryIntent, SceneEditIntent
+from robot_agent_brain.contracts.turn import BrainTurn, SceneQueryIntent, SceneEditIntent, SceneEditPlan
 from robot_agent_brain.contracts.task_intent import TaskIntent, TaskEntity, Operation
 from robot_agent_brain.contracts.scene import SceneConfig
 
@@ -66,7 +66,7 @@ def test_loaded_empty_robot_never_generates_objects(tmp_path):
 
 def test_platform_commit_survives_publication_failure(tmp_path, monkeypatch):
     provider = Provider(BrainTurn(status="accepted", turn_kind="scene_edit", instruction="add",
-                                  scene_edit=SceneEditIntent(operation="add", semantic_name="apple", category="fruit")))
+                                  scene_edit=SceneEditPlan(entities=[dict(entity_id="target", semantic_name='apple', category='fruit', count=1, quantity_mode='single')], operations=[SceneEditIntent(operation='add', target="target")])))
     app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path)), provider=provider)
     def fail(*args, **kwargs):
         raise OSError("disk full")

@@ -6,7 +6,7 @@ from robot_agent_brain.contracts.grounded_task import GroundedEntity, GroundedTa
 from robot_agent_brain.contracts.scene import ModelProperty, SceneConfig, SceneObject, Transform
 from robot_agent_brain.contracts.spatial import SpatialRelationType
 from robot_agent_brain.contracts.task_intent import Direction, MotionScale, Operation, QuantityMode, TaskEntity, TaskIntent, TaskType
-from robot_agent_brain.contracts.turn import BrainTurn, SceneEditIntent, TurnKind, TurnStatus
+from robot_agent_brain.contracts.turn import BrainTurn, SceneEditIntent, TurnKind, TurnStatus, SceneEditPlan
 from robot_agent_brain.grounding.scene_grounder import SceneGrounder
 from robot_agent_brain.models.prompts import TASK_UNDERSTANDING_PROMPT
 from robot_agent_brain.models.task_understanding import normalize_motion_language
@@ -89,7 +89,7 @@ def test_brain_session_uses_local_scene_manager_and_remote_snapshot():
 
 def test_brain_turn_enforces_single_payload():
     with pytest.raises(ValueError):
-        BrainTurn(status=TurnStatus.ACCEPTED, turn_kind=TurnKind.SCENE_EDIT, instruction="x", scene_edit=SceneEditIntent(operation="add", semantic_name="banana", category="fruit"), task_intent=TaskIntent(instruction="x", entities=[], operations=[]))
+        BrainTurn(status=TurnStatus.ACCEPTED, turn_kind=TurnKind.SCENE_EDIT, instruction="x", scene_edit=SceneEditPlan(entities=[dict(entity_id="target", semantic_name='banana', category='fruit', count=1, quantity_mode='single')], operations=[SceneEditIntent(operation='add', target="target")]), task_intent=TaskIntent(instruction="x", entities=[], operations=[]))
 
 
 def test_specific_name_does_not_fall_back_to_same_category():
@@ -145,7 +145,7 @@ def test_scene_edit_add_uses_asset_and_commits_through_session():
     class Provider:
         def understand_turn(self, request):
             return BrainTurn(status="accepted", turn_kind=TurnKind.SCENE_EDIT, instruction=request.instruction,
-                             scene_edit=SceneEditIntent(operation="add", semantic_name="banana", category="fruit", relation="right_of", reference="apple"))
+                             scene_edit=SceneEditPlan(entities=[dict(entity_id="target", semantic_name='banana', category='fruit', count=1, quantity_mode='single'), dict(entity_id="reference", semantic_name='apple', category="fruit")], operations=[SceneEditIntent(operation='add', relation='right_of', target="target", reference="reference")]))
     assets = LocalAssetCatalog([
         ModelProperty(asset_id="apple", semantic_name="apple", category="fruit", dimensions_m=(.1, .1, .1)),
         ModelProperty(asset_id="banana", semantic_name="banana", category="fruit", dimensions_m=(.1, .1, .1)),

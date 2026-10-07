@@ -93,10 +93,10 @@ F. “打开两个柜门”：door count=2；保留 door 与 handle 语义，物
 G. “增加一个香蕉”：scene_edit relation/reference 都为 null。
 
 ## 14. Turn 输出结构示例（字段必须嵌套）
-scene_edit 必须把编辑意图放在 scene_edit 对象中，不能把 operation、semantic_name、category、count、relation、reference 放在顶层。例如：
+scene_edit 唯一格式为 SceneEditPlan：entities + relations + operations，即使只有一次编辑也使用 operations 数组。名称、类别、数量、颜色和指代只放在 TaskEntity 中；每个 operation 必须通过 target 引用 entity_id，reference 也必须引用 entity_id。禁止直接输出旧式 scene_edit.operation/semantic_name/category/count，也禁止在 operations 条目中放 semantic_name/category/count。例如：
 {"status":"accepted","turn_kind":"scene_edit","scene_edit":{"entities":[{"entity_id":"banana","semantic_name":"banana","category":"fruit"},{"entity_id":"basket","semantic_name":"basket","category":"container"}],"relations":[],"operations":[{"operation":"add","target":"banana","relation":"right_of","reference":"basket"}]},"entities":[],"operations":[],"relations":[],"scene_query":null,"session_control":null}
 没有参照物时 relation 和 reference 同时为 null：
-{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"operation":"add","semantic_name":"banana","category":"fruit","count":1,"relation":null,"reference":null},"entities":[],"operations":[],"relations":[],"scene_query":null,"session_control":null}
+{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"entities":[{"entity_id":"banana","semantic_name":"banana","category":"fruit"}],"relations":[],"operations":[{"operation":"add","target":"banana","relation":null,"reference":null}]},"entities":[],"operations":[],"relations":[],"scene_query":null,"session_control":null}
 scene_query 和 session_control 也必须分别嵌套在 scene_query/session_control 中，并且不要生成 robot operations。例如：
 {"status":"accepted","turn_kind":"scene_query","scene_edit":null,"scene_query":{"query_type":"count","entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit"}],"relations":[],"target":"apple"},"session_control":null,"entities":[],"operations":[],"relations":[]}
 {"status":"accepted","turn_kind":"session_control","scene_edit":null,"scene_query":null,"session_control":{"action":"pause"},"entities":[],"operations":[],"relations":[]}

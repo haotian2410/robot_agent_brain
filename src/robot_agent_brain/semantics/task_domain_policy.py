@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..contracts.turn import BrainTurn, SceneEditIntent, SceneEditPlan, TurnKind, TurnStatus
-from ..contracts.task_intent import Operation, TaskIntent, TaskEntity
+from ..contracts.task_intent import Operation, TaskIntent
 from .robot_interactions import RobotInteractionLexicon
 
 
@@ -21,7 +21,7 @@ class TaskDomainPolicy:
             from .motion_evidence import normalize_scene_motion
             edits = normalize_scene_motion(instruction, turn.scene_edit)
             turn = turn.model_copy(update={"scene_edit": edits})
-            plan = edits if isinstance(edits, SceneEditPlan) else SceneEditPlan(operations=[edits])
+            plan = edits
             if explicit_robot or any(op.explicit_robot for op in plan.operations):
                 if any(op.operation != "translate" or op.reference for op in plan.operations):
                     return self._clarify(instruction)
@@ -29,11 +29,6 @@ class TaskDomainPolicy:
                 operations = []
                 for index, edit in enumerate(plan.operations, 1):
                     target = edit.target
-                    if target is None:
-                        target = f"edit_object_{index}"
-                        entities.append(TaskEntity(entity_id=target, semantic_name=edit.semantic_name,
-                                                   category=edit.category, count=edit.count,
-                                                   quantity_mode="all" if edit.count > 1 else "single"))
                     operations.append(Operation(operation_id=f"op-{index}", task_type="move", target=target,
                                                 motion_direction=edit.direction, distance_m=edit.distance_m,
                                                 motion_scale=edit.motion_scale))

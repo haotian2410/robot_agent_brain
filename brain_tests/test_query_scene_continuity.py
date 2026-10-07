@@ -103,8 +103,7 @@ def test_l_z01_z03_planar_relative_moves_preserve_support_height(target, referen
     obj = next(o for o in scene.objects if o.semantic_name == target)
     x,y,z = obj.transform.position
     obj.transform = Transform(position=(x,y,z*scale), scale=(1,1,scale))
-    patch = SceneEditor(assets).edit(SceneEditIntent(operation="move_relative", semantic_name=target,
-        category="fruit", reference=reference, relation="right_of"), scene)
+    patch = SceneEditor(assets).edit(SceneEditPlan(entities=[dict(entity_id="target", semantic_name=target, category='fruit', count=1, quantity_mode='single'), dict(entity_id="reference", semantic_name=reference, category="fruit")], operations=[SceneEditIntent(operation='move_relative', relation='right_of', target="target", reference="reference")]), scene)
     final = SceneManager(scene).apply_patch(patch)
     moved = next(o for o in final.objects if o.semantic_name == target)
     assert moved.transform.position[2] == z*scale
@@ -117,8 +116,7 @@ def test_l_z04_relative_add_uses_verified_support_and_own_bottom():
     scene = supported_scene()
     scene.objects.pop()  # remove existing banana
     assets = BrainConfig().load_assets()
-    patch = SceneEditor(assets).edit(SceneEditIntent(operation="add", semantic_name="banana", category="fruit",
-        reference="apple", relation="right_of"), scene)
+    patch = SceneEditor(assets).edit(SceneEditPlan(entities=[dict(entity_id="target", semantic_name='banana', category='fruit', count=1, quantity_mode='single'), dict(entity_id="reference", semantic_name='apple', category="fruit")], operations=[SceneEditIntent(operation='add', relation='right_of', target="target", reference="reference")]), scene)
     final = SceneManager(scene).apply_patch(patch)
     banana = next(o for o in final.objects if o.semantic_name == "banana")
     assert banana.transform.position[0] > scene.objects[1].transform.position[0]
@@ -131,8 +129,7 @@ def test_f_s01_s04_support_continuity_and_no_guessed_membership(direction, dista
     scene = supported_scene()
     scene.objects[1].properties["container_membership"] = "box_01"
     assets = BrainConfig().load_assets()
-    patch = SceneEditor(assets).edit(SceneEditIntent(operation="translate", semantic_name="apple", category="fruit",
-        direction=direction, distance_m=distance), scene)
+    patch = SceneEditor(assets).edit(SceneEditPlan(entities=[dict(entity_id="target", semantic_name='apple', category='fruit', count=1, quantity_mode='single')], operations=[SceneEditIntent(operation='translate', direction=direction, distance_m=distance, target="target")]), scene)
     assert [op.action for op in patch.operations] == ["update_transform", "update_property"]
     final = SceneManager(scene).apply_patch(patch)
     apple = final.objects[1]
@@ -151,8 +148,7 @@ def test_relative_add_without_verified_or_default_support_is_rejected():
     scene = supported_scene()
     scene.objects[1].transform = Transform(position=(-.25,0,.2))
     with pytest.raises(ValueError, match="scene_edit_support_unknown"):
-        SceneEditor(BrainConfig().load_assets()).edit(SceneEditIntent(operation="add", semantic_name="banana",
-            category="fruit", relation="right_of", reference="apple"), scene)
+        SceneEditor(BrainConfig().load_assets()).edit(SceneEditPlan(entities=[dict(entity_id="target", semantic_name='banana', category='fruit', count=1, quantity_mode='single'), dict(entity_id="reference", semantic_name='apple', category="fruit")], operations=[SceneEditIntent(operation='add', relation='right_of', target="target", reference="reference")]), scene)
 
 
 def test_world_bounds_respect_offset_aabb_scale_and_quaternion():
@@ -213,8 +209,7 @@ def test_default_support_fallback_is_explicit_and_geometry_checked():
     scene.objects.pop()
     scene.objects[1].transform.position = (-.25,0,.2)
     config = BrainConfig()
-    patch = SceneEditor(config.load_assets()).edit(SceneEditIntent(operation="add", semantic_name="banana",
-        category="fruit", relation="right_of", reference="apple"), scene, defaults=config.load_defaults())
+    patch = SceneEditor(config.load_assets()).edit(SceneEditPlan(entities=[dict(entity_id="target", semantic_name='banana', category='fruit', count=1, quantity_mode='single'), dict(entity_id="reference", semantic_name='apple', category="fruit")], operations=[SceneEditIntent(operation='add', relation='right_of', target="target", reference="reference")]), scene, defaults=config.load_defaults())
     final = SceneManager(scene).apply_patch(patch)
     assert final.objects[-1].transform.position[2] == pytest.approx(.025)
     assert final.objects[-1].properties["support"] == "table_01"

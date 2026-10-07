@@ -2,8 +2,6 @@
 import random
 from ..contracts.bootstrap import BootstrapResult
 from ..contracts.scene import SceneConfig, SceneObject, Transform
-from ..contracts.turn import SceneEditPlan
-from ..contracts.task_intent import TaskEntity
 from ..grounding.scene_relation_resolver import SceneRelationResolver
 from .asset_resolver import AssetResolver
 
@@ -20,20 +18,6 @@ class SceneBootstrapper:
             entities, relations = turn.task_intent.entities, turn.task_intent.spatial_relations
         else:
             plan = turn.scene_edit
-            if not isinstance(plan, SceneEditPlan):
-                target = TaskEntity(entity_id="edit_target", semantic_name=plan.semantic_name,
-                                    category=plan.category, count=plan.count,
-                                    quantity_mode="all" if plan.count > 1 else "single")
-                values = {"target":target.entity_id}
-                entities = [target]
-                if plan.reference:
-                    # Legacy name-only references can be completed only by a
-                    # unique catalog name/alias, never guessed from a category.
-                    model = self.resolver.resolve(TaskEntity(entity_id="edit_reference", semantic_name=plan.reference,
-                                                              category="unspecified"), infer_category=True).model
-                    entities.append(TaskEntity(entity_id="edit_reference", semantic_name=plan.reference, category=model.category))
-                    values["reference"] = "edit_reference"
-                plan = SceneEditPlan(entities=entities, operations=[plan.model_copy(update=values)])
             if all(op.operation == "remove" for op in plan.operations):
                 raise ValueError("scene_required: cannot create objects only to remove them")
             defined, needed = set(), set()

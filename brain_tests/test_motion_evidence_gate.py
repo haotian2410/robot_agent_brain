@@ -2,13 +2,12 @@ import json
 import httpx
 import pytest
 from robot_agent_brain.semantics.motion_evidence import resolve_motion_evidence, normalize_scene_motion
-from robot_agent_brain.contracts.turn import SceneEditIntent
+from robot_agent_brain.contracts.turn import SceneEditIntent, SceneEditPlan
 
 
 @pytest.mark.parametrize("text", ["苹果向右移动", "move apple right"])
 def test_model_distance_cannot_fill_missing_user_distance(text):
-    edit = SceneEditIntent(operation="translate", semantic_name="apple", category="fruit",
-                           direction="right", distance_m=.01)
+    edit = SceneEditPlan(entities=[dict(entity_id="target", semantic_name='apple', category='fruit', count=1, quantity_mode='single')], operations=[SceneEditIntent(operation='translate', direction='right', distance_m=0.01, target="target")])
     with pytest.raises(ValueError, match="motion_distance_evidence_missing"):
         normalize_scene_motion(text, edit)
 

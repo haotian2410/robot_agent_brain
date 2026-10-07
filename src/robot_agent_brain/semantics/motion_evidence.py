@@ -90,8 +90,8 @@ def resolve_motion_evidence(instruction, operation_count):
 
 
 def normalize_scene_motion(instruction, edit):
-    from ..contracts.turn import SceneEditPlan, SceneEditIntent
-    operations = edit.operations if isinstance(edit, SceneEditPlan) else [edit]
+    from ..contracts.turn import SceneEditIntent
+    operations = edit.operations
     count = sum(op.operation == "translate" for op in operations)
     if not count:
         return edit
@@ -108,4 +108,4 @@ def normalize_scene_motion(instruction, edit):
             if span.distance_m is not None or span.motion_scale is not None:
                 values.update(distance_m=span.distance_m, motion_scale=span.motion_scale)
         result.append(SceneEditIntent.model_validate(values))
-    return edit.model_copy(update={"operations": result}) if isinstance(edit, SceneEditPlan) else result[0]
+    return edit.model_copy(update={"operations": result})

@@ -4,7 +4,7 @@ import pytest
 from robot_agent_brain.application import BrainApplication
 from robot_agent_brain.config import BrainConfig
 from robot_agent_brain.contracts.scene import SceneConfig, Transform
-from robot_agent_brain.contracts.turn import BrainTurn, SceneEditIntent, SceneQueryIntent
+from robot_agent_brain.contracts.turn import BrainTurn, SceneEditIntent, SceneQueryIntent, SceneEditPlan
 from robot_agent_brain.scene.bootstrapper import SceneBootstrapper
 from robot_agent_brain.scene.transform_editor import rotate
 from test_application_artifacts import Provider, robot
@@ -28,7 +28,7 @@ def test_b02_initial_geometry_is_outside_target_container(tmp_path):
 
 def test_b08_initial_translation_is_applied_exactly_once(tmp_path):
     turn = BrainTurn(status="accepted", turn_kind="scene_edit", instruction="苹果右移十厘米",
-        scene_edit=SceneEditIntent(operation="translate", semantic_name="apple", category="fruit", direction="right", distance_m=.1))
+        scene_edit=SceneEditPlan(entities=[dict(entity_id="target", semantic_name='apple', category='fruit', count=1, quantity_mode='single')], operations=[SceneEditIntent(operation='translate', direction='right', distance_m=0.1, target="target")]))
     app = app_at(tmp_path, turn)
     initial = app.bootstrapper.prepare(turn, scene_id="comparison").scene
     initial_apple = next(o for o in initial.objects if o.semantic_name == "apple")

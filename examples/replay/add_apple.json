@@ -5,7 +5,7 @@
       "status":"accepted",
       "turn_kind":"scene_edit",
       "instruction":"增加一个苹果",
-      "scene_edit":{"operation":"add","semantic_name":"apple","category":"fruit","count":1}
+      "scene_edit":{"entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit"}],"relations":[],"operations":[{"operation":"add","target":"apple"}]}
     }
   }
 ]

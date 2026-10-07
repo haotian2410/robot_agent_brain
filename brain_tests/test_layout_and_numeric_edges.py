@@ -6,7 +6,7 @@ from jsonschema import Draft202012Validator
 from robot_agent_brain.config import BrainConfig
 from robot_agent_brain.contracts.scene import SceneConfig, SceneObject, Transform
 from robot_agent_brain.contracts.commands import CommandsFile
-from robot_agent_brain.contracts.turn import SceneEditIntent
+from robot_agent_brain.contracts.turn import SceneEditIntent, SceneEditPlan
 from robot_agent_brain.scene.editor import SceneEditor
 from test_export_roundtrip import wire
 
@@ -48,8 +48,7 @@ def test_relative_add_exhausts_workspace_without_changing_reference():
     add_table(scene, assets)
     original = scene.model_dump()
     with pytest.raises(ValueError, match="bootstrap_layout_failed"):
-        SceneEditor(assets).edit(SceneEditIntent(operation="add", semantic_name="banana", category="fruit",
-                                               relation="right_of", reference="a"), scene, defaults=defaults)
+        SceneEditor(assets).edit(SceneEditPlan(entities=[dict(entity_id="target", semantic_name='banana', category='fruit', count=1, quantity_mode='single'), dict(entity_id="reference", semantic_name='a', category="fruit")], operations=[SceneEditIntent(operation='add', relation='right_of', target="target", reference="reference")]), scene, defaults=defaults)
     assert scene.model_dump() == original
 
 
@@ -59,8 +58,7 @@ def test_collision_resolution_preserves_behind_relation():
     scene = SceneConfig(scene_id="s", objects=[SceneObject(scene_object_id="a", semantic_name="apple", category="fruit",
         asset_id="demo_apple", transform=Transform(position=(0,0,.1)))])
     add_table(scene, assets)
-    patch = SceneEditor(assets).edit(SceneEditIntent(operation="add", semantic_name="banana", category="fruit", count=3,
-                                                   relation="behind", reference="a"), scene)
+    patch = SceneEditor(assets).edit(SceneEditPlan(entities=[dict(entity_id="target", semantic_name='banana', category='fruit', count=3, quantity_mode='all'), dict(entity_id="reference", semantic_name='a', category="fruit")], operations=[SceneEditIntent(operation='add', relation='behind', target="target", reference="reference")]), scene)
     added = [op for op in patch.operations if op.action == "add"]
     assert len(added) == 3
     assert all(op.object.transform.position[1] < 0 for op in added)
