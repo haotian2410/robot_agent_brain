@@ -1,12 +1,13 @@
 # Scene v1 / 只读资产迁移报告 — 2026-10-09
 
 基线：`a60a17b4c93e898aec65073e4d44516295761040`。
-最终 commit SHA 在交付消息中提供，避免报告自引用自己的 commit。
+代码提交：`a111320e0ff6eb26cce5f673a33b022603fe32f5`，已推送 main 并由 ls-remote 核对。
+最终文档 commit SHA 在交付消息中提供，避免报告自引用自己的 commit。
 本节为当前状态；后面旧协议/旧验收数量仅为历史。
 
 ## v3 最终验收项目
 
-1. 提交：完成本地验收后提交，远程结果记录在本节后续验收栏。
+1. 提交：上述代码提交已完成，远程结果记录在本节后续验收栏。
 2. Pydantic：src/robot_agent_brain/contracts/scene.py；CLI `robot-brain schemas --output-dir var/schemas`
    导出 scene_config.schema.json、commands.schema.json、run_report.schema.json，Schema 与运行时模型同源。
 3. 用户 fixture：brain_tests/fixtures/shared_scene_v1.json 与用户提供 scene_example (2).json 的 JSON
@@ -31,7 +32,7 @@
     保存恢复后禁止复用删除编号。旧 flat 场景/旧 checkpoint 需显式外部转换或新建会话。
 14. full pytest：**425 passed in 5.35s**（Python 3.12），无 skip/xfail；git diff --check 通过。
 15. 仓库外 wheel：新 venv 真正从 site-packages 导入，清除 PYTHONPATH，smoke 已通过。
-16. Python 3.11/3.12 CI：最终提交后实际核对，不以工作流存在代替通过。
+16. Python 3.11/3.12 CI：代码提交 a111320 的两个矩阵任务均成功，实际链接见下方。
 17. real_qwen_tested=true：新协议 demo 6/6，8 次真实 HTTP，详见 demo/VALIDATION.md。
     使用 demo 元数据，模型真实；没有伪响应/Replay 替代，没有新增模型调用或改变第二阶段边界。
 18. Simulation/Frontend/Control 未实际联调；robot_executed=false，不新增模拟执行、MuJoCo、IK、轨迹依赖。
@@ -52,15 +53,22 @@
 
 ## 最终重验
 
-实际最终 wheel：`/tmp/brain-shared-wheel-ckQP2d/final/robot_agent_brain-0.1.0-py3-none-any.whl`。
-SHA256：`5b7de479b269a79280c01b6da7d943afddfee9432ed810729a0ce536084b3510`。
+实际提交版 wheel：`/tmp/brain-shared-wheel-ckQP2d/committed/robot_agent_brain-0.1.0-py3-none-any.whl`。
+SHA256：`253b5152058a7252e29f25e2828b19c27aa264079699fb5d9ab0db88db7cfe7f`。
 venv：`/tmp/brain-shared-wheel-ckQP2d/venv`；从 /tmp 清除 PYTHONPATH 执行 wheel_smoke.py，
-实际导入该 venv/site-packages，**passed**；产物 `/tmp/brain-wheel-smoke-rgwqix8_`。
+实际导入该 venv/site-packages，**passed**；提交版复验产物 `/tmp/brain-wheel-smoke-tkkdyxuh`。
 检查 wheel 95 个条目，不含原资产 OBJ/MTL/PNG/7z；JSON Schema 从同一安装包成功导出。
 初次尝试 --no-build-isolation 因本机无 hatchling 失败，改用标准隔离构建成功；未安装项目运行时新依赖。
 原始 fixture JSON 与仓库 fixture 逐值比较相等；21 个 cache 对照 OBJ 重算和资产树哈希复核通过。
 真实 demo 结果根目录：`demo/results/shared-scene-v1/20261009-001313-f6f762/`（Git 忽略）。
-远程 Python 3.11/3.12 CI 待提交后核对，下方补充实际链接和状态。
+代码提交 [a111320 的 CI](https://github.com/haotian2410/robot_agent_brain/actions/runs/37808232735)
+已由 GitHub API 核对 head_sha：
+
+- [Python 3.11](https://github.com/haotian2410/robot_agent_brain/actions/runs/37808232735/job/113418033925)：completed / success。
+- [Python 3.12](https://github.com/haotian2410/robot_agent_brain/actions/runs/37808232735/job/113418034342)：completed / success。
+
+两项均实际跑全量 pytest、wheel 构建、新 venv 安装和仓库外 smoke，不是仅声明工作流存在。
+后续文档提交只补充这些已观测证据，不修改运行代码。
 
 ---
 

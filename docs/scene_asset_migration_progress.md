@@ -2,12 +2,12 @@
 
 ## 2026-10-09 最新状态（取代下方阶段记录）
 
-运行链路与全部旧测试已迁移至唯一组件协议；上一轮全量 418 passed。
-已补充直接 SceneManager 非法历史编号回归，最终数量以 implementation_report 为准。
+运行链路与全部旧测试已迁移至唯一组件协议；最终全量 425 passed，包含直接 SceneManager 非法历史编号回归。
 仓库外 wheel smoke 已通过，真实 Qwen 新协议 demo 6/6 通过。
 21 个资产离线复核后 SHA256 仍为下方原始值，原包零修改。
 README/contracts/manual_testing/demo 文档已同步，不再将旧 flat/颜色字段称为现行协议。
-正在完成最终打包与远程 CI；当前正式平台资源仍待部署方提供，未进行 Control/渲染联调。
+代码 a111320 已提交并推送，提交版独立 wheel 复验和远程 Python 3.11/3.12 CI 均通过。
+当前正式平台资源仍待部署方提供，未进行 Control/渲染联调。
 最终证据以 docs/implementation_report.md 为准。
 
 ## 以下是保留的早期迁移记录，不代表当前状态
