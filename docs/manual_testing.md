@@ -1,4 +1,4 @@
-# 手动测试：Brain 原生规划应用
+# 手动测试：组件 Scene v1 规划应用
 
 ## 环境与模型
 
@@ -26,8 +26,8 @@ robot-brain run '把两个苹果放进篮子' --provider qwen \
 | 参数 | 含义与可选值 |
 |---|---|
 | `--config PATH` | 配置 JSON；资产/defaults/replay 相对路径以配置文件目录为基准 |
-| `--scene PATH` | run/chat 可选的 Brain 原生场景；不传则生成或恢复，不能传 MJCF |
-| `--assets PATH` | `AssetDocument` JSON；省略使用演示元数据 |
+| `--scene PATH` | run/chat 可选的团队组件 Scene v1；不传则生成或恢复，不能传 MJCF/旧 flat |
+| `--assets PATH` | metadata-only demo AssetDocument（含 demo_assets/library_ids/完整 AABB）；不能与正式库配置混用 |
 | `--defaults PATH` | 桌面、工作区、布局次数、默认初始数量配置 |
 | `--provider qwen/replay` | 默认 qwen；Replay 不是任意自然语言解析器 |
 | `--planner recipe/qwen/auto` | 默认 recipe；qwen 仅对机器人任务进行第二次模型调用；auto 只根据 supports 路由 |
@@ -98,7 +98,7 @@ Scene Edit 已统一为 SceneEditPlan；自定义 Replay 或模型输出中即�
 已存在的同一会话可运行（先按上文配置真实 Qwen 的 model）：
 
 ```bash
-robot-brain run '红色苹果有几个' --provider qwen --session demo01 --output-dir var/demo --debug
+robot-brain run '苹果有几个' --provider qwen --session demo01 --output-dir var/demo --debug
 robot-brain chat --provider qwen --session query-continuity --output-dir var/qwen --debug
 ```
 
@@ -123,8 +123,9 @@ Query 与 Robot 共用 semantic entity selection。查看 debug/brain_turn.json�
 scene_query 只能有 query_type/entities/relations/target，不能有旧顶层名称或 referent ID。
 复数实体应为 dialogue_ref_set=true、quantity_mode=all、all_available=true。
 查看 query_result.json.object_ids 和编辑后的 scene_config.json，而非只看成功提示。
-真实服务恢复后的专项还需记录中文别名、颜色、rightmost、TaskEntity、relations、
-模型调用次数及最终 Query/Commands Schema。本轮未运行真实模型，详见交付报告。
+专项还需记录中文别名、rightmost、TaskEntity、relations、模型调用次数及最终 Schema。
+颜色筛选目前没有可靠证据，预期明确缺证据，而不是假装从显示名判断。
+本轮真实模型样例记录见 demo/VALIDATION.md；不代表任意任务都通过。
 
 默认支撑接触容差在 defaults JSON 的 support_contact_tolerance_m 设置（米，默认 .001）。
 这是几何判定容差，不是给位姿加固定补偿；只推断水平表面，不推断容器内部。
@@ -206,4 +207,42 @@ semantic_validation、prompt_tokens、completion_tokens、latency、commands_cou
 资产假装支持。当前既有 domain policy 将“把苹果向右移动五厘米”判为直接 scene_edit，
 所以它是“零次第二规划”的对照项；要测机器人 MOVE 请说“抓起苹果，向右移动五厘米后放下”。
 
-本轮服务 8080 不可达，以上是真实验收流程，不是真实模型通过记录。
+按钮/柜门等未提供真实资产的任务仍是待部署验收项；已跑的样例见 demo/VALIDATION.md。
+
+## 正式只读资产库与协议验收
+
+```bash
+python scripts/build_asset_geometry_cache.py --asset-root model/grasp_objects \
+  --output config/brain_asset_geometry_cache.json
+python scripts/validate_asset_geometry_cache.py --asset-root model/grasp_objects \
+  --cache config/brain_asset_geometry_cache.json
+robot-brain schemas --output-dir var/shared-schemas
+python -m pytest -q brain_tests -o addopts=''
+```
+
+build/validate 都报告前后资产树 SHA256，必须相等。只生成资产目录外的缓存；
+runtime 只读取 index、metadata、cache、可选分类，不扫描 OBJ。真实库包含 1–21。
+`config/local_asset_library.json` 的 root/cache/category/aliases 相对该配置文件解析；
+本地绝对路径不会写入 MetadataRef.path。可选 category sidecar 未配置时 category-only
+bootstrap 返回 asset_category_unavailable；有多个候选时仍须澄清。
+
+正式库先改 model 为服务实际 ID。无场景 bootstrap 还需要团队真实桌子/机器人
+MetadataRef、完整几何和 default_robot_driver；当前示例刻意不填这些未知值。
+只填 `$LIBRARY_SERVER/101` 不会创造资源，本地 adapter 必须能从 index 解析到它；
+平台资源不在当前抓取库时应由部署端提供完整库或注入 AssetLibraryPort 实现，不能改造原共享包。
+导入已有正式 Scene 可先做纯 Semantic 查询，无须为此解析不相关资源：
+
+```bash
+robot-brain run '有几个苹果' --config config/local_asset_library.json \
+  --scene /path/to/confirmed-scene.json --model "$ROBOT_BRAIN_MODEL" \
+  --session shared-new --output-dir var/shared-tests --debug --json
+```
+
+不要把团队示例里的 `<id>` 当真实资源；它只用于结构往返测试。也不要复用旧协议
+session_state.json，使用新 session。新建 demo 仍可直接运行 `python demo/run_demo.py`，
+但其中桌面/机器人是合成元数据，不能充当正式 UR5e 的关节参数或物理模型。
+
+查看 scene_config.json：只有组件字段，ID 是整数；Light/Camera 的 parent=0 原样保留。
+修改一个对象后比较其他 components，尤其 RobotDriver joint_limits，应完全一致。
+删除后再新增并重启，会话历史应阻止旧 ID 复用；history 不进入公共 Scene。
+inside 无证据报错，state 仅返回 support；不会出现旧 container_membership/color 属性。

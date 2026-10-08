@@ -1,7 +1,10 @@
 from robot_agent_brain.adapters.local_asset_catalog import LocalAssetCatalog
-from robot_agent_brain.contracts.scene import ModelProperty, SceneConfig, SceneObject
+from robot_agent_brain.contracts.model_property import ModelProperty
+from robot_agent_brain.contracts.scene import SceneConfig, SceneObject
 from robot_agent_brain.contracts.task_intent import Direction, MotionScale, Operation, TaskEntity, TaskIntent, TaskType
 from robot_agent_brain.pipeline import BrainPipeline
+from robot_agent_brain.config import BrainConfig
+from test_component_runtime import object_
 
 
 class FakeUnderstanding:
@@ -14,11 +17,10 @@ class FakeUnderstanding:
 
 
 def test_end_to_end_brain_pipeline_without_physics():
-    assets = LocalAssetCatalog([ModelProperty(asset_id="apple_basic", semantic_name="apple", category="fruit", dimensions_m=(0.08, 0.08, 0.09))])
-    scene = SceneConfig(scene_id="scene-001", scene_version=4, robot="ur5e", objects=[
-        SceneObject(scene_object_id="apple_01", asset_id="apple_basic", semantic_name="apple", category="fruit"),
-    ])
+    assets = BrainConfig().load_assets()
+    scene = SceneConfig(scene_schema_version=1, scene_id=1, scene_version=4, scene_name="scene-001",
+                        objects=[object_(0, "apple", metadata_ref="$DEMO_LIBRARY/2")])
     result = BrainPipeline(FakeUnderstanding(), assets).run("req-001", "把苹果向右移动一点", scene)
     assert result.commands is None
     patch = result.scene_patch.operations[0]
-    assert patch.transform.position == (0.008, 0.0, 0.0)
+    assert patch.component.properties["position"] == [0.008, 0.0, 0.0]

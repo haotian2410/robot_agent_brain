@@ -16,7 +16,7 @@ class PlanValidator:
         require(all(len(e.scene_object_ids) == 1 for e in task.entities), "concrete instances required")
         if scene is not None:
             require((task.scene_id, task.scene_version) == (scene.scene_id, scene.scene_version), "scene mismatch")
-            objects = {o.scene_object_id for o in scene.objects}
+            objects = {o.object_id_in_scene for o in scene.objects}
             require(all(i in objects for i in bindings.values()), "concrete existing instances required")
             require(held_object is None or held_object in objects, "unknown held object")
         operations = {op.operation_id: op for op in task.operations}

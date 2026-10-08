@@ -8,6 +8,8 @@ from robot_agent_brain.models.task_understanding import TaskParseOutput
 from robot_agent_brain.models.prompts import TASK_UNDERSTANDING_PROMPT
 from robot_agent_brain.scene.editor import SceneEditor
 from robot_agent_brain.scene.scene_manager import SceneManager
+from robot_agent_brain.scene.component_access import SceneIndex
+from robot_agent_brain.scene.scene_graph import world_transform
 from test_query_scene_continuity import supported_scene
 
 
@@ -56,17 +58,17 @@ def test_all_scene_edit_prompt_examples_are_canonical():
 def test_relative_add_reference_uses_catalog_alias_without_instance_aliases():
     scene = supported_scene()
     scene.objects.pop()  # only table and apple
-    scene.objects[1].properties = {}
     before = scene.model_dump()
     plan = SceneEditPlan(entities=[
         dict(entity_id="new", semantic_name="香蕉", category="fruit"),
         dict(entity_id="reference", semantic_name="苹果", category="fruit")],
         operations=[SceneEditIntent(operation="add", target="new", reference="reference", relation="right_of")])
-    result = SceneEditor(BrainConfig().load_assets()).edit_result(plan, scene)
+    assets = BrainConfig().load_assets()
+    result = SceneEditor(assets, aliases=assets.metadata.aliases).edit_result(plan, scene)
     final = SceneManager(scene).apply_patch(result.patch)
-    assert result.created_object_ids == ["banana_01"]
-    assert final.objects[-1].semantic_name == "banana"
-    assert final.objects[-1].transform.position[0] > scene.objects[1].transform.position[0]
-    assert final.objects[-1].properties["support"] == "table_01"
+    assert result.created_object_ids == [2]
+    assert SceneIndex(final).semantic(2).semantic_name == "banana"
+    assert world_transform(final, 2).position[0] > world_transform(scene, 1).position[0]
+    assert SceneIndex(final).semantic(2).support == 0
     assert final.scene_version == scene.scene_version + 1
     assert scene.model_dump() == before

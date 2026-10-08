@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ..contracts.grounded_task import GroundedTask
+from ..contracts.scene import SceneId
 from ..contracts.skill_plan import SkillName, SkillPlan, SkillStep
 from ..contracts.task_intent import TaskType
 
@@ -13,7 +14,7 @@ class RecipePlanner:
     def supports(cls, task: GroundedTask) -> bool:
         return all(op.task_type in cls.SUPPORTED_TASK_TYPES for op in task.operations)
 
-    def plan(self, task: GroundedTask, held_object: str | None = None) -> SkillPlan:
+    def plan(self, task: GroundedTask, held_object: SceneId | None = None) -> SkillPlan:
         steps: list[SkillStep] = []
         current_held = held_object
         bindings = {entity.entity_id: entity.scene_object_id for entity in task.entities}
@@ -25,7 +26,7 @@ class RecipePlanner:
             object_id = bindings.get(target)
             if skill == SkillName.GRASP:
                 if current_held is not None:
-                    raise ValueError("holding_conflict: gripper already holds " + current_held)
+                    raise ValueError(f"holding_conflict: gripper already holds {current_held}")
                 current_held = object_id
             elif skill == SkillName.RELEASE:
                 if current_held != object_id or current_held is None:

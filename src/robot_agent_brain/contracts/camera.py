@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import StrEnum
+from .scene import SceneId
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -22,7 +23,7 @@ class CameraRequest(BaseModel):
 class CameraFrame(BaseModel):
     model_config = ConfigDict(extra="forbid")
     camera_id: str
-    scene_id: str
+    scene_id: SceneId
     scene_version: int = Field(ge=0)
     width: int = Field(gt=0)
     height: int = Field(gt=0)
@@ -34,7 +35,7 @@ class CameraFrame(BaseModel):
 
 class CameraInstanceBox(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    scene_object_id: str
+    scene_object_id: SceneId
     bbox: tuple[int, int, int, int]
 
     @model_validator(mode="after")

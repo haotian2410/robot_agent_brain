@@ -2,16 +2,148 @@
   "schema_version": "1.0",
   "demo_assets": true,
   "models": [
-    {"asset_id":"demo_table", "semantic_name":"table", "category":"surface", "dimensions_m":[1.6,1.2,0.05]},
-    {"asset_id":"demo_apple", "semantic_name":"apple", "category":"fruit", "dimensions_m":[0.08,0.08,0.09]},
-    {"asset_id":"demo_banana", "semantic_name":"banana", "category":"fruit", "dimensions_m":[0.18,0.06,0.05]},
-    {"asset_id":"demo_basket", "semantic_name":"basket", "category":"container", "dimensions_m":[0.25,0.22,0.15]},
-    {"asset_id":"demo_box", "semantic_name":"box", "category":"container", "dimensions_m":[0.24,0.24,0.18]}
+    {
+      "asset_id": "demo_table",
+      "semantic_name": "table",
+      "category": "surface",
+      "dimensions_m": [
+        1.6,
+        1.2,
+        0.05
+      ],
+      "aabb_m": [
+        -0.8,
+        -0.6,
+        -0.025,
+        0.8,
+        0.6,
+        0.025
+      ]
+    },
+    {
+      "asset_id": "demo_apple",
+      "semantic_name": "apple",
+      "category": "fruit",
+      "dimensions_m": [
+        0.08,
+        0.08,
+        0.09
+      ],
+      "aabb_m": [
+        -0.04,
+        -0.04,
+        -0.045,
+        0.04,
+        0.04,
+        0.045
+      ]
+    },
+    {
+      "asset_id": "demo_banana",
+      "semantic_name": "banana",
+      "category": "fruit",
+      "dimensions_m": [
+        0.18,
+        0.06,
+        0.05
+      ],
+      "aabb_m": [
+        -0.09,
+        -0.03,
+        -0.025,
+        0.09,
+        0.03,
+        0.025
+      ]
+    },
+    {
+      "asset_id": "demo_basket",
+      "semantic_name": "basket",
+      "category": "container",
+      "dimensions_m": [
+        0.25,
+        0.22,
+        0.15
+      ],
+      "aabb_m": [
+        -0.125,
+        -0.11,
+        -0.075,
+        0.125,
+        0.11,
+        0.075
+      ]
+    },
+    {
+      "asset_id": "demo_box",
+      "semantic_name": "box",
+      "category": "container",
+      "dimensions_m": [
+        0.24,
+        0.24,
+        0.18
+      ],
+      "aabb_m": [
+        -0.12,
+        -0.12,
+        -0.09,
+        0.12,
+        0.12,
+        0.09
+      ]
+    },
+    {
+      "asset_id": "demo_robot",
+      "semantic_name": "demo_robot",
+      "category": "robot",
+      "dimensions_m": [
+        0.1,
+        0.1,
+        0.1
+      ],
+      "aabb_m": [
+        -0.05,
+        -0.05,
+        0,
+        0.05,
+        0.05,
+        0.1
+      ]
+    }
   ],
-  "aliases":{"苹果":"apple","香蕉":"banana","篮子":"basket","盒子":"box","桌子":"table","桌面":"table"},
-  "category_aliases":{"水果":"fruit","容器":"container","桌面":"surface"},
-  "overridable_properties":{
-    "demo_apple":["color"],"demo_banana":["color"],"demo_basket":["color"],"demo_box":["color"]
+  "aliases": {
+    "苹果": "apple",
+    "香蕉": "banana",
+    "篮子": "basket",
+    "盒子": "box",
+    "桌子": "table",
+    "桌面": "table"
   },
-  "center_origin_assets":["demo_table","demo_apple","demo_banana","demo_basket","demo_box"]
+  "category_aliases": {
+    "水果": "fruit",
+    "容器": "container",
+    "桌面": "surface"
+  },
+  "overridable_properties": {
+    "demo_apple": [
+      "color"
+    ],
+    "demo_banana": [
+      "color"
+    ],
+    "demo_basket": [
+      "color"
+    ],
+    "demo_box": [
+      "color"
+    ]
+  },
+  "library_ids": {
+    "demo_table": 1,
+    "demo_apple": 2,
+    "demo_banana": 3,
+    "demo_basket": 4,
+    "demo_box": 5,
+    "demo_robot": 6
+  }
 }

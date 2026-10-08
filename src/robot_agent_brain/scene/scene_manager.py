@@ -1,54 +1,65 @@
-from __future__ import annotations
-
-from ..contracts.scene import PatchAction, SceneConfig, ScenePatch
+"""Atomic component patches; historical identity belongs to the Session."""
+from ..contracts.scene import PatchAction, SceneConfig, ScenePatch, SceneComponent
 
 
 class SceneManager:
-    def __init__(self, scene: SceneConfig):
+    def __init__(self, scene, *, seen_scene_object_ids=None, next_scene_object_id=None):
         self.scene = SceneConfig.model_validate(scene.model_dump())
+        current = {o.object_id_in_scene for o in self.scene.objects}
+        history = set(seen_scene_object_ids or ())
+        if any(type(value) is not int or not 0 <= value < 2**53 for value in history):
+            raise ValueError("scene_identity_history_invalid")
+        if next_scene_object_id is not None and (
+                type(next_scene_object_id) is not int or not 0 <= next_scene_object_id <= 2**53):
+            raise ValueError("scene_next_object_id_invalid")
+        self.seen_scene_object_ids = history | current
+        self.next_scene_object_id = max(max(self.seen_scene_object_ids, default=-1) + 1,
+                                        next_scene_object_id if next_scene_object_id is not None else 0)
 
-    def apply_patch(self, patch: ScenePatch) -> SceneConfig:
+    def apply_patch(self, patch):
         patch = ScenePatch.model_validate(patch.model_dump())
         if patch.scene_id != self.scene.scene_id:
             raise ValueError("scene_patch_scene_mismatch")
         if patch.base_scene_version != self.scene.scene_version:
             raise ValueError("scene_patch_version_conflict")
-        objects = {item.scene_object_id: item.model_copy(deep=True) for item in self.scene.objects}
-        retired = list(self.scene.retired_object_ids)
+        objects = {o.object_id_in_scene: o.model_copy(deep=True) for o in self.scene.objects}
+        seen = set(self.seen_scene_object_ids)
         for operation in patch.operations:
-            object_id = operation.scene_object_id
+            identifier = operation.object_id_in_scene
             if operation.action == PatchAction.ADD:
-                if object_id in retired:
-                    raise ValueError(f"scene_object_id_retired: {object_id}")
-                if object_id in objects:
-                    raise ValueError(f"scene_object_already_exists: {object_id}")
-                objects[object_id] = operation.object.model_copy(deep=True)
-            elif operation.action == PatchAction.REMOVE:
-                if object_id not in objects:
-                    raise ValueError(f"scene_object_missing: {object_id}")
-                del objects[object_id]
-                retired.append(object_id)
-            elif operation.action == PatchAction.UPDATE_TRANSFORM:
-                if object_id not in objects:
-                    raise ValueError(f"scene_object_missing: {object_id}")
-                current = objects[object_id]
-                properties = dict(current.properties)
-                # A direct transform edit invalidates derived containment/support
-                # facts; they must be re-established by the next grounding pass.
-                for key in ("container_membership", "support", "support_relation", "support_evaluated"):
-                    properties.pop(key, None)
-                objects[object_id] = current.model_copy(update={"transform": operation.transform, "properties": properties})
-            elif operation.action == PatchAction.UPDATE_PROPERTY:
-                if object_id not in objects:
-                    raise ValueError(f"scene_object_missing: {object_id}")
-                merged = {**objects[object_id].properties, **operation.properties}
-                objects[object_id] = objects[object_id].model_copy(update={"properties": merged})
-        values = self.scene.model_dump()
-        values.update({
-            "scene_version": self.scene.scene_version + 1,
-            "objects": list(objects.values()),
-            "retired_object_ids": list(dict.fromkeys(retired)),
-        })
-        candidate = SceneConfig.model_validate(values)
+                if identifier in seen:
+                    raise ValueError(f"scene_object_id_reused: {identifier}")
+                objects[identifier] = operation.object.model_copy(deep=True)
+                seen.add(identifier)
+                continue
+            if identifier not in objects:
+                raise ValueError(f"scene_object_missing: {identifier}")
+            if operation.action == PatchAction.REMOVE:
+                del objects[identifier]
+                continue
+            current = objects[identifier]
+            kind = operation.component.component_type if operation.component else operation.component_type
+            components = list(current.components)
+            matching = next((i for i, c in enumerate(components) if c.component_type == kind), None)
+            if operation.action == PatchAction.REMOVE_COMPONENT:
+                if matching is None:
+                    raise ValueError("scene_component_missing: " + kind)
+                components.pop(matching)
+            else:
+                component = operation.component.model_copy(deep=True)
+                if matching is None:
+                    components.append(component)
+                else:
+                    components[matching] = component
+                changed_transform = (kind == "Transform" and
+                    (matching is None or current.components[matching].properties != component.properties))
+                if changed_transform:
+                    components = [SceneComponent(component_type="Semantic", properties={**c.properties, "support": None})
+                                  if c.component_type == "Semantic" else c for c in components]
+            objects[identifier] = current.model_copy(update={"components": components})
+        candidate = SceneConfig.model_validate({**self.scene.model_dump(), "objects": list(objects.values()),
+                                                "scene_version": self.scene.scene_version + 1})
         self.scene = candidate
-        return self.scene.model_copy(deep=True)
+        self.seen_scene_object_ids = seen
+        self.next_scene_object_id = max(self.next_scene_object_id, max(seen, default=-1) + 1)
+        return candidate.model_copy(deep=True)

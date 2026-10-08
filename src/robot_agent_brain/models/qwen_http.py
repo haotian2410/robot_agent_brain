@@ -136,9 +136,6 @@ class QwenHTTPProvider:
 
     def understand_turn(self, request: TaskUnderstandingRequest):
         def parse(value):
-            marker = re.search(r"\[dialogue_exclude=([^\]]+)\]", request.instruction)
-            if marker and value.get("entities"):
-                value["entities"][0]["exclude_scene_object_ids"] = [marker.group(1)]
             return TaskParseOutput.model_validate(value).to_brain_turn(request.instruction)
         return self._call("task_understanding", TASK_UNDERSTANDING_PROMPT,
                           prompt_payload({"instruction": request.instruction}), TaskParseOutput.model_json_schema(), parse)

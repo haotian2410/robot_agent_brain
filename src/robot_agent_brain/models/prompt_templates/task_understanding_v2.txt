@@ -107,3 +107,7 @@ Schema约定：status 只能 accepted/clarification_required/unsupported_task。
 
 颜色查询示例：“红色苹果有几个”：
 {"status":"accepted","turn_kind":"scene_query","scene_query":{"query_type":"count","entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit","color":"red"}],"relations":[],"target":"apple"}}
+
+场景平移字段特别注意：scene_edit.operations 的 translate 使用 direction（不是机器人 operation 的 motion_direction）。平移必须同时给出 direction 和 distance_m 或 motion_scale，不得只写 operation/target 后漏掉方向和幅度。纯改色用 update_properties，不需要位置参照。复合编辑必须逐条完整保留。
+例如“直接修改场景：两个苹果都向右移动两厘米，香蕉绕世界Z轴旋转三十度，再把篮子改为蓝色”：
+{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit","count":2,"quantity_mode":"all"},{"entity_id":"banana","semantic_name":"banana","category":"fruit"},{"entity_id":"basket","semantic_name":"basket","category":"container"}],"relations":[],"operations":[{"operation":"translate","target":"apple","direction":"right","distance_m":0.02},{"operation":"rotate","target":"banana","coordinate_frame":"world","axis":"z","angle_deg":30},{"operation":"update_properties","target":"basket","properties":{"color":"blue"}}]}}

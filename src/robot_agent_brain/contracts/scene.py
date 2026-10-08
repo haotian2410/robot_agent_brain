@@ -1,126 +1,219 @@
-from __future__ import annotations
-
-from enum import StrEnum
+"""Canonical team component Scene v1; no legacy flat runtime representation."""
 import math
-import json
-from typing import Any, Literal
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from typing import Annotated, Literal
+from enum import StrEnum
+
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+
+
+SceneId = Annotated[int, Field(strict=True, ge=0, le=2**53 - 1)]
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    @model_validator(mode="after")
-    def json_values_only(self):
-        try:
-            json.dumps(self.model_dump(), allow_nan=False)
-        except (ValueError, TypeError) as exc:
-            raise ValueError("scene values must be finite JSON data") from exc
-        return self
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
-class Transform(StrictModel):
-    position: tuple[float, float, float] = (0.0, 0.0, 0.0)
-    quaternion_xyzw: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
-    scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+class TransformProperties(StrictModel):
+    position: tuple[float, float, float]
+    quaternion_xyzw: tuple[float, float, float, float]
+    scale: tuple[float, float, float]
+    parent: SceneId | None
 
     @model_validator(mode="after")
     def valid_transform(self):
-        if not all(math.isfinite(v) for v in (*self.position, *self.quaternion_xyzw, *self.scale)):
-            raise ValueError("transform values must be finite")
-        if not math.isclose(math.sqrt(sum(v*v for v in self.quaternion_xyzw)), 1.0, rel_tol=0, abs_tol=1e-6):
-            raise ValueError("transform quaternion must be normalized (xyzw)")
-        if any(value <= 0 for value in self.scale):
-            raise ValueError("transform scale must be positive")
+        if not math.isclose(sum(v * v for v in self.quaternion_xyzw), 1, rel_tol=0, abs_tol=1e-6):
+            raise ValueError("transform_quaternion_not_normalized")
+        if any(v <= 0 for v in self.scale):
+            raise ValueError("transform_scale_not_positive")
         return self
 
 
+class MetadataRefProperties(StrictModel):
+    # The team fixture uses <id> for illustration. Structural load must keep it
+    # unchanged; only the asset adapter decides whether it can be resolved.
+    path: str = Field(min_length=1)
+
+
+class SemanticProperties(StrictModel):
+    semantic_name: str = Field(min_length=1)
+    category: str = Field(min_length=1)
+    support: SceneId | None
+
+
+class MeshRendererProperties(StrictModel):
+    forceOverrideColor: str = Field(pattern=r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")
+
+
+class LightProperties(StrictModel):
+    type: str = Field(min_length=1)
+    intensity: float = Field(ge=0)
+    color: str = Field(pattern=r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")
+
+
+class CameraProperties(StrictModel):
+    type: str = Field(min_length=1)
+    fov: float = Field(gt=0, lt=180)
+    near: float = Field(gt=0)
+    far: float = Field(gt=0)
+    resolution: tuple[Annotated[int, Field(strict=True, gt=0)], Annotated[int, Field(strict=True, gt=0)]]
+
+    @model_validator(mode="after")
+    def valid_clipping(self):
+        if self.far <= self.near:
+            raise ValueError("camera_far_must_exceed_near")
+        return self
+
+
+class RobotDriverProperties(StrictModel):
+    joint_sequence: list[str] = Field(min_length=1)
+    joint_limits: dict[str, tuple[float, float]]
+
+    @model_validator(mode="after")
+    def valid_joints(self):
+        if len(set(self.joint_sequence)) != len(self.joint_sequence) or any(not s for s in self.joint_sequence):
+            raise ValueError("robot_joint_sequence_invalid")
+        if set(self.joint_sequence) != set(self.joint_limits):
+            raise ValueError("robot_joint_limits_coverage_invalid")
+        if any(low > high for low, high in self.joint_limits.values()):
+            raise ValueError("robot_joint_limits_invalid")
+        return self
+
+
+COMPONENT_PROPERTIES = {
+    "Transform": TransformProperties, "MetadataRef": MetadataRefProperties,
+    "Semantic": SemanticProperties, "MeshRenderer": MeshRendererProperties,
+    "Light": LightProperties, "Camera": CameraProperties, "RobotDriver": RobotDriverProperties,
+}
+
+
+class SceneComponent(StrictModel):
+    component_type: str = Field(min_length=1)
+    properties: dict[str, JsonValue]
+
+    @model_validator(mode="after")
+    def validate_properties(self):
+        def finite_json(value):
+            if isinstance(value, float) and not math.isfinite(value):
+                raise ValueError("scene_json_nonfinite")
+            if isinstance(value, dict):
+                for item in value.values():
+                    finite_json(item)
+            elif isinstance(value, list):
+                for item in value:
+                    finite_json(item)
+        finite_json(self.properties)
+        if self.component_type in COMPONENT_PROPERTIES:
+            COMPONENT_PROPERTIES[self.component_type].model_validate(self.properties)
+        return self
+
+    @classmethod
+    def __get_pydantic_json_schema__(cls, core_schema, handler):
+        schema = handler(core_schema)
+        schema["allOf"] = [{
+            "if": {"properties": {"component_type": {"const": name}}},
+            "then": {"properties": {"properties": model.model_json_schema()}},
+        } for name, model in COMPONENT_PROPERTIES.items()]
+        return schema
+
+
 class SceneObject(StrictModel):
-    scene_object_id: str
-    asset_id: str
-    semantic_name: str
-    category: str
-    transform: Transform = Field(default_factory=Transform)
-    properties: dict[str, Any] = Field(default_factory=dict)
+    object_id_in_scene: SceneId
+    object_name_in_scene: str
+    components: list[SceneComponent]
+
+    @model_validator(mode="after")
+    def valid_components(self):
+        names = [c.component_type for c in self.components]
+        if names.count("Transform") != 1:
+            raise ValueError("scene_requires_one_transform")
+        if len(names) != len(set(names)):
+            raise ValueError("scene_component_duplicate")
+        return self
 
 
 class SceneConfig(StrictModel):
-    schema_version: Literal["1.0"] = "1.0"
-    scene_id: str
-    scene_version: int = Field(default=0, ge=0)
-    robot: str | None = None
-    objects: list[SceneObject] = Field(default_factory=list)
-    retired_object_ids: list[str] = Field(default_factory=list)
+    scene_schema_version: Literal[1]
+    scene_version: Annotated[int, Field(strict=True, ge=0)]
+    scene_id: SceneId
+    scene_name: str
+    objects: list[SceneObject]
+
+    @field_validator("scene_schema_version", mode="before")
+    @classmethod
+    def strict_schema_version(cls, value):
+        if type(value) is not int or value != 1:
+            raise ValueError("scene_schema_unsupported")
+        return value
 
     @model_validator(mode="after")
-    def unique_objects(self):
-        ids = [item.scene_object_id for item in self.objects]
-        if len(ids) != len(set(ids)):
-            raise ValueError("scene_object_id must be unique")
-        if set(ids) & set(self.retired_object_ids):
-            raise ValueError("active object id cannot be retired")
+    def validate_graph(self):
+        ids = {obj.object_id_in_scene for obj in self.objects}
+        if len(ids) != len(self.objects):
+            raise ValueError("scene_object_id_duplicate")
+        parents = {}
+        for obj in self.objects:
+            transform = next(c for c in obj.components if c.component_type == "Transform")
+            parent = transform.properties["parent"]
+            if parent is not None and (parent not in ids or parent == obj.object_id_in_scene):
+                raise ValueError("scene_parent_invalid")
+            parents[obj.object_id_in_scene] = parent
+            semantic = next((c for c in obj.components if c.component_type == "Semantic"), None)
+            if semantic is not None:
+                support = semantic.properties["support"]
+                if support is not None and (support not in ids or support == obj.object_id_in_scene):
+                    raise ValueError("scene_support_invalid")
+        completed = set()
+        for identifier in ids:
+            current, visited = identifier, set()
+            while current is not None and current not in completed:
+                if current in visited:
+                    raise ValueError("scene_parent_cycle")
+                visited.add(current)
+                current = parents[current]
+            completed.update(visited)
         return self
 
 
 class PatchAction(StrEnum):
-    ADD = "add"
-    REMOVE = "remove"
-    UPDATE_TRANSFORM = "update_transform"
-    UPDATE_PROPERTY = "update_property"
+    ADD = "add_object"
+    REMOVE = "remove_object"
+    UPSERT_COMPONENT = "upsert_component"
+    REMOVE_COMPONENT = "remove_component"
 
 
 class ScenePatchOperation(StrictModel):
     action: PatchAction
-    scene_object_id: str
+    object_id_in_scene: SceneId
     object: SceneObject | None = None
-    transform: Transform | None = None
-    properties: dict[str, Any] | None = None
+    component: SceneComponent | None = None
+    component_type: str | None = None
 
     @model_validator(mode="after")
     def validate_payload(self):
-        allowed = {PatchAction.ADD: "object", PatchAction.UPDATE_TRANSFORM: "transform",
-                   PatchAction.UPDATE_PROPERTY: "properties", PatchAction.REMOVE: None}[self.action]
-        if any(getattr(self, name) is not None and name != allowed for name in ("object", "transform", "properties")):
-            raise ValueError("scene_patch_payload_mismatch")
-        required = {
-            PatchAction.ADD: self.object,
-            PatchAction.UPDATE_TRANSFORM: self.transform,
-            PatchAction.UPDATE_PROPERTY: self.properties,
-        }
-        if self.action in required and required[self.action] is None:
-            raise ValueError(f"{self.action.value} patch payload is missing")
-        if self.action == PatchAction.ADD and self.object.scene_object_id != self.scene_object_id:
-            raise ValueError("add patch object id mismatch")
+        payload = {PatchAction.ADD: "object", PatchAction.REMOVE: None,
+                   PatchAction.UPSERT_COMPONENT: "component", PatchAction.REMOVE_COMPONENT: "component_type"}[self.action]
+        for field in ("object", "component", "component_type"):
+            if (getattr(self, field) is not None) != (field == payload):
+                raise ValueError("scene_patch_payload_mismatch")
+        if self.object is not None and self.object.object_id_in_scene != self.object_id_in_scene:
+            raise ValueError("scene_patch_object_id_mismatch")
+        if self.component_type is not None and not self.component_type:
+            raise ValueError("scene_patch_component_type_empty")
         return self
 
 
 class ScenePatch(StrictModel):
-    scene_id: str
-    base_scene_version: int = Field(ge=0)
+    scene_id: SceneId
+    base_scene_version: Annotated[int, Field(strict=True, ge=0)]
     operations: list[ScenePatchOperation] = Field(min_length=1)
 
 
 class SceneSnapshot(StrictModel):
-    scene_id: str
-    scene_version: int
+    scene_id: SceneId
+    scene_version: Annotated[int, Field(strict=True, ge=0)]
     accepted: bool = True
     error: str | None = None
 
 
-class ModelProperty(StrictModel):
-    asset_id: str
-    semantic_name: str
-    category: str
-    dimensions_m: tuple[float, float, float]
-    aabb_m: tuple[float, float, float, float, float, float] | None = None
-
-    @model_validator(mode="after")
-    def positive_dimensions(self):
-        if any(not math.isfinite(value) or value <= 0 for value in self.dimensions_m):
-            raise ValueError("dimensions_m must be positive")
-        if any(not value.strip() for value in (self.asset_id, self.semantic_name, self.category)):
-            raise ValueError("asset identifiers and names must not be empty")
-        if self.aabb_m is not None:
-            if not all(math.isfinite(v) for v in self.aabb_m) or any(self.aabb_m[i] >= self.aabb_m[i+3] for i in range(3)):
-                raise ValueError("invalid asset AABB: expected min xyz then max xyz")
-        return self
+# Python spelling only: both names describe the exact component properties.
+Transform = TransformProperties

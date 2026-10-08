@@ -4,11 +4,12 @@ from robot_agent_brain.contracts.task_intent import Operation
 from robot_agent_brain.planning.plan_validator import PlanValidator
 from robot_agent_brain.planning.recipe_planner import RecipePlanner
 from test_recipe_state import task, move
+from test_component_runtime import object_
 
 
 def scene():
-    return SceneConfig(scene_id="s", objects=[SceneObject(scene_object_id=name+"_01", semantic_name="apple",
-                        asset_id="apple", category="fruit") for name in ("a", "b")])
+    return SceneConfig(scene_schema_version=1, scene_version=0, scene_id=1, scene_name="s",
+                       objects=[object_(identifier, "apple") for identifier in (101, 102)])
 
 
 def test_valid_compound_and_initial_holding():
@@ -16,7 +17,7 @@ def test_valid_compound_and_initial_holding():
                   Operation(operation_id="op-3", task_type="release", target="a")])
     PlanValidator().validate(value, RecipePlanner().plan(value), scene())
     value = task([move()])
-    PlanValidator().validate(value, RecipePlanner().plan(value, held_object="a_01"), scene(), held_object="a_01")
+    PlanValidator().validate(value, RecipePlanner().plan(value, held_object=101), scene(), held_object=101)
 
 
 @pytest.mark.parametrize("mutation", ["missing_effect", "missing_locate", "wrong_role", "duplicate_id", "dependency", "missing_instance", "extra_move"])

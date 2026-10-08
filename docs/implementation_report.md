@@ -1,4 +1,70 @@
-# Optional 第二阶段 Qwen Atomic Skill Planner — 2026-10-07
+# Scene v1 / 只读资产迁移报告 — 2026-10-09
+
+基线：`a60a17b4c93e898aec65073e4d44516295761040`。
+最终 commit SHA 在交付消息中提供，避免报告自引用自己的 commit。
+本节为当前状态；后面旧协议/旧验收数量仅为历史。
+
+## v3 最终验收项目
+
+1. 提交：完成本地验收后提交，远程结果记录在本节后续验收栏。
+2. Pydantic：src/robot_agent_brain/contracts/scene.py；CLI `robot-brain schemas --output-dir var/schemas`
+   导出 scene_config.schema.json、commands.schema.json、run_report.schema.json，Schema 与运行时模型同源。
+3. 用户 fixture：brain_tests/fixtures/shared_scene_v1.json 与用户提供 scene_example (2).json 的 JSON
+   内容一致；顶层/对象/组件字段不新增 flat 字段，严格契约及 round-trip 测试通过。
+4. MetadataRef.path 原样往返，含样例 `<id>`；占位只准结构保留，不可资源 resolve。
+5. AssetLibraryPort 的 resolve/find_by_name/find_by_category 统一资源入口；Local adapter 只读
+   index/metadata/外置 cache/可选 sidecar，严格解析 `$LIBRARY_SERVER/<规范整数>`，不接受本地路径。
+6. scripts/build_asset_geometry_cache.py 离线扫描 OBJ 顶点生成完整 local min/max + dimensions；
+   scripts/validate_asset_geometry_cache.py 对照重算。运行时不扫描 OBJ/MTL/PNG。
+7. grasp_objects 21 个资产前后树 SHA256 均为
+   `7dc29ed669cbb94c2a3ff8a3c128bf37bc8ee2f6ed0250528b5fdfaf28866e01`，确认零修改。
+   资产包及压缩包不进入 Git/wheel，派生 cache/categories/aliases 在 config/。
+8. 已有场景 category 来自 Semantic；无场景 category-only 依可选 sidecar 筛选，
+   未配返回 asset_category_unavailable，多候选仍需消歧，不随机选取、不改资产 metadata。
+9. parent=null 为 world，非 null 为 parent-local；parent=0 保留。空间推理使用完整 world affine，
+   编辑逆变换写回局部 TRS，无法表达的剪切编辑拒绝。
+10. RobotDriver joint_sequence/joint_limits 精确保留，编辑其他对象不变；不送入第二模型。
+11. 未知 JSON-safe 组件 round-trip 原样保留；已知组件严格验证，Camera/Light/MeshRenderer 不丢失。
+12. Scene、Grounded、Commands target/reference、Feedback、Camera、Dialogue 数字 ID 全链路迁移；
+    Task semantic ID 仍为 string；独立 ResolvedSelectionRelation/CommandPlacementTarget 避免混用。
+13. old flat Scene runtime 已移除。内部 SessionState 保存 seen/next，不进入 Scene；
+    保存恢复后禁止复用删除编号。旧 flat 场景/旧 checkpoint 需显式外部转换或新建会话。
+14. full pytest：**425 passed in 5.35s**（Python 3.12），无 skip/xfail；git diff --check 通过。
+15. 仓库外 wheel：新 venv 真正从 site-packages 导入，清除 PYTHONPATH，smoke 已通过。
+16. Python 3.11/3.12 CI：最终提交后实际核对，不以工作流存在代替通过。
+17. real_qwen_tested=true：新协议 demo 6/6，8 次真实 HTTP，详见 demo/VALIDATION.md。
+    使用 demo 元数据，模型真实；没有伪响应/Replay 替代，没有新增模型调用或改变第二阶段边界。
+18. Simulation/Frontend/Control 未实际联调；robot_executed=false，不新增模拟执行、MuJoCo、IK、轨迹依赖。
+19. 剩余限制如下，不把单元测试当正式平台可执行性证明。
+
+## 剩余限制与部署输入
+
+- 当前抓取库 1–21 不包含正式桌子/机器人资源。default_table_metadata_ref、default_robot_metadata_ref、
+  default_robot_driver 必须由团队提供，并由 adapter 解析到完整资源/几何。当前 Local adapter 仅支持
+  配置 index 内资源，外部平台库需部署端提供完整库或同 Port 的适配器；不能只填不存在的编号。
+  config/local_asset_library.json 留 null 是明确缺配置，不会悄悄回退 demo。
+- 内置 demo 平台为合成 demo_joint 和几何，不是真实 UR5e 配置。真实 Qwen demo 不是正式资产联调。
+- Scene 没有 color/inside/interaction_state；缺可靠证据明确失败，不猜显示名、不添加旧 properties。
+- 支撑推导是水平朝上 surface 的 AABB 几何证据，不是接触/稳定性物理；移动支撑物不会执行物理跟随。
+  父节点运动会按 scene graph 改变子节点世界变换，但不求解支撑动力学，外部执行必须返回确认快照。
+- Commands v2 已改 concrete integer IDs，但 taskStep/旧 Control 适配没有实施；plan success 不等于执行成功。
+- 真实 Qwen 仅覆盖两个多轮样例，不是任意中文任务准确率保证；正式 camera 渲染与视觉定位未测试。
+
+## 最终重验
+
+实际最终 wheel：`/tmp/brain-shared-wheel-ckQP2d/final/robot_agent_brain-0.1.0-py3-none-any.whl`。
+SHA256：`5b7de479b269a79280c01b6da7d943afddfee9432ed810729a0ce536084b3510`。
+venv：`/tmp/brain-shared-wheel-ckQP2d/venv`；从 /tmp 清除 PYTHONPATH 执行 wheel_smoke.py，
+实际导入该 venv/site-packages，**passed**；产物 `/tmp/brain-wheel-smoke-rgwqix8_`。
+检查 wheel 95 个条目，不含原资产 OBJ/MTL/PNG/7z；JSON Schema 从同一安装包成功导出。
+初次尝试 --no-build-isolation 因本机无 hatchling 失败，改用标准隔离构建成功；未安装项目运行时新依赖。
+原始 fixture JSON 与仓库 fixture 逐值比较相等；21 个 cache 对照 OBJ 重算和资产树哈希复核通过。
+真实 demo 结果根目录：`demo/results/shared-scene-v1/20261009-001313-f6f762/`（Git 忽略）。
+远程 Python 3.11/3.12 CI 待提交后核对，下方补充实际链接和状态。
+
+---
+
+# 历史：Optional 第二阶段 Qwen Atomic Skill Planner — 2026-10-07
 
 基线：`ab434b24e61f3ceca0ea7365b307c821d7e3602b`。
 验收代码提交：`fd4d245685341bb4f82202a669ee56775db3ccc6`，已实际 push 到 main。

@@ -1,11 +1,13 @@
 import pytest
-from support_fixtures import add_table
 from robot_agent_brain.adapters.local_asset_catalog import LocalAssetCatalog
-from robot_agent_brain.contracts.scene import ModelProperty, SceneConfig, SceneObject
+from robot_agent_brain.contracts.model_property import ModelProperty
+from robot_agent_brain.contracts.scene import SceneConfig, SceneObject
 from robot_agent_brain.contracts.turn import BrainTurn, SceneEditPlan, SceneEditIntent
 from robot_agent_brain.contracts.task_intent import TaskEntity
 from robot_agent_brain.pipeline import BrainPipeline
 from robot_agent_brain.session.dialogue_state import DialogueState
+from robot_agent_brain.config import BrainConfig
+from test_query_scene_continuity import supported_scene
 
 
 def test_understanding_allows_local_add_reference_without_previous_focus():
@@ -19,14 +21,14 @@ def test_understanding_allows_local_add_reference_without_previous_focus():
                     TaskEntity(entity_id="b", semantic_name="banana", category="fruit", dialogue_ref=True)], operations=[
                     SceneEditIntent(operation="add", target="b", reference="a", relation="right_of"),
                     SceneEditIntent(operation="translate", target="b", direction="right", distance_m=.1)]))
-    assets = LocalAssetCatalog([ModelProperty(asset_id=name, semantic_name=name, category="fruit", dimensions_m=(.1,.1,.1)) for name in ("apple","banana")])
-    scene = SceneConfig(scene_id="s", objects=[SceneObject(scene_object_id="a1", asset_id="apple", semantic_name="apple", category="fruit")])
+    assets = BrainConfig().load_assets()
+    scene = supported_scene()
+    scene.objects.pop()
     provider = Provider()
-    add_table(scene, assets)
     result = BrainPipeline(provider, assets).run("r", "在苹果右边添加香蕉，然后把它右移十厘米", scene, dialogue=DialogueState())
     assert provider.count == 1
-    assert [op.action for op in result.scene_patch.operations] == ["add", "update_property", "update_transform", "update_property"]
-    assert len({op.scene_object_id for op in result.scene_patch.operations}) == 1
+    assert [op.action for op in result.scene_patch.operations] == ["add_object", "upsert_component", "upsert_component", "upsert_component"]
+    assert len({op.object_id_in_scene for op in result.scene_patch.operations}) == 1
 
 
 def test_unresolved_cross_turn_pronoun_still_rejected():
@@ -36,4 +38,5 @@ def test_unresolved_cross_turn_pronoun_still_rejected():
                 scene_edit=SceneEditPlan(entities=[TaskEntity(entity_id="a", semantic_name="apple", category="fruit", dialogue_ref=True)],
                     operations=[SceneEditIntent(operation="translate", target="a", direction="right", distance_m=.1)]))
     with pytest.raises(ValueError, match="dialogue_reference_missing"):
-        BrainPipeline(Provider(), LocalAssetCatalog()).understand_turn("把它右移十厘米", scene=SceneConfig(scene_id="s"), dialogue=DialogueState())
+        BrainPipeline(Provider(), BrainConfig().load_assets()).understand_turn("把它右移十厘米",
+            scene=SceneConfig(scene_schema_version=1, scene_version=0, scene_id=1, scene_name="s", objects=[]), dialogue=DialogueState())

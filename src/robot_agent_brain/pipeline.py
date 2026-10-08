@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .contracts.camera import CameraFrame
 from .contracts.commands import CommandsFile
 from .contracts.grounded_task import GroundedTask
-from .contracts.scene import SceneConfig, ScenePatch
+from .contracts.scene import SceneConfig, ScenePatch, SceneId
 from .contracts.skill_plan import SkillPlan
 from .contracts.task_intent import TaskIntent
 from .contracts.turn import BrainTurn, SessionControlIntent, TurnKind, TurnStatus
@@ -36,8 +36,8 @@ class BrainResult(BaseModel):
     scene_patch: ScenePatch | None = None
     scene_query_result: SceneQueryResult | None = None
     session_action: SessionControlIntent | None = None
-    focus_object_ids: list[str] | None = None
-    deleted_object_ids: list[str] = Field(default_factory=list)
+    focus_object_ids: list[SceneId] | None = None
+    deleted_object_ids: list[SceneId] = Field(default_factory=list)
     planner_used: Literal["recipe", "qwen"] | None = None
     planner_trace: dict | None = Field(default=None, exclude=True)
 
@@ -65,9 +65,11 @@ class BrainResult(BaseModel):
 
 class BrainPipeline:
     def __init__(self, understanding, assets, scene_editor=None, vision_provider=None,
-                 skill_planning_provider=None, planner_mode="recipe"):
+                 skill_planning_provider=None, planner_mode="recipe", robot="ur5e", aliases=None):
         self.understanding = understanding
         self.aliases = getattr(getattr(assets, "metadata", None), "aliases", {})
+        if aliases is not None:
+            self.aliases = aliases
         self.category_aliases = getattr(getattr(assets, "metadata", None), "category_aliases", {})
         self.grounder = SceneGrounder(aliases=self.aliases, category_aliases=self.category_aliases)
         self.motion = MotionScaleResolver(assets)
@@ -75,8 +77,8 @@ class BrainPipeline:
         self.skill_planner = SkillPlannerRouter(mode=planner_mode, recipe_planner=self.planner,
                                                model_provider=skill_planning_provider, registry=REGISTRY)
         self.expander = TaskExpander()
-        self.scene_editor = scene_editor or SceneEditor(assets)
-        self.exporter = CommandExporter()
+        self.scene_editor = scene_editor or SceneEditor(assets, aliases=self.aliases, category_aliases=self.category_aliases)
+        self.exporter = CommandExporter(robot=robot)
         self.vision_provider = vision_provider
         self.vision_fallback = VisionFallbackGrounder()
         self.domain_policy = TaskDomainPolicy()
@@ -121,6 +123,8 @@ class BrainPipeline:
                 raise deferred_reference_error
         if turn.task_intent is not None:
             turn = turn.model_copy(update={"task_intent": turn.task_intent.model_copy(update={"instruction": instruction})})
+        if dialogue is not None and scene is not None:
+            turn = dialogue.apply_exclusions(turn, scene, aliases=self.aliases)
         turn = self.domain_policy.classify(turn, instruction)
         if turn.status == TurnStatus.ACCEPTED and turn.turn_kind == TurnKind.ROBOT_TASK:
             turn = turn.model_copy(update={"task_intent": normalize_motion_language(turn.task_intent)})
@@ -129,7 +133,8 @@ class BrainPipeline:
     def process_turn(self, request_id: str, turn: BrainTurn, scene: SceneConfig | None, *,
                      dialogue=None, bindings_override=None, edit_defaults=None,
                      capture: Callable[[], CameraFrame] | None = None,
-                     held_object: str | None = None) -> BrainResult:
+                     held_object: SceneId | None = None,
+                     seen_scene_object_ids=None, next_scene_object_id=None) -> BrainResult:
         """Consume an understood turn without another provider call or normalization."""
         self.skill_planner.last_trace = None
         if turn.status != TurnStatus.ACCEPTED:
@@ -140,7 +145,9 @@ class BrainPipeline:
             raise ValueError("scene_required")
         if turn.turn_kind == TurnKind.SCENE_EDIT:
             edited = self.scene_editor.edit_result(turn.scene_edit, scene, dialogue=dialogue, defaults=edit_defaults,
-                                                  bindings_override=bindings_override)
+                                                  bindings_override=bindings_override,
+                                                  seen_scene_object_ids=seen_scene_object_ids,
+                                                  next_scene_object_id=next_scene_object_id)
             return BrainResult(turn_kind=turn.turn_kind, scene_patch=edited.patch,
                                focus_object_ids=edited.focus_object_ids or None,
                                deleted_object_ids=edited.deleted_object_ids)
@@ -178,7 +185,7 @@ class BrainPipeline:
 
     def run(self, request_id: str, instruction: str, scene: SceneConfig, *,
             dialogue=None, capture: Callable[[], CameraFrame] | None = None,
-            held_object: str | None = None, bindings_override=None) -> BrainResult:
+            held_object: SceneId | None = None, bindings_override=None) -> BrainResult:
         turn = self.understand_turn(instruction, scene=scene, dialogue=dialogue)
         return self.process_turn(request_id, turn, scene, dialogue=dialogue, capture=capture,
                                  held_object=held_object, bindings_override=bindings_override)

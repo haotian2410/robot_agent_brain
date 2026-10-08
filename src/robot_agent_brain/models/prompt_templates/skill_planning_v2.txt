@@ -12,3 +12,5 @@
 initial_state.gripper_occupied=true 时不能无条件 grasp；held_entity=null 不代表夹爪空闲。
 intent 只写简短审计说明，不输出 reasoning。不得修改 placement_target、goal 或 operation 顺序。
 禁止输出 asset_id、scene_object_id、quaternion、IK、collision、path、command_id 等执行或物理字段。
+
+输出必须是紧凑单行 JSON，不换行、不缩进；省略值为 null 的可选字段。intent 使用简短中文动作摘要，不重复实体清单或长句。必须完整输出所有 operation 和步骤，不得为缩短输出删动作。有限输出预算应优先用于完整技能计划，而不是排版或冗长审计文本。

@@ -3,14 +3,15 @@ from typing import Literal
 import json
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from .task_intent import Direction, PlacementTarget
+from .task_intent import Direction
+from .scene import SceneId
 from .skill_plan import SkillName
 
 Region = Literal["grasp_region", "placement_region", "button_surface"]
 
 class Parameters(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    target: str = Field(min_length=1)
+    target: SceneId
 
     # Compatibility for clients of the v2 JSON-shaped Python API.
     def __getitem__(self, key):
@@ -26,11 +27,11 @@ class GraspParameters(Parameters):
     pass
 
 class ReleaseParameters(Parameters):
-    reference: str | None = None
+    reference: SceneId | None = None
     region: Region | None = None
 
 class MoveParameters(Parameters):
-    reference: str | None = None
+    reference: SceneId | None = None
     region: Region | None = None
     motion_direction: Direction | None = None
     distance_m: float | None = Field(default=None, gt=0, le=2, allow_inf_nan=False)
@@ -60,11 +61,11 @@ class PressParameters(Parameters):
     region: Region | None = None
 
 class PullParameters(Parameters):
-    reference: str | None = None
+    reference: SceneId | None = None
     region: Region | None = None
 
 class PushParameters(Parameters):
-    reference: str | None = None
+    reference: SceneId | None = None
     region: Region | None = None
 
 PARAMETER_TYPES = {
@@ -106,17 +107,34 @@ class Command(BaseModel):
         data["parameters"] = PARAMETER_TYPES[kind].model_validate(params)
         return data
 
+class CommandPlacementTarget(BaseModel):
+    """Concrete Control target; never reuse semantic Task PlacementTarget."""
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["container_interior", "support_surface", "relative_object", "free_space"]
+    reference: SceneId | None = None
+    relation: str | None = None
+
+    @model_validator(mode="after")
+    def validate_semantics(self):
+        if self.kind == "relative_object" and (self.reference is None or not self.relation):
+            raise ValueError("relative_object placement requires reference and relation")
+        if self.kind == "container_interior" and self.relation not in {None, "inside"}:
+            raise ValueError("container placement relation must be inside")
+        if self.kind == "free_space" and self.relation is not None:
+            raise ValueError("free_space placement allows an optional support reference, not a relation")
+        return self
+
 class CommandOperation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation_id: str
     semantic_intent: str = Field(min_length=1)
-    placement_target: PlacementTarget | None = None
+    placement_target: CommandPlacementTarget | None = None
 
 class CommandsFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal["2.0"] = "2.0"
     request_id: str
-    scene_id: str
+    scene_id: SceneId
     scene_version: int = Field(ge=0)
     robot: str
     operations: list[CommandOperation]
@@ -148,7 +166,7 @@ class ExecutionFeedback(BaseModel):
     request_id: str
     status: Literal["success", "failed", "partial"]
     commands: list[CommandFeedback]
-    holding_object: str | None = None
+    holding_object: SceneId | None = None
 
 
 def canonical_commands(commands: CommandsFile) -> dict:

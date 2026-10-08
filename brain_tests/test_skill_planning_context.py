@@ -15,7 +15,7 @@ def placement_task():
 
 def test_context_roles_goals_and_physical_projection():
     value = placement_task()
-    context = build_planner_context(value, "a_01")
+    context = build_planner_context(value, 101)
     op = context.operations[0]
     assert op.id == "op-1" and op.valid_roles == ("source", "destination")
     assert op.role_bindings.source == "a" and op.role_bindings.destination == "b"
@@ -24,7 +24,7 @@ def test_context_roles_goals_and_physical_projection():
     assert "source=a" in context.semantic_summary
     payload = context.model_dump_json()
     for forbidden in ("scene_object_id", "asset_id", "position", "quaternion", "scale", "bbox", "joint",
-                      "trajectory", "ik", "collision", "path", "mesh", "a_01", "b_01", "distance_m"):
+                      "trajectory", "ik", "collision", "path", "mesh", "101", "102", "distance_m"):
         assert forbidden not in payload
     assert {e.id for e in context.entities} == {"a", "b"}
 
@@ -32,7 +32,7 @@ def test_context_roles_goals_and_physical_projection():
 def test_context_external_holding_and_order():
     value = task([Operation(operation_id="op-1", task_type="grasp", target="a"),
                   move().model_copy(update={"depends_on": ["op-1"]})])
-    context = build_planner_context(value, "unrelated_01")
+    context = build_planner_context(value, 999)
     assert context.initial_state.held_entity is None and context.initial_state.gripper_occupied
     assert [op.id for op in context.operations] == ["op-1", "op-2"]
     assert context.operations[1].depends_on == ["op-1"]

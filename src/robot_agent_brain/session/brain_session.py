@@ -8,6 +8,8 @@ class BrainSession:
     """Local semantic state commits only after platform acknowledgement."""
     def __init__(self, scene, pipeline, platform):
         self.scene_manager = None
+        self.seen_scene_object_ids = set()
+        self.next_scene_object_id = 0
         self.pipeline, self.platform = pipeline, platform
         self.dialogue = DialogueState()
         self.session_action = None
@@ -34,19 +36,33 @@ class BrainSession:
     def initialize_scene(self, scene):
         if self.pending_execution_request is not None:
             raise ValueError("execution_pending")
-        candidate = SceneManager(scene)
+        candidate = self._candidate_manager(scene)
         try:
             self._check_snapshot(self.platform.load_scene(candidate.scene), candidate.scene)
         except Exception:
             self.sync_state = "unknown"
             raise
-        self.scene_manager = candidate
+        self._commit_manager(candidate)
         self.sync_state = "synchronized"
         self.dialogue = DialogueState()
         self.holding_object = None
         self.exported_commands.clear()
         self.last_exported_request = None
         self.last_request_id = None
+
+    def _candidate_manager(self, scene):
+        current = {obj.object_id_in_scene for obj in self.scene.objects} if self.scene else set()
+        incoming = {obj.object_id_in_scene for obj in scene.objects}
+        retired = self.seen_scene_object_ids - current
+        if incoming & retired:
+            raise ValueError("scene_object_id_reused")
+        return SceneManager(scene, seen_scene_object_ids=self.seen_scene_object_ids,
+                            next_scene_object_id=self.next_scene_object_id)
+
+    def _commit_manager(self, manager):
+        self.scene_manager = manager
+        self.seen_scene_object_ids = set(manager.seen_scene_object_ids)
+        self.next_scene_object_id = manager.next_scene_object_id
 
     @staticmethod
     def _check_snapshot(snapshot, expected):
@@ -58,7 +74,7 @@ class BrainSession:
     def apply_scene_patch(self, patch):
         if self.pending_execution_request is not None:
             raise ValueError("execution_pending")
-        candidate = SceneManager(self.require_scene())
+        candidate = self._candidate_manager(self.require_scene())
         candidate_scene = candidate.apply_patch(patch)
         try:
             snapshot = self.platform.apply_patch(patch)
@@ -71,7 +87,7 @@ class BrainSession:
             self.sync_state = "unknown"
             raise
         self.sync_state = "synchronized"
-        self.scene_manager = candidate
+        self._commit_manager(candidate)
         return self.scene
 
     def capture(self, request=None):
@@ -101,7 +117,9 @@ class BrainSession:
         self.check_turn(turn)
         result = self.pipeline.process_turn(request_id, turn, self.scene,
                                            dialogue=self.dialogue, capture=self.capture,
-                                           held_object=self.holding_object, bindings_override=bindings_override, edit_defaults=edit_defaults)
+                                           held_object=self.holding_object, bindings_override=bindings_override, edit_defaults=edit_defaults,
+                                           seen_scene_object_ids=self.seen_scene_object_ids,
+                                           next_scene_object_id=self.next_scene_object_id)
         return self._accept_result(request_id, result)
 
     def process_initial_robot_turn(self, request_id, turn, scene, *, bindings_override):
@@ -128,7 +146,7 @@ class BrainSession:
             self.last_exported_request = request_id
             self.last_request_id = request_id
         if result.scene_patch is not None:
-            if self.holding_object and any(op.scene_object_id == self.holding_object for op in result.scene_patch.operations):
+            if self.holding_object is not None and any(op.object_id_in_scene == self.holding_object for op in result.scene_patch.operations):
                 raise ValueError("scene_edit_held_object_conflict")
             self.apply_scene_patch(result.scene_patch)
         if result.session_action is not None:
@@ -162,21 +180,22 @@ class BrainSession:
         if feedback.status == "success" and (set(actual) != expected or any(c.status != "success" for c in feedback.commands)):
             raise ValueError("execution_feedback_incomplete_success")
         scene = self.require_scene()
-        if feedback.holding_object is not None and feedback.holding_object not in {o.scene_object_id for o in scene.objects}:
+        if feedback.holding_object is not None and feedback.holding_object not in {o.object_id_in_scene for o in scene.objects}:
             raise ValueError("execution_feedback_holding_unknown")
         candidate = None
         if confirmed_scene is not None:
             candidate = SceneConfig.model_validate(confirmed_scene.model_dump())
             if candidate.scene_id != scene.scene_id or candidate.scene_version <= scene.scene_version:
                 raise ValueError("execution_feedback_scene_mismatch")
-            if feedback.holding_object is not None and feedback.holding_object not in {o.scene_object_id for o in candidate.objects}:
+            if feedback.holding_object is not None and feedback.holding_object not in {o.object_id_in_scene for o in candidate.objects}:
                 raise ValueError("execution_feedback_holding_unknown")
         if feedback_source not in {"external", "simulated"}:
             raise ValueError("execution_feedback_source_invalid")
         self.sync_state = "unknown"
         if candidate is not None:
+            manager = self._candidate_manager(candidate)
             self._check_snapshot(self.platform.load_scene(candidate), candidate)
-            self.scene_manager = SceneManager(candidate)
+            self._commit_manager(manager)
             self.sync_state = "synchronized"
         self.holding_object = feedback.holding_object
         self.last_feedback_source = feedback_source

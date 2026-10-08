@@ -1,8 +1,12 @@
-from robot_agent_brain.contracts.scene import ModelProperty, SceneConfig, SceneObject, Transform
+from robot_agent_brain.contracts.model_property import ModelProperty
+from robot_agent_brain.contracts.scene import SceneConfig, SceneObject, Transform
 from robot_agent_brain.contracts.task_intent import Direction, Operation, TaskEntity, TaskIntent, TaskType
 from robot_agent_brain.contracts.turn import BrainTurn, SceneEditIntent, SceneEditPlan
 from robot_agent_brain.adapters.local_asset_catalog import LocalAssetCatalog
 from robot_agent_brain.pipeline import BrainPipeline
+from robot_agent_brain.config import BrainConfig
+from test_component_runtime import object_
+import pytest
 
 
 class MoveUnderstanding:
@@ -20,22 +24,17 @@ class MoveUnderstanding:
 
 
 def test_multiple_scene_moves_are_atomic_and_keep_transform_components():
-    assets = LocalAssetCatalog([
-        ModelProperty(asset_id="apple", semantic_name="apple", category="fruit", dimensions_m=(.1, .1, .1)),
-        ModelProperty(asset_id="banana", semantic_name="banana", category="fruit", dimensions_m=(.1, .1, .1)),
-    ])
-    scene = SceneConfig(scene_id="s", objects=[
-        SceneObject(scene_object_id="apple_01", asset_id="apple", semantic_name="apple", category="fruit",
-                    transform=Transform(quaternion_xyzw=(0, 0, 2**-.5, 2**-.5), scale=(2, 1, 1))),
-        SceneObject(scene_object_id="banana_01", asset_id="banana", semantic_name="banana", category="fruit",
-                    transform=Transform(position=(.4, 0, 0))),
-    ])
+    assets = BrainConfig().load_assets()
+    scene = SceneConfig(scene_schema_version=1, scene_id=1, scene_version=0, scene_name="s", objects=[
+        object_(0, "apple", scale=(2, 1, 1), metadata_ref="$DEMO_LIBRARY/2"),
+        object_(1, "banana", position=(.4, 0, 0), metadata_ref="$DEMO_LIBRARY/3")])
+    scene.objects[0].components[0].properties["quaternion_xyzw"] = [0, 0, 2**-.5, 2**-.5]
     result = BrainPipeline(MoveUnderstanding(), assets).run("r", "苹果向右移动五厘米，香蕉向前移动十厘米", scene)
     assert result.commands is None
-    assert len(result.scene_patch.operations) == 2
-    assert result.scene_patch.operations[0].transform.position == (.05, 0, 0)
-    assert result.scene_patch.operations[0].transform.quaternion_xyzw == (0, 0, 2**-.5, 2**-.5)
-    assert result.scene_patch.operations[0].transform.scale == (2, 1, 1)
+    assert len(result.scene_patch.operations) == 4
+    assert result.scene_patch.operations[0].component.properties["position"] == [.05, 0, 0]
+    assert result.scene_patch.operations[0].component.properties["quaternion_xyzw"] == pytest.approx((0, 0, 2**-.5, 2**-.5))
+    assert result.scene_patch.operations[0].component.properties["scale"] == pytest.approx((2, 1, 1))
 
 
 class NativeSceneUnderstanding:
@@ -45,15 +44,15 @@ class NativeSceneUnderstanding:
 
 
 def test_native_scene_edit_distance_is_replaced_by_text_evidence():
-    assets = LocalAssetCatalog([ModelProperty(asset_id="apple", semantic_name="apple", category="fruit", dimensions_m=(.1, .1, .1))])
-    scene = SceneConfig(scene_id="s", objects=[SceneObject(scene_object_id="apple_01", asset_id="apple", semantic_name="apple", category="fruit")])
+    assets = BrainConfig().load_assets()
+    scene = SceneConfig(scene_schema_version=1, scene_id=1, scene_version=0, scene_name="s", objects=[object_(0, "apple", metadata_ref="$DEMO_LIBRARY/2")])
     result = BrainPipeline(NativeSceneUnderstanding(), assets).run("r", "苹果向右移动十厘米", scene)
-    assert result.scene_patch.operations[0].transform.position == (.1, 0, 0)
+    assert result.scene_patch.operations[0].component.properties["position"] == [.1, 0, 0]
 
 
 def test_native_scene_edit_millimeter_and_vague_scale_evidence():
-    assets = LocalAssetCatalog([ModelProperty(asset_id="apple", semantic_name="apple", category="fruit", dimensions_m=(.1, .1, .1))])
-    scene = SceneConfig(scene_id="s", objects=[SceneObject(scene_object_id="apple_01", asset_id="apple", semantic_name="apple", category="fruit")])
-    for text, expected in (("苹果向右移动5毫米", .005), ("苹果向右移动一点", .01)):
+    assets = BrainConfig().load_assets()
+    scene = SceneConfig(scene_schema_version=1, scene_id=1, scene_version=0, scene_name="s", objects=[object_(0, "apple", metadata_ref="$DEMO_LIBRARY/2")])
+    for text, expected in (("苹果向右移动5毫米", .005), ("苹果向右移动一点", .008)):
         result = BrainPipeline(NativeSceneUnderstanding(), assets).run("r", text, scene)
-        assert abs(result.scene_patch.operations[0].transform.position[0] - expected) < 1e-9
+        assert abs(result.scene_patch.operations[0].component.properties["position"][0] - expected) < 1e-9

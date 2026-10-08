@@ -1,11 +1,14 @@
 from itertools import product
 from ..contracts.grounded_task import GroundedTask
 from ..contracts.task_intent import Operation
+from ..scene.component_access import SceneIndex
+from ..scene.scene_graph import world_transform
 
 class TaskExpander:
     """Keep set membership stable across phases; zip equally sized roles."""
     def expand(self, task: GroundedTask, scene=None) -> GroundedTask:
-        objects = {o.scene_object_id: o for o in scene.objects} if scene else {}
+        objects = {o.object_id_in_scene: o for o in scene.objects} if scene else {}
+        scene_index = SceneIndex(scene) if scene else None
         entities, members = [], {}
         for entity in task.entities:
             ids = entity.scene_object_ids
@@ -17,9 +20,11 @@ class TaskExpander:
                 members[entity.entity_id].append(concrete_id)
                 data = dict(entity_id=concrete_id, scene_object_id=object_id, scene_object_ids=[object_id])
                 if object_id in objects:
-                    data.update(asset_id=objects[object_id].asset_id,
-                                category=objects[object_id].category,
-                                model_scale=objects[object_id].transform.scale)
+                    semantic = scene_index.semantic(object_id)
+                    data.update(metadata_ref=scene_index.metadata_ref(object_id),
+                                semantic_name=semantic.semantic_name,
+                                category=semantic.category,
+                                model_scale=world_transform(scene, object_id).scale)
                 entities.append(entity.model_copy(update=data))
         operations, expanded_ids = [], {}
         pairwise_cursors = {}

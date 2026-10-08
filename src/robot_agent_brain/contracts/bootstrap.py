@@ -1,13 +1,13 @@
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
-from .scene import SceneConfig
+from .scene import SceneConfig, SceneId
 
 
 class BootstrapResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
     scene: SceneConfig
     scene_source: Literal["generated"] = "generated"
-    entity_candidates: dict[str, list[str]] = Field(default_factory=dict)
+    entity_candidates: dict[str, list[SceneId]] = Field(default_factory=dict)
     assumptions: list[str] = Field(default_factory=list)
     asset_bindings: dict[str, str] = Field(default_factory=dict)
 

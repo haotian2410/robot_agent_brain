@@ -1,5 +1,6 @@
 from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, model_validator
+from .scene import SceneId
 
 
 class RelationScope(StrEnum):
@@ -48,4 +49,19 @@ class SpatialRelation(BaseModel):
             raise ValueError(f"task_semantic_invalid: {self.relation.value} requires reference")
         if self.reference is not None and self.reference == self.subject:
             raise ValueError("task_semantic_invalid: relation subject and reference must differ")
+        return self
+
+
+class ResolvedSelectionRelation(BaseModel):
+    """Internal concrete relation; semantic references stay strings in Task."""
+    model_config = ConfigDict(extra="forbid")
+    relation: SpatialRelationType
+    reference_object_id: SceneId | None = None
+
+    @model_validator(mode="after")
+    def validate_reference(self):
+        unary = {"left", "right", "front", "back", "up", "down", "leftmost",
+                 "rightmost", "frontmost", "backmost", "highest", "lowest"}
+        if self.relation.value not in unary and self.reference_object_id is None:
+            raise ValueError("scene_relation_reference_missing")
         return self

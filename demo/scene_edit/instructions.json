@@ -1,0 +1,17 @@
+[
+  {
+    "id": "01_create_scene",
+    "instruction": "直接修改场景：增加两个苹果、一个香蕉和一个篮子。",
+    "expected": {"turn_kind": "scene_edit", "scene_source": "generated", "skill_planning_calls": 0, "object_counts": {"apple": 2, "banana": 1, "basket": 1}}
+  },
+  {
+    "id": "02_compound_edit",
+    "instruction": "直接修改场景：把两个苹果都向右移动两厘米，把香蕉绕世界Z轴旋转三十度。",
+    "expected": {"turn_kind": "scene_edit", "scene_source": "session", "skill_planning_calls": 0, "apple_delta_x": 0.02, "banana_yaw_degrees": 30}
+  },
+  {
+    "id": "03_query_count",
+    "instruction": "有几个苹果？",
+    "expected": {"turn_kind": "scene_query", "scene_source": "session", "skill_planning_calls": 0, "query_count": 2}
+  }
+]

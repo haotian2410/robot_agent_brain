@@ -31,7 +31,6 @@ class ParseEntity(BaseModel):
     dialogue_ref_set: bool = False
     all_available: bool = False
     category_only: bool = False
-    exclude_scene_object_ids: list[str] = Field(default_factory=list)
 
 
 class ParseOperation(BaseModel):
@@ -124,7 +123,6 @@ class TaskParseOutput(BaseModel):
                 quantity_mode=item.quantity_mode,
                 aliases=item.aliases, dialogue_ref=item.dialogue_ref, dialogue_ref_set=item.dialogue_ref_set, all_available=item.all_available,
                 category_only=item.category_only,
-                exclude_scene_object_ids=item.exclude_scene_object_ids,
             ) for item in self.entities],
             operations=operation_values,
             spatial_relations=relations,

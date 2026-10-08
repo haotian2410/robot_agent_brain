@@ -7,3 +7,6 @@ build/
 *.egg-info/
 var/
 
+# Shared read-only asset package; never ship meshes in this repository/wheel.
+model/grasp_objects/
+model/grasp_objects.7z

@@ -48,7 +48,7 @@ def test_auto_holding_conflict_never_calls_qwen():
     provider = MockSkillPlanningProvider()
     planner = router("auto", provider)
     with pytest.raises(BrainError) as error:
-        planner.plan(placement_task(), held_object="b_01")
+        planner.plan(placement_task(), held_object=102)
     assert error.value.issue.code == "holding_conflict"
     assert provider.requests == [] and planner.last_trace.model_calls == 0
 
@@ -111,7 +111,7 @@ def test_initially_held_source_can_skip_pickup():
     raw = raw_plan()
     raw["operations"][0]["steps"] = raw["operations"][0]["steps"][3:]
     provider = MockSkillPlanningProvider(raw)
-    result = router(provider=provider).plan(placement_task(), held_object="a_01")
+    result = router(provider=provider).plan(placement_task(), held_object=101)
     assert len(result.plan.steps) == 3
     assert provider.requests[0].context.initial_state.held_entity == "a"
 
@@ -119,7 +119,7 @@ def test_initially_held_source_can_skip_pickup():
 def test_unrelated_holding_blocks_qwen_output_no_fallback():
     planner = router(provider=MockSkillPlanningProvider())
     with pytest.raises(BrainError) as error:
-        planner.plan(placement_task(), held_object="b_01")
+        planner.plan(placement_task(), held_object=102)
     assert error.value.issue.code == "holding_conflict"
     assert error.value.issue.stage == "skill_planning"
     assert planner.last_trace.used_planner == "qwen"

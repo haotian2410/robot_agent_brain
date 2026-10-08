@@ -5,10 +5,10 @@ from robot_agent_brain.planning.task_expander import TaskExpander
 
 
 def pair_task(count=2):
-    return GroundedTask(instruction="把两个苹果分别放入两个盒子", scene_id="s", scene_version=0,
-        entities=[GroundedEntity(entity_id=name, semantic_name=name, category=category, asset_id=name,
-                    scene_object_id=name+"_1", scene_object_ids=[f"{name}_{i+1}" for i in range(n)])
-                  for name, category, n in (("apple", "fruit", 2), ("box", "container", count))],
+    return GroundedTask(instruction="把两个苹果分别放入两个盒子", scene_id=1, scene_version=0,
+        entities=[GroundedEntity(entity_id=name, semantic_name=name, category=category,
+                    scene_object_id=start, scene_object_ids=list(range(start, start+n)))
+                  for name, category, n, start in (("apple", "fruit", 2, 0), ("box", "container", count, 10))],
         operations=[Operation(operation_id="op-1", task_type="pick_and_place", source="apple", destination="box",
                     assignment_mode="pairwise", placement_target={"kind":"container_interior", "reference":"box", "relation":"inside"})])
 

@@ -7,6 +7,8 @@ from robot_agent_brain.scene.asset_resolver import AssetResolver
 from robot_agent_brain.scene.bootstrapper import SceneBootstrapper
 from robot_agent_brain.grounding.scene_grounder import SceneGrounder
 from test_application_artifacts import Provider, robot
+from component_fixtures import demo_bootstrap, named_objects
+from robot_agent_brain.scene.scene_graph import world_transform
 
 
 def test_add_layout_is_seeded_and_repeatable(tmp_path):
@@ -18,9 +20,9 @@ def test_add_layout_is_seeded_and_repeatable(tmp_path):
         report = app.handle(turn.instruction)
         assert report.run_status == "success", report
         scene = app.get_session(report.session_id).scene
-        apples = [o for o in scene.objects if o.semantic_name == "apple"]
-        positions.append([o.transform.position for o in apples])
-        assert any(abs(apples[0].transform.position[i]-apples[1].transform.position[i]) >= .08+app.defaults.clearance_m for i in (0,1))
+        apples = named_objects(scene, "apple")
+        positions.append([world_transform(scene, o.object_id_in_scene).position for o in apples])
+        assert any(abs(world_transform(scene, apples[0].object_id_in_scene).position[i]-world_transform(scene, apples[1].object_id_in_scene).position[i]) >= .08+app.defaults.clearance_m for i in (0,1))
     assert positions[0] == positions[1] and positions[0] != positions[2]
 
 
@@ -28,20 +30,23 @@ def test_work_area_must_fit_actual_support_geometry():
     config = BrainConfig()
     defaults = config.load_defaults().model_copy(update={"workspace_max":(2,2)})
     with pytest.raises(ValueError, match="bootstrap_workspace_outside_support"):
-        SceneBootstrapper(config.load_assets(), defaults).prepare(robot(), scene_id="s")
+        bootstrap = demo_bootstrap(config)[1]
+        bootstrap.defaults = defaults
+        bootstrap.prepare(robot(), scene_id=1)
 
 
 def test_exact_asset_name_does_not_bypass_category_constraint():
-    resolver = AssetResolver(BrainConfig().load_assets())
+    assets = BrainConfig().load_assets()
+    resolver = AssetResolver(assets, aliases=assets.metadata.aliases, category_aliases=assets.metadata.category_aliases)
     with pytest.raises(ValueError, match="asset_category_mismatch"):
         resolver.resolve(TaskEntity(entity_id="a", semantic_name="apple", category="container"))
-    assert resolver.resolve(TaskEntity(entity_id="a", semantic_name="苹果", category="水果")).model.asset_id == "demo_apple"
+    assert resolver.resolve(TaskEntity(entity_id="a", semantic_name="苹果", category="水果")).model.metadata_ref == "$DEMO_LIBRARY/2"
 
 
 def test_grounding_override_does_not_bypass_category_constraint():
     config = BrainConfig()
     task = robot()
-    initial = SceneBootstrapper(config.load_assets(), config.load_defaults()).prepare(task, scene_id="s")
+    initial = demo_bootstrap(config)[1].prepare(task, scene_id=1)
     task.task_intent.entities[0].category = "container"
     with pytest.raises(ValueError, match="grounding_binding_invalid"):
         SceneGrounder().ground(task.task_intent, initial.scene, initial.bindings_for(initial.scene))

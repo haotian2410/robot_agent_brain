@@ -28,5 +28,5 @@ class SceneObjectSelector:
         overrides.update(local)
         task = SceneGrounder(aliases=self.aliases, category_aliases=self.category_aliases).ground(intent, scene, overrides)
         ids = next(e.scene_object_ids for e in task.entities if e.entity_id == target)
-        by_id = {obj.scene_object_id: obj for obj in scene.objects}
+        by_id = {obj.object_id_in_scene: obj for obj in scene.objects}
         return [by_id[object_id] for object_id in ids]

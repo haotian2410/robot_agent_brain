@@ -1,4 +1,26 @@
-# 二次 Atomic Skill Planner 验收
+# Scene v1 / 只读资产迁移验收 — 2026-10-09
+
+下表是当前实现的验收依据；后面的旧阶段记录仅为历史，颜色、flat Scene、旧 ID 断言已按新协议迁移。
+
+| v3 方案条目 | 当前自动化证据（brain_tests/） |
+|---|---|
+| 1–4、18–27、70–74 | test_shared_scene_contract：用户 fixture 等值往返、字段严格验证、parent=0、未知组件、joint_limits/Camera/Light/MetadataRef 不变 |
+| 5–15、65–69 | test_asset_library：只读索引/metadata/cache、统一 ref 解析、离线 build/validate 前后 tree hash、category sidecar、runtime 不扫描 OBJ |
+| 16–17、28–31、42–47、50 | test_component_runtime：Semantic 优先、全局别名/类别、world 父链筛选、整数 concrete ID、颜色/inside 无证据明确失败 |
+| 32–35、51–53、78–79 | test_component_editor、test_scene_atomicity：组件 patch、其他组件保留、支持事实刷新、失败版本/编号不变 |
+| 48–49、77 | test_component_geometry：实测 cache 的 apple(1)、底部原点模型(4)、XY 偏心工具(16)，完整 AABB 支撑/世界 bounds/布局，无 center-origin 回退 |
+| 54–58、66 | test_component_bootstrap、test_library_config：正式引用/config、平台资源缺失失败、world AABB 落桌、组件输出、机器人型号来自 config |
+| 59–61 | test_component_session：删后不复用、保存恢复历史、ID=0 持物/焦点、失败不耗编号、marker 无 concrete ID、非法历史拒绝 |
+| 62–64 | test_export_roundtrip、test_component_runtime：Commands/Feedback 数字 ID、独立 CommandPlacementTarget、公开 Schema 落盘验证 |
+| 75–76 | test_asset_library、test_component_runtime、test_catalog_alias_selection：中文别名/category 候选、无 sidecar 不随机选 |
+| 80、第二 Qwen 边界 | test_boundary、test_skill_planning_context、test_skill_planning_end_to_end：不引入执行依赖、不向第二模型投影物理场景 |
+| 应用与发布 | test_component_demo_application、scripts/wheel_smoke.py：建场景→导出→编辑→恢复→查询，安装包外独立运行 |
+| 真实 Qwen | demo/run_demo.py：新组件协议两组共 6 轮通过，8 次真实 HTTP；不代表 Control 执行 |
+
+全量 pytest、独立 wheel、远程 Python 3.11/3.12 CI 的实际结果和剩余限制见 implementation_report.md。
+正式平台 table/robot 资源尚未提供；测试 fixture/demo 不作为正式资源替代。
+
+# 历史：二次 Atomic Skill Planner 验收
 
 基线 `ab434b24e61f3ceca0ea7365b307c821d7e3602b`。四个新测试文件覆盖下表；
 真实 Qwen、Control、前端未联调，不以 MockTransport 代替真实验收。

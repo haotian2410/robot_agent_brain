@@ -7,19 +7,19 @@ from robot_agent_brain.adapters.json_command_sink import JsonCommandSink
 
 
 def wire(skill, parameters):
-    return dict(schema_version="2.0", request_id="r", scene_id="s", scene_version=0, robot="ur5e",
+    return dict(schema_version="2.0", request_id="r", scene_id=1, scene_version=0, robot="ur5e",
                 operations=[dict(operation_id="op-1", semantic_intent="test")],
                 commands=[dict(command_id="c1", source_skill_step_id="s1", operation_id="op-1",
                                skill_name=skill, parameters=parameters)])
 
 
-VALID = [("locate", {"target": "a"}), ("grasp", {"target": "a"}),
-         ("move", {"target": "a", "region": "grasp_region"}),
-         ("move", {"target": "a", "motion_direction": "right", "distance_m": .1}),
-         ("release", {"target": "a", "reference": "b", "region": "placement_region"}),
-         ("press", {"target": "a", "region": "button_surface"}),
-         ("pull", {"target": "a", "reference": "handle"}),
-         ("push", {"target": "a", "reference": "handle"})]
+VALID = [("locate", {"target": 0}), ("grasp", {"target": 0}),
+         ("move", {"target": 0, "region": "grasp_region"}),
+         ("move", {"target": 0, "motion_direction": "right", "distance_m": .1}),
+         ("release", {"target": 0, "reference": 1, "region": "placement_region"}),
+         ("press", {"target": 0, "region": "button_surface"}),
+         ("pull", {"target": 0, "reference": 2}),
+         ("push", {"target": 0, "reference": 2})]
 
 
 @pytest.mark.parametrize("skill,params", VALID)
@@ -42,16 +42,16 @@ def test_every_skill_rejects_unknown_parameters(skill, params):
 
 
 @pytest.mark.parametrize("skill,params", [
-    ("locate", {"target": "a", "region": "grasp_region"}),
-    ("grasp", {"target": "a", "reference": "b"}),
-    ("release", {"target": "a", "distance_m": .1}),
-    ("press", {"target": "a", "reference": "b"}),
-    ("pull", {"target": "a", "motion_direction": "right"}),
-    ("push", {"target": "a", "distance_m": .1}),
-    ("move", {"target": "a"}),
-    ("move", {"target": "a", "motion_direction": None, "distance_m": None}),
-    ("move", {"target": "a", "region": "grasp_region", "motion_direction": "right", "distance_m": .1}),
-    ("move", {"target": "a", "motion_direction": "right", "distance_m": float("inf")}),
+    ("locate", {"target": 0, "region": "grasp_region"}),
+    ("grasp", {"target": 0, "reference": 1}),
+    ("release", {"target": 0, "distance_m": .1}),
+    ("press", {"target": 0, "reference": 1}),
+    ("pull", {"target": 0, "motion_direction": "right"}),
+    ("push", {"target": 0, "distance_m": .1}),
+    ("move", {"target": 0}),
+    ("move", {"target": 0, "motion_direction": None, "distance_m": None}),
+    ("move", {"target": 0, "region": "grasp_region", "motion_direction": "right", "distance_m": .1}),
+    ("move", {"target": 0, "motion_direction": "right", "distance_m": float("inf")}),
 ])
 def test_wrong_skill_parameters_fail_both_validators(skill, params):
     payload = wire(skill, params)

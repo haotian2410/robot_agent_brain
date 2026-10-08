@@ -11,6 +11,8 @@ import robot_agent_brain
 from jsonschema import Draft202012Validator
 from robot_agent_brain.config import BrainConfig
 from robot_agent_brain.contracts.commands import CommandsFile
+from robot_agent_brain.contracts.scene import SceneConfig
+from robot_agent_brain.scene.component_access import SceneIndex
 from robot_agent_brain.models.prompts import TASK_UNDERSTANDING_PROMPT, SKILL_PLANNING_PROMPT
 from robot_agent_brain.skills.registry import REGISTRY
 
@@ -39,6 +41,8 @@ def main():
     run("schemas", "--output-dir", str(directory / "schemas"))
     schema = json.loads((directory / "schemas" / "commands.schema.json").read_text())
     assert schema == CommandsFile.model_json_schema()
+    scene_schema = json.loads((directory / "schemas" / "scene_config.schema.json").read_text())
+    assert scene_schema == SceneConfig.model_json_schema()
     instruction = "把两个苹果放进篮子"
     fixture = [{"instruction":instruction, "turn":{"status":"accepted", "turn_kind":"robot_task", "instruction":instruction,
         "task_intent":{"instruction":instruction,
@@ -68,7 +72,13 @@ def main():
     scene = json.loads(Path(first["artifacts"]["scene_config"]).read_text())
     Draft202012Validator(schema).validate(commands)
     assert (commands["scene_id"], commands["scene_version"]) == (scene["scene_id"],scene["scene_version"])
-    assert sum(o["semantic_name"] == "apple" for o in scene["objects"]) == 2
+    parsed_scene = SceneConfig.model_validate(scene)
+    Draft202012Validator(scene_schema).validate(scene)
+    index = SceneIndex(parsed_scene)
+    assert sum(index.semantic(o.object_id_in_scene).semantic_name == "apple" for o in index.semantic_objects()) == 2
+    assert type(scene["scene_id"]) is int
+    assert all(type(command["parameters"]["target"]) is int for command in commands["commands"])
+    assert index.robot_driver(1) is not None
     second = json.loads(run("run", instruction, *common))
     assert second["scene_source"] == "session" and second["scene_id"] == first["scene_id"]
     assert second["scene_version"] == first["scene_version"]
@@ -83,9 +93,10 @@ def main():
     add_options[add_options.index("--session") + 1] = "wheel-add"
     fourth = json.loads(run("run", add, *add_options))
     assert fourth["run_status"] == "success" and "commands" not in fourth["artifacts"]
-    assert fourth["scene_source"] == "generated" and fourth["scene_version"] == 1
+    assert fourth["scene_source"] == "generated" and fourth["scene_version"] == 2
     edited = json.loads(Path(fourth["artifacts"]["scene_config"]).read_text())
-    assert sum(o["semantic_name"] == "banana" for o in edited["objects"]) == 1
+    index = SceneIndex(SceneConfig.model_validate(edited))
+    assert sum(index.semantic(o.object_id_in_scene).semantic_name == "banana" for o in index.semantic_objects()) == 1
     print(json.dumps({"wheel_smoke":"passed", "installed_module":str(installed), "artifacts":str(directory),
                       "provider":"replay", "real_qwen_tested":False}, ensure_ascii=False))
 

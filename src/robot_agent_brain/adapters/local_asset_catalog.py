@@ -1,4 +1,5 @@
-from ..contracts.scene import ModelProperty
+from ..contracts.model_property import ModelProperty
+from ..contracts.asset_library import LibraryAssetId
 import json
 from pathlib import Path
 from typing import Literal
@@ -10,17 +11,19 @@ class AssetDocument(BaseModel):
     schema_version: Literal["1.0"] = "1.0"
     models: list[ModelProperty]
     demo_assets: bool = False
+    library_ids: dict[str, LibraryAssetId] = Field(default_factory=dict)
     aliases: dict[str, str] = Field(default_factory=dict)
     category_aliases: dict[str, str] = Field(default_factory=dict)
     overridable_properties: dict[str, list[str]] = Field(default_factory=dict)
     intrinsic_properties: dict[str, dict[str, str | float | bool]] = Field(default_factory=dict)
-    center_origin_assets: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_index(self):
         ids = [m.asset_id for m in self.models]
         if len(ids) != len(set(ids)):
             raise ValueError("asset_id_duplicate")
+        if len(set(self.library_ids.values())) != len(self.library_ids):
+            raise ValueError("library_asset_id_duplicate")
         for aliases, canonical in ((self.aliases, {m.semantic_name.casefold() for m in self.models}),
                                    (self.category_aliases, {m.category.casefold() for m in self.models})):
             normalized = {}
@@ -31,7 +34,7 @@ class AssetDocument(BaseModel):
                 if key in normalized and normalized[key] != value:
                     raise ValueError("asset_alias_conflict")
                 normalized[key] = value
-        if not (set(self.overridable_properties) | set(self.intrinsic_properties) | set(self.center_origin_assets)) <= set(ids):
+        if not (set(self.overridable_properties) | set(self.intrinsic_properties)) <= set(ids):
             raise ValueError("asset_metadata_unknown_id")
         return self
 

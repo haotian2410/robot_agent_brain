@@ -5,9 +5,10 @@ from robot_agent_brain.planning.recipe_planner import RecipePlanner
 
 
 def task(operations):
-    return GroundedTask(instruction="test", scene_id="s", scene_version=0,
-                        entities=[GroundedEntity(entity_id=name, semantic_name="apple", scene_object_id=name+"_01",
-                                                  asset_id="apple", category="fruit") for name in ("a", "b")],
+    return GroundedTask(instruction="test", scene_id=1, scene_version=0,
+                        entities=[GroundedEntity(entity_id=name, semantic_name="apple", scene_object_id=identifier,
+                                                  metadata_ref="$DEMO_LIBRARY/2", category="fruit")
+                                  for name, identifier in (("a", 101), ("b", 102))],
                         operations=operations)
 
 
@@ -36,10 +37,10 @@ def test_double_grasp_blocked_not_silently_rewritten():
 
 def test_release_requires_matching_confirmed_holding():
     value = task([Operation(operation_id="op-1", task_type="release", target="a")])
-    for held in (None, "b_01"):
+    for held in (None, 102):
         with pytest.raises(ValueError, match="plan_precondition_failed"):
             RecipePlanner().plan(value, held_object=held)
-    assert len(RecipePlanner().plan(value, held_object="a_01").steps) == 1
+    assert len(RecipePlanner().plan(value, held_object=101).steps) == 1
 
 
 def test_search_is_not_locate():

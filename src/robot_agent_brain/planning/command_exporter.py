@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..contracts.commands import Command, CommandOperation, CommandsFile
+from ..contracts.commands import Command, CommandOperation, CommandPlacementTarget, CommandsFile
 from ..contracts.grounded_task import GroundedTask
 from ..contracts.scene import SceneConfig
 from ..contracts.skill_plan import SkillName, SkillPlan
@@ -10,6 +10,11 @@ from .plan_validator import PlanValidator
 
 class CommandExporter:
     """Translate semantic skill steps to commands v2 without physical compilation."""
+
+    def __init__(self, robot: str):
+        if not robot.strip():
+            raise ValueError("command_export_robot_config_missing")
+        self.robot = robot
 
     def export(self, request_id: str, task: GroundedTask, plan: SkillPlan, scene: SceneConfig, *, held_object=None) -> CommandsFile:
         PlanValidator().validate(task, plan, scene, held_object=held_object)
@@ -58,7 +63,7 @@ class CommandExporter:
             request_id=request_id,
             scene_id=scene.scene_id,
             scene_version=scene.scene_version,
-            robot=scene.robot or "unspecified",
+            robot=self.robot,
             operations=command_operations,
             commands=commands,
         )
@@ -67,9 +72,14 @@ class CommandExporter:
     def _bind_placement(placement, bindings):
         if placement is None:
             return None
-        reference_values = bindings.get(placement.reference, [placement.reference])
-        reference = reference_values[0]
-        return placement.model_copy(update={"reference": reference})
+        reference = None
+        if placement.reference is not None:
+            reference_values = bindings.get(placement.reference)
+            if reference_values is None or len(reference_values) != 1:
+                raise ValueError("command_export_placement_binding_invalid")
+            reference = reference_values[0]
+        return CommandPlacementTarget(
+            kind=placement.kind, reference=reference, relation=placement.relation)
 
     @staticmethod
     def _semantic_intent(operation, bindings):

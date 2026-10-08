@@ -1,0 +1,8 @@
+{
+  "default_table_metadata_ref": "$DEMO_LIBRARY/1",
+  "default_robot_metadata_ref": "$DEMO_LIBRARY/6",
+  "default_robot_driver": {
+    "joint_sequence": ["demo_joint"],
+    "joint_limits": {"demo_joint": [-1, 1]}
+  }
+}

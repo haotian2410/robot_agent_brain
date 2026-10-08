@@ -1,0 +1,17 @@
+[
+  {
+    "id": "01_create_and_plan",
+    "instruction": "用机械臂先把两个苹果放进篮子，再把一个香蕉放进盒子。",
+    "expected": {"turn_kind": "robot_task", "scene_source": "generated", "skill_planning_calls": 1, "min_commands_count": 18, "object_counts": {"apple": 2, "banana": 1, "basket": 1, "box": 1}}
+  },
+  {
+    "id": "02_grasp_move_release",
+    "instruction": "用机械臂抓起香蕉，向右移动五厘米，然后放下香蕉。",
+    "expected": {"turn_kind": "robot_task", "scene_source": "session", "skill_planning_calls": 1, "min_commands_count": 5, "distance_m": 0.05}
+  },
+  {
+    "id": "03_query_count",
+    "instruction": "有几个苹果？",
+    "expected": {"turn_kind": "scene_query", "scene_source": "session", "skill_planning_calls": 0, "query_count": 2}
+  }
+]

@@ -1,5 +1,5 @@
 from typing import Protocol
-from ..contracts.scene import ModelProperty
+from ..contracts.model_property import ModelProperty
 
 
 class AssetCatalogPort(Protocol):

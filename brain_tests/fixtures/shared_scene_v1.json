@@ -1,0 +1,36 @@
+{
+  "scene_schema_version": 1,
+  "scene_version": 1,
+  "scene_id": 1,
+  "scene_name": "Sample Scene",
+  "objects": [
+    {"object_id_in_scene": 0, "object_name_in_scene": "Cube", "components": [
+      {"component_type": "Transform", "properties": {"position": [0,0,0], "quaternion_xyzw": [0,0,0,1], "scale": [1,1,1], "parent": null}},
+      {"component_type": "MetadataRef", "properties": {"path": "$LIBRARY_SERVER/<id>"}},
+      {"component_type": "MeshRenderer", "properties": {"forceOverrideColor": "#FFFFFF"}},
+      {"component_type": "Semantic", "properties": {"semantic_name": "cube", "category": "object", "support": 5}}
+    ]},
+    {"object_id_in_scene": 1, "object_name_in_scene": "Light1", "components": [
+      {"component_type": "Transform", "properties": {"position": [1,1,1], "quaternion_xyzw": [0,0,0,1], "scale": [1,1,1], "parent": 0}},
+      {"component_type": "Light", "properties": {"type": "Ambient", "intensity": 0.5, "color": "#FFFFFF"}}
+    ]},
+    {"object_id_in_scene": 2, "object_name_in_scene": "Sample RGBDCamera", "components": [
+      {"component_type": "Transform", "properties": {"position": [1,1,1], "quaternion_xyzw": [0,0,0,1], "scale": [1,1,1], "parent": 0}},
+      {"component_type": "Camera", "properties": {"type": "rgbd", "fov": 60, "near": 0.1, "far": 1000, "resolution": [640,480]}}
+    ]},
+    {"object_id_in_scene": 3, "object_name_in_scene": "Robot_ur5e", "components": [
+      {"component_type": "Transform", "properties": {"position": [2,2,2], "quaternion_xyzw": [0,0,0,1], "scale": [1,1,1], "parent": null}},
+      {"component_type": "MetadataRef", "properties": {"path": "$LIBRARY_SERVER/<id>"}},
+      {"component_type": "RobotDriver", "properties": {
+        "joint_sequence": ["joint1","joint2","joint3","joint4","joint5","joint6"],
+        "joint_limits": {"joint1": [-3.14,3.14], "joint2": [-1.57,1.57], "joint3": [-1.57,1.57], "joint4": [-3.14,3.14], "joint5": [-1.57,1.57], "joint6": [-3.14,3.14]}
+      }}
+    ]},
+    {"object_id_in_scene": 5, "object_name_in_scene": "Table", "components": [
+      {"component_type": "Transform", "properties": {"position": [0,0,0], "quaternion_xyzw": [0,0,0,1], "scale": [1,1,1], "parent": null}},
+      {"component_type": "MetadataRef", "properties": {"path": "$LIBRARY_SERVER/<id>"}},
+      {"component_type": "MeshRenderer", "properties": {"forceOverrideColor": "#FFFFFF"}},
+      {"component_type": "Semantic", "properties": {"semantic_name": "table", "category": "surface", "support": null}}
+    ]}
+  ]
+}

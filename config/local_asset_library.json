@@ -1,0 +1,15 @@
+{
+  "provider": "qwen",
+  "planner": "qwen",
+  "base_url": "http://127.0.0.1:8080/v1",
+  "model": "Qwen3.8-27B",
+  "asset_library_root": "../model/grasp_objects",
+  "asset_geometry_cache": "brain_asset_geometry_cache.json",
+  "asset_category_index": "asset_categories.json",
+  "semantic_aliases": "semantic_aliases.json",
+  "library_ref_prefix": "$LIBRARY_SERVER/",
+  "robot": "ur5e",
+  "default_table_metadata_ref": null,
+  "default_robot_metadata_ref": null,
+  "output_dir": "var/shared-scene"
+}

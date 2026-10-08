@@ -1,10 +1,14 @@
 import pytest
 
 from robot_agent_brain.adapters.local_asset_catalog import LocalAssetCatalog
-from robot_agent_brain.contracts.scene import ModelProperty, SceneConfig, SceneObject
+from robot_agent_brain.contracts.model_property import ModelProperty
+from robot_agent_brain.contracts.scene import SceneConfig, SceneObject
 from robot_agent_brain.contracts.task_intent import TaskIntent, TaskEntity, Operation
 from robot_agent_brain.contracts.turn import BrainTurn, SceneEditIntent, SceneQueryIntent, SessionControlIntent, SceneEditPlan
 from robot_agent_brain.pipeline import BrainPipeline
+from robot_agent_brain.config import BrainConfig
+from robot_agent_brain.session.dialogue_state import DialogueState
+from test_component_runtime import object_
 
 
 class SpyProvider:
@@ -28,10 +32,9 @@ def fixture_pipeline(kind):
     }[kind]
     turn = BrainTurn(status="accepted", turn_kind=kind, instruction="provider text", **payload)
     provider = SpyProvider(turn)
-    assets = LocalAssetCatalog([ModelProperty(asset_id="apple", semantic_name="apple", category="fruit",
-                                             dimensions_m=(.1, .1, .1))])
-    scene = SceneConfig(scene_id="s", objects=[SceneObject(scene_object_id="apple_01", asset_id="apple",
-                                                          semantic_name="apple", category="fruit")])
+    assets = BrainConfig().load_assets()
+    scene = SceneConfig(scene_schema_version=1, scene_id=1, scene_version=0, scene_name="s",
+                        objects=[object_(0, "apple", metadata_ref="$DEMO_LIBRARY/2")])
     return BrainPipeline(provider, assets), provider, scene
 
 
@@ -62,7 +65,7 @@ def test_direct_process_never_calls_provider(kind):
 
 def test_context_markers_do_not_replace_original_instruction():
     pipeline, provider, scene = fixture_pipeline("robot_task")
-    class Context:
+    class Context(DialogueState):
         def contextualize(self, text, scene):
             return text + " [dialogue_ref=apple]"
     turn = pipeline.understand_turn("抓起它", scene=scene, dialogue=Context())

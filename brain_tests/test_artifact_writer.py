@@ -11,12 +11,12 @@ def report():
 
 def test_publishes_real_paths_and_never_overwrites(tmp_path):
     writer = ArtifactWriter(tmp_path)
-    result = writer.publish(report(), scene=SceneConfig(scene_id="s"))
+    result = writer.publish(report(), scene=SceneConfig(scene_schema_version=1, scene_id=1, scene_version=0, scene_name="s", objects=[]))
     assert Path(result.artifacts["scene_config"]).is_file()
     assert Path(result.artifacts["scene_config"]).is_absolute()
     before = Path(result.artifacts["scene_config"]).read_bytes()
     with pytest.raises(ValueError, match="already_exists"):
-        writer.publish(report(), scene=SceneConfig(scene_id="different"))
+        writer.publish(report(), scene=SceneConfig(scene_schema_version=1, scene_id=2, scene_version=0, scene_name="different", objects=[]))
     assert Path(result.artifacts["scene_config"]).read_bytes() == before
 
 

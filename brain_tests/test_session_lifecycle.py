@@ -7,11 +7,12 @@ from robot_agent_brain.contracts.scene import SceneConfig, SceneObject
 from robot_agent_brain.contracts.turn import BrainTurn, SessionControlIntent
 from robot_agent_brain.contracts.task_intent import TaskIntent, TaskEntity, Operation
 from robot_agent_brain.contracts.commands import ExecutionFeedback, CommandFeedback
+from test_component_runtime import object_
 
 
 def session():
-    scene = SceneConfig(scene_id="s", objects=[SceneObject(scene_object_id="a", asset_id="demo_apple",
-                                                         semantic_name="apple", category="fruit")])
+    scene = SceneConfig(scene_schema_version=1, scene_version=0, scene_id=1, scene_name="s",
+                        objects=[object_(0, "apple", metadata_ref="$DEMO_LIBRARY/2")])
     return BrainSession(scene, BrainPipeline(None, BrainConfig().load_assets()), MockScenePlatform())
 
 
@@ -22,7 +23,7 @@ def turn():
 
 
 def feedback(commands, status="success"):
-    return ExecutionFeedback(request_id=commands.request_id, status=status, holding_object="a",
+    return ExecutionFeedback(request_id=commands.request_id, status=status, holding_object=0,
         commands=[CommandFeedback(command_id=c.command_id, status="success") for c in commands.commands])
 
 
@@ -61,7 +62,7 @@ def test_feedback_requires_dispatch_and_then_refresh():
     assert value.holding_object is None
     value.apply_execution_feedback(feedback(commands, "partial"), feedback_source="simulated")
     assert value.sync_state == "unknown" and value.pending_execution_request is None
-    assert value.holding_object == "a" and value.last_feedback_source == "simulated"
+    assert value.holding_object == 0 and value.last_feedback_source == "simulated"
     with pytest.raises(ValueError, match="scene_sync_unknown"):
         value.process_turn("next", turn())
 
@@ -98,7 +99,7 @@ def test_invalid_feedback_is_transactional(invalid):
     elif invalid == "incomplete":
         incoming.commands.pop()
     elif invalid == "holding":
-        incoming.holding_object = "not-present"
+        incoming.holding_object = 999
     else:
         snapshot.scene_version = 0
     before = value.scene.model_dump()

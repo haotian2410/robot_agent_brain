@@ -2,7 +2,7 @@ import json
 import pytest
 from robot_agent_brain.config import BrainConfig
 from robot_agent_brain.adapters.local_asset_catalog import LocalAssetCatalog
-from robot_agent_brain.contracts.scene import ModelProperty
+from robot_agent_brain.contracts.model_property import ModelProperty
 from robot_agent_brain.contracts.task_intent import TaskEntity
 from robot_agent_brain.scene.asset_resolver import AssetResolver
 
@@ -11,15 +11,17 @@ def entity(name="苹果", **kwargs):
     return TaskEntity(entity_id="a", semantic_name=name, category="fruit", **kwargs)
 
 
-def test_demo_resources_alias_and_color():
+def test_demo_resources_alias_and_missing_color_evidence():
     config = BrainConfig.load(environ={})
     assert config.model is None
     assert config.load_defaults().initial_counts == {}
     catalog = config.load_assets()
-    result = AssetResolver(catalog).resolve(entity(color="red"))
+    resolver = AssetResolver(catalog, aliases=catalog.metadata.aliases)
+    result = resolver.resolve(entity())
     assert result.model.semantic_name == "apple"
-    assert result.properties == {"color": "red"}
     assert result.assumptions and catalog.metadata.demo_assets
+    with pytest.raises(ValueError, match="asset_color_evidence_missing"):
+        resolver.resolve(entity(color="red"))
 
 
 def test_config_precedence_and_secrets(tmp_path):
@@ -59,7 +61,7 @@ def test_duplicate_ids_alias_conflicts_and_copy_isolation():
     assert catalog.get_model_property("a").semantic_name == "apple"
     with pytest.raises(ValueError, match="asset_alias_invalid"):
         LocalAssetCatalog.from_document({"models": [model.model_dump()], "aliases": {"apple": "pear"}})
-    with pytest.raises(ValueError, match="asset_color_unsupported"):
+    with pytest.raises(ValueError, match="asset_color_evidence_missing"):
         AssetResolver(catalog).resolve(entity("apple", color="red"))
 
 

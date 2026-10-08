@@ -39,12 +39,22 @@ class BrainApplication:
         if self.config.vision and (platform_factory is LocalScenePlatform or not hasattr(provider, "detect")):
             raise BrainError("vision_requires_rendering_platform", "configuration",
                              "Vision requires an explicit rendering platform and a detection provider; LocalScenePlatform has no images")
-        editor = SceneEditor(self.assets, SceneLayoutPolicy(clearance_m=self.defaults.clearance_m), seed=self.config.seed)
+        aliases = (self.config.load_semantic_aliases() if self.config.semantic_aliases is not None
+                   else getattr(getattr(self.assets, "metadata", None), "aliases", {}))
+        category_aliases = getattr(getattr(self.assets, "metadata", None), "category_aliases", {})
+        editor = SceneEditor(self.assets, SceneLayoutPolicy(clearance_m=self.defaults.clearance_m), seed=self.config.seed,
+                             aliases=aliases, category_aliases=category_aliases)
         self.pipeline = BrainPipeline(provider, self.assets, scene_editor=editor,
                                       vision_provider=provider if self.config.vision else None,
                                       skill_planning_provider=provider if hasattr(provider, "plan") else None,
-                                      planner_mode=self.config.planner)
-        self.bootstrapper = SceneBootstrapper(self.assets, self.defaults, robot=self.config.robot, seed=self.config.seed)
+                                      planner_mode=self.config.planner, robot=self.config.robot,
+                                      aliases=self.config.load_semantic_aliases() if self.config.semantic_aliases else None)
+        bootstrap = self.config.bootstrap_settings()
+        self.bootstrapper = SceneBootstrapper(self.assets, self.defaults, robot=self.config.robot, seed=self.config.seed,
+            table_metadata_ref=bootstrap.get("default_table_metadata_ref"),
+            robot_metadata_ref=bootstrap.get("default_robot_metadata_ref"),
+            robot_driver=bootstrap.get("default_robot_driver"),
+            aliases=aliases, category_aliases=category_aliases)
         self.codec = SceneFileCodec(self.assets)
         self.writer = ArtifactWriter(self.config.output_dir)
         self.sessions = {}
@@ -56,12 +66,8 @@ class BrainApplication:
         safe_identifier(session_id)
         state = self.store.load(session_id)
         if session_id not in self.sessions or state is not None and state.revision > self.revisions.get(session_id, 0):
-            if state is not None and state.scene is not None:
-                for obj in state.scene.objects:
-                    try:
-                        self.assets.get_model_property(obj.asset_id)
-                    except LookupError as exc:
-                        raise ValueError("session_asset_missing: " + obj.asset_id) from exc
+            # Scene Semantic queries do not require mesh resources. Resolve
+            # MetadataRef only when geometry is actually needed, not on restore.
             session = BrainSession(None, self.pipeline, self.platform_factory())
             self.sessions[session_id] = self.store.restore(state, session) if state else session
             self.sessions[session_id].restored_config_fingerprint = state.config_fingerprint if state else None
@@ -159,7 +165,8 @@ class BrainApplication:
                 initial_robot = None
                 if session.scene is None and turn.turn_kind not in {"scene_query", "session_control"}:
                     stage = "bootstrap"
-                    initial = self.bootstrapper.prepare(turn, scene_id=uuid.uuid4().hex)
+                    from secrets import randbits
+                    initial = self.bootstrapper.prepare(turn, scene_id=randbits(53))
                     report.scene_source = "generated"
                     report.assumptions = initial.assumptions
                     if turn.turn_kind == "robot_task":

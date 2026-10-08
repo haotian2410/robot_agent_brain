@@ -9,7 +9,8 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from ..adapters.artifact_writer import safe_identifier
 from ..contracts.commands import CommandsFile, canonical_commands
-from ..contracts.scene import SceneConfig
+from ..contracts.scene import SceneConfig, SceneId
+from ..scene.scene_manager import SceneManager
 from .dialogue_state import DialogueState
 
 
@@ -23,7 +24,10 @@ class SessionState(BaseModel):
     dialogue: DialogueState = Field(default_factory=DialogueState)
     session_action: Literal["pause", "resume", "close"] | None = None
     sync_state: Literal["synchronized", "unknown"] = "synchronized"
-    holding_object: str | None = None
+    holding_object: SceneId | None = None
+    seen_scene_object_ids: set[SceneId] = Field(default_factory=set)
+    # The exhausted sentinel is one past the largest valid Scene ID.
+    next_scene_object_id: int = Field(default=0, strict=True, ge=0, le=2**53)
     last_exported_request: str | None = None
     exported_commands: dict[str, dict] = Field(default_factory=dict)
     dispatched_requests: set[str] = Field(default_factory=set)
@@ -34,8 +38,10 @@ class SessionState(BaseModel):
     @model_validator(mode="after")
     def consistent(self):
         safe_identifier(self.session_id)
-        known = {o.scene_object_id for o in self.scene.objects} if self.scene else set()
-        focus = self.dialogue.last_entity_ids + ([self.dialogue.last_entity_id] if self.dialogue.last_entity_id else [])
+        known = {o.object_id_in_scene for o in self.scene.objects} if self.scene else set()
+        if not known <= self.seen_scene_object_ids or self.next_scene_object_id <= max(self.seen_scene_object_ids, default=-1):
+            raise ValueError("session_state_allocator_invalid")
+        focus = self.dialogue.last_entity_ids + ([self.dialogue.last_entity_id] if self.dialogue.last_entity_id is not None else [])
         if not set(focus) <= known or self.holding_object is not None and self.holding_object not in known:
             raise ValueError("session_state_unknown_object")
         for request, payload in self.exported_commands.items():
@@ -100,6 +106,7 @@ class SessionStore:
     def save(self, session_id, session, *, revision, config_fingerprint=None):
         """Caller holds lock across restore, processing, and this checkpoint."""
         state = SessionState(session_id=session_id, revision=revision, config_fingerprint=config_fingerprint, scene=session.scene,
+            seen_scene_object_ids=session.seen_scene_object_ids, next_scene_object_id=session.next_scene_object_id,
             dialogue=session.dialogue, session_action=session.session_action, sync_state=session.sync_state,
             holding_object=session.holding_object, last_exported_request=session.last_exported_request,
             exported_commands=session.exported_commands, dispatched_requests=session.dispatched_requests,
@@ -124,6 +131,11 @@ class SessionStore:
     def restore(state, session):
         if state.scene is not None:
             session.initialize_scene(state.scene)
+            session._commit_manager(SceneManager(state.scene,
+                seen_scene_object_ids=state.seen_scene_object_ids, next_scene_object_id=state.next_scene_object_id))
+        else:
+            session.seen_scene_object_ids = set(state.seen_scene_object_ids)
+            session.next_scene_object_id = state.next_scene_object_id
         for name in ("dialogue", "session_action", "sync_state", "holding_object", "last_exported_request",
                      "exported_commands", "dispatched_requests", "pending_commands", "pending_execution_request",
                      "last_feedback_source"):

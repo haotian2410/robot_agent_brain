@@ -17,11 +17,11 @@ class VisionFallbackGrounder:
             raise ValueError("camera_frame_scene_mismatch")
         if frame.rgb is None or not frame.instance_boxes:
             raise ValueError("vision_grounding_scene_instance_missing")
-        known = {o.scene_object_id for o in scene.objects}
+        known = {o.object_id_in_scene for o in scene.objects}
         if any(b.scene_object_id not in known for b in frame.instance_boxes):
             raise ValueError("vision_grounding_unknown_scene_instance")
         output = provider.detect(frame, [VisionEntity(entity_id=entity.entity_id, semantic_name=entity.semantic_name)])
-        eligible = {o.scene_object_id for o in candidates}
+        eligible = {o.object_id_in_scene for o in candidates}
         result = []
         for detection in output.detections:
             if detection.entity != entity.entity_id:

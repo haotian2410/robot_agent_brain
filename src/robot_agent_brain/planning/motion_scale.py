@@ -3,11 +3,11 @@ from __future__ import annotations
 from ..contracts.grounded_task import GroundedTask
 from ..contracts.task_intent import Direction, TaskType
 from ..models.motion_policy import MotionPolicy
-from ..ports.asset_catalog import AssetCatalogPort
+from ..ports.asset_library import AssetLibraryPort
 
 
 class MotionScaleResolver:
-    def __init__(self, assets: AssetCatalogPort, policy: MotionPolicy | None = None):
+    def __init__(self, assets: AssetLibraryPort, policy: MotionPolicy | None = None):
         self.assets = assets
         self.policy = policy or MotionPolicy()
 
@@ -22,10 +22,12 @@ class MotionScaleResolver:
             if actor is None:
                 raise ValueError(f"motion_scale_grounding_missing: {operation.operation_id}")
             try:
-                model = self.assets.get_model_property(actor.asset_id)
-            except LookupError as exc:
+                if actor.metadata_ref is None:
+                    raise ValueError("scene_geometry_metadata_missing")
+                model = self.assets.resolve(actor.metadata_ref)
+            except (LookupError, ValueError) as exc:
                 raise ValueError(
-                    f"motion_scale_geometry_missing: operation={operation.operation_id} asset={actor.asset_id}"
+                    f"motion_scale_geometry_missing: operation={operation.operation_id} metadata_ref={actor.metadata_ref}"
                 ) from exc
             axis = {
                 Direction.LEFT: 0, Direction.RIGHT: 0,

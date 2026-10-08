@@ -1,8 +1,9 @@
-# Brain 原生协议与迁移
+# 团队组件 Scene v1 与 Brain 规划协议
 
 ## Optional Atomic Skill Planner（本轮新增）
 
-冻结的 Query、SceneEditPlan、CommandsFile 2.0 wire 不变。第二阶段仅组合原子技能，
+Query、SceneEditPlan 的语义边界不变；CommandsFile 2.0 的 concrete ID 本轮改为整数。
+第二阶段仅组合原子技能，
 不是第二次任务理解，也不执行物理仿真。完整路径为 Grounding → TaskExpander →
 MotionScaleResolver → SkillPlannerRouter → PlanValidator → CommandExporter。
 Exporter 保留同一 PlanValidator 门禁。
@@ -85,16 +86,46 @@ debug 保存 context/catalog/raw/normalized/validation 与调用日志；未完�
 
 ## 边界
 
-本版输出 Brain 原生 SceneConfig、ScenePatch、CommandsFile，不是 MJCF/XML。
-团队草案的 components 场景和 taskStep 文件还没有完成适配；文件名相似不表示兼容。
-SceneFileCodec 是未来转换边界，当前拒绝未知版本、损坏 JSON 和 components 格式。
+本版 SceneConfig 已迁移到团队组件 Scene v1；ScenePatch 是内部组件补丁，
+CommandsFile 仍为 Brain-Control v2，不是 taskStep，也不是 MJCF/XML。
+SceneFileCodec 仅接受新组件格式，拒绝未知版本、损坏 JSON 和旧 flat Scene。
 LocalScenePlatform 只维护元数据并确认版本，不渲染；capture 明确不支持。
 
 ## ID、单位和版本
 
+公共 Scene 顶层严格为 scene_schema_version、scene_version、scene_id、scene_name、objects。
+对象严格为 object_id_in_scene、object_name_in_scene、components；组件为 component_type、properties。
+每个对象恰好一个 Transform，不强制 Semantic/MetadataRef（Camera/Light 可以没有）。
+已知 Transform/MetadataRef/Semantic/MeshRenderer/Light/Camera/RobotDriver properties 严格验证；
+未知组件按 JSON-safe 字典保留，拒绝非有限数。已知组件原始 properties 也保留，不用重新填默认值改写。
+测试 fixture 位于 brain_tests/fixtures/shared_scene_v1.json，与用户文件 JSON 内容相等。
+
+Transform.parent=null 表示世界 TRS，非 null 表示相对父节点的局部 TRS，0 是合法父 ID。
+父引用必须存在、不能指向自身、不能有环。所有空间筛选/查询/支撑使用 world_transform；
+编辑先在世界坐标计算，再 local_from_world 写回原父系。完整仿射链支持非均匀缩放；
+编辑结果若不能表示为局部 TRS（剪切），明确拒绝，不近似改写。
+
+ScenePatch 的 operations 仅 add_object/remove_object/upsert_component/remove_component，
+分别携带 object、无 payload、component、component_type；目标字段为 object_id_in_scene。
+SceneManager 先验证整份候选再提交；失败不增版本、不消耗历史 ID。删除被 parent/support
+引用的对象必须同 patch 修复引用，否则整份失败。目标以外组件及 RobotDriver joint 字典不改写。
+
+MetadataRef.path 原样保存，结构加载不强制资源可解析；示例 `<id>` 可以往返，但不能用于 resolve。
+LocalAssetLibraryAdapter 只接受配置前缀后跟规范十进制整数，不接受本地路径/前导零/悬空 ID。
+index 负责 ID↔目录映射，metadata 负责核对身份；geometry cache 提供完整 bounds，
+可选 category sidecar 用于资源类别候选。runtime 不读 OBJ/MTL/PNG，离线脚本才读 OBJ。
+现有 Scene 的 Semantic 优先于资源名称/category。资源缺失在实际请求几何时明确失败。
+
+BrainAssetView 是内部只读派生值，不进入 Scene；几何以 local min/max 为准。
+DemoAssetLibrary 是独立的 metadata-only $DEMO_LIBRARY 命名空间，必须显式 bounds 和稳定
+library_ids；正式资产配置没有自动 demo 回退。正式 Bootstrap 需要真实 table/robot 引用、
+可 resolve 的资源及 default_robot_driver，缺配置失败，不从显示名推断机器人型号。
+
 - SceneConfig 的 `scene_id` 标识场景；`scene_version` 是确认的非负版本。
-- `scene_object_id` 是稳定实例 ID；`asset_id` 对应资产元数据，不是可随意虚构的 mesh。
-- 删除后的 ID 进入 retired_object_ids，不能复活。语义实体 ID 不等于场景实例 ID。
+- `scene_id` / `object_id_in_scene` 是 0..2^53−1 的严格整数（拒绝 bool/数字字符串）。
+- `MetadataRef.path` 是唯一资产引用，与实例编号无关；公共 Scene 无 asset_id。
+- 删除编号保存在内部 SessionState.seen_scene_object_ids，配合 next_scene_object_id，
+  恢复后仍不能复用；不向 Scene 增加 retired/history 字段。语义 entity_id 仍为字符串。
 - Transform 位置单位米，四元数顺序 xyzw，scale 为正比例；编辑旋转角度为度。
 - 世界坐标约定 x 右、y 前、z 上；桌面“左上”使用 x-/y+，不是 z+。
 - 机器人计划采用模型轴尺寸与实例 scale 将 small/medium/large 转换成 10%/50%/200%。
@@ -120,9 +151,10 @@ Query、Robot Grounding、Scene Edit 复用 SemanticEntitySelector 的名称、�
 颜色、排除、绑定和 selection relation 规则。count/existence 可返回 0/N；机器人唯一性
 和集合数量仍在 Grounder 校验；candidate_pool 在关系筛选前检查数量。
 
-其中 AssetCatalog.aliases 是全局名称映射（例如 苹果→apple），请求名称和场景名称均先
-canonicalize；SceneObject.properties.aliases 则是实例级附加名称。无需在上传场景中复制
-资产别名，导入和查询不会为此改写场景。未声明的名称不会仅因同类别而匹配。
+其中 semantic_aliases.json 是全局名称映射（例如 苹果→apple），请求名称和场景名称均先
+canonicalize。Scene 不再有实例 aliases/color 属性；Semantic 是现有实例的语义事实，
+不被 Asset metadata 覆盖。未声明的名称不会仅因同类别而匹配。颜色没有可靠证据时
+明确返回 grounding_evidence_missing，不从显示名或渲染颜色猜语义。
 
 REMOVED：dialogue_scene_object_id marker 和 Provider 单对象 referent 注入。
 `[dialogue_ref=apple]` 只提供语义名；`[dialogue_ref_set=apple]` 必须对应
@@ -151,22 +183,31 @@ left_of/right_of/front_of/behind 保留已有对象 Z；新增对象先确定可
 按自身几何底部计算高度，再设置 XY。支撑未知时只允许显式 defaults 桌面回退，
 否则 scene_edit_support_unknown。free_space 不再是 above 的别名。
 
-SpatialFactResolver 使用 AABB（优先）或明确 center_origin_assets 元数据，考虑 scale
-和 xyzw 四元数；只推导 category=surface 的水平、朝上的支撑面，允许任意 yaw。
+SpatialFactResolver 只使用 AssetLibraryPort.resolve(MetadataRef.path) 的完整 local AABB，
+通过父链 world affine matrix 变换八角点；不再有 center-origin 回退。
+只推导 category=surface 的水平、朝上的支撑面，允许任意 yaw。
 这是包围盒语义事实，不是物理接触检测。倾斜面、未知原点不推断支撑。
 布局配置 support_contact_tolerance_m 默认为 0.001 米，可配置，不作为补偿位移。
 
-UPDATE_TRANSFORM 先清除 support/support_relation/container_membership/support_evaluated，
-Editor 在 prospective scene 中校验后追加 UPDATE_PROPERTY，整个 patch 只提交一个版本。
-`support_evaluated=true` 表示本轮完成受支持几何范围内的支撑检查；无可证明支撑时
-on 查询不匹配，但不写入伪造的 support。缺少可检查几何仍保留 unknown 行为。
-没有容器内部几何，永不自动重建 container_membership。
+upsert_component 实际改变 Transform 时先将 Semantic.support 清为 null；Editor 在
+prospective scene 验证后通过 upsert_component 写回可证明支撑，整个 patch 只增加一个版本。
+无可证明支撑保留 null；on 只读取 Semantic.support。当前协议没有 container_membership、
+interaction_state、support_evaluated；不添加兼容字段。inside 缺外部证据明确返回
+scene_relation_evidence_missing；state 查询只返回 support。
 
 ## CommandsFile 2.0 wire
 
 顶层包含 schema_version、request_id、scene_id、scene_version、robot、operations、commands。
 每条 command 通过 operation_id 引用高层目标，通过 source_skill_step_id 引用技能步骤。
 目标与参照都是具体实例，不能输出集合、XYZ、IK 或轨迹。
+
+CommandsFile.scene_id、Parameters.target/reference、ExecutionFeedback.holding_object、
+GroundedEntity.scene_object_id(s)、Camera 检测框 ID 和 DialogueState 焦点均为整数。
+Task 层 entity_id/source/destination/reference 保持字符串；ResolvedSelectionRelation
+专供具体关系筛选，CommandPlacementTarget 专供整数 reference，不复用语义 PlacementTarget。
+CommandsFile.robot 来自 BrainConfig.robot，不新增 RobotDriver.robot_model。
+QueryResult.object_ids 为整数；positions/states 的 JSON 字典键按 JSON 规范序列化为字符串，
+Python 校验恢复为整数。新数字协议不是旧字符串 Commands/Session 的兼容转换。
 
 MOVE 有互斥的两种 wire 形式：region 模式，或 motion_direction + distance_m 模式。
 canonical_commands 排除 null 字段，再执行模型和公开 JSON Schema 校验。

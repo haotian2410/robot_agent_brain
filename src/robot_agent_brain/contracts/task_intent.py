@@ -3,6 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .spatial import SpatialRelation
+from .scene import SceneId
 
 
 class StrictModel(BaseModel):
@@ -70,7 +71,7 @@ class TaskEntity(StrictModel):
     dialogue_ref_set: bool = False
     all_available: bool = False
     category_only: bool = False
-    exclude_scene_object_ids: list[str] = Field(default_factory=list)
+    exclude_scene_object_ids: list[SceneId] = Field(default_factory=list)
 
 
 class Operation(StrictModel):

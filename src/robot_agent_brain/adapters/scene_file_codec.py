@@ -6,8 +6,8 @@ from ..errors import BrainError
 
 
 class SceneFileCodec:
-    """Brain-native flat scene format only. Never edits an input file."""
-    def __init__(self, assets):
+    """Exact shared component Scene v1. Resource resolution is a separate step."""
+    def __init__(self, assets=None):
         self.assets = assets
 
     def load(self, path):
@@ -16,12 +16,10 @@ class SceneFileCodec:
                               parse_constant=lambda value: (_ for _ in ()).throw(ValueError("non-finite JSON")))
         except (OSError, UnicodeError, ValueError) as exc:
             raise BrainError("scene_file_invalid", "scene_import", str(exc)) from exc
-        if not isinstance(data, dict) or "components" in data or data.get("schema_version") != "1.0":
-            raise BrainError("scene_schema_unsupported", "scene_import", "Expected Brain flat SceneConfig version 1.0")
+        if not isinstance(data, dict) or type(data.get("scene_schema_version")) is not int or data["scene_schema_version"] != 1:
+            raise BrainError("scene_schema_unsupported", "scene_import", "Expected shared component Scene version 1")
         try:
             scene = SceneConfig.model_validate(data)
-            for obj in scene.objects:
-                self.assets.get_model_property(obj.asset_id)
         except (ValidationError, LookupError) as exc:
             raise BrainError("scene_file_invalid", "scene_import", str(exc)) from exc
         return scene

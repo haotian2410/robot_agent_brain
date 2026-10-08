@@ -1,7 +1,8 @@
 from .camera import CameraFrame, CameraRequest
 from .commands import Command, CommandsFile, ExecutionFeedback
 from .grounded_task import GroundedEntity, GroundedTask
-from .scene import ModelProperty, SceneConfig, SceneObject, ScenePatch, ScenePatchOperation, SceneSnapshot, Transform
+from .model_property import ModelProperty
+from .scene import SceneConfig, SceneObject, ScenePatch, ScenePatchOperation, SceneSnapshot, Transform
 from .skill_plan import SkillPlan, SkillStep
 from .spatial import RelationScope, SpatialRelation, SpatialRelationType
 from .turn import BrainTurn, SceneEditIntent, SceneEditPlan, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus

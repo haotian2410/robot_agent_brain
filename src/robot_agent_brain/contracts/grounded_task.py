@@ -3,15 +3,16 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .task_intent import Operation
 from .spatial import SpatialRelation
+from .scene import SceneId
 
 
 class GroundedEntity(BaseModel):
     model_config = ConfigDict(extra="forbid")
     entity_id: str
     semantic_name: str
-    scene_object_id: str
-    scene_object_ids: list[str] = Field(default_factory=list)
-    asset_id: str
+    scene_object_id: SceneId
+    scene_object_ids: list[SceneId] = Field(default_factory=list)
+    metadata_ref: str | None = None
     category: str
     category_only: bool = False
     model_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
@@ -31,7 +32,7 @@ class GroundedTask(BaseModel):
     entities: list[GroundedEntity]
     operations: list[Operation]
     spatial_relations: list[SpatialRelation] = Field(default_factory=list)
-    scene_id: str
+    scene_id: SceneId
     scene_version: int
 
     @model_validator(mode="after")
