@@ -2,6 +2,28 @@
 
 ## 环境与模型
 
+### 使用 final_models
+
+从 `/home/cscvlab/下载/final_models.7z` 解压到仓库的 `model/final_models/`，然后验证：
+
+```bash
+python scripts/validate_final_models.py --root model/final_models \
+  --cache config/final_models_geometry_cache.json
+```
+
+显式加载新库场景：
+
+```bash
+robot-brain run '把苹果放进篮子' --config config/final_models.json \
+  --scene model/final_models/scenes/3/ur5e_table_sorting.json \
+  --provider qwen --planner qwen --model "$ROBOT_BRAIN_MODEL" \
+  --output-dir var/final-models-demo --debug
+```
+
+新库中模型和机器人共享数字编号，因此 MetadataRef 必须同时包含 `path` 和 `type`。
+没有 `type` 的重复命名空间引用会拒绝。`scenes/1/ur5e_table_empty.json` 是不传
+`--scene` 时的自动建场景模板；附件位置交给场景平台，不由 Brain 推算。
+
 在仓库安装 `python -m pip install -e '.[dev]'`。只需要 Python 3.11/3.12、
 Pydantic、httpx、jsonschema；不要为了此应用安装 MuJoCo/Control。
 本地持久化锁目前针对 Linux/POSIX，不宣称支持分布式文件系统。

@@ -24,6 +24,8 @@ def world_extents(dimensions, transform):
 
 
 def local_bounds(model):
+    if model.local_aabb_min_m is None or model.local_aabb_max_m is None:
+        raise ValueError("asset_geometry_requires_platform")
     return model.local_aabb_min_m, model.local_aabb_max_m
 
 

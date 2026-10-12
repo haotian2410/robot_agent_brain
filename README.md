@@ -53,6 +53,43 @@ Replay 验证工程链路，不证明真实 Qwen 理解质量。模型连接失�
 真实多轮 demo 的分版本记录见 [demo/VALIDATION.md](demo/VALIDATION.md)。测试、wheel 与 CI 记录见
 [implementation_report](docs/implementation_report.md)。
 
+### final_models 资产库
+
+本仓库默认检测 `config/final_models.json`，使用 `model/final_models` 下的新资产库。
+该目录由 `/home/cscvlab/下载/final_models.7z` 解压得到，已加入 gitignore，不会提交模型文件。
+显式场景可以直接传入：
+
+```bash
+robot-brain run '把苹果放进篮子' --config config/final_models.json \
+  --scene model/final_models/scenes/3/ur5e_table_sorting.json \
+  --provider qwen --planner qwen --model "$ROBOT_BRAIN_MODEL" \
+  --output-dir var/final-models-demo --debug
+```
+
+新库的模型和机器人数字 ID 独立，必须通过 `MetadataRef.path + type` 区分：
+`$LIBRARY_SERVER/1` with `model` 是 apple，with `robot` 是 ur5e_arm。场景中的
+`RobotAttachment`、初始关节和连接关节会原样保留；Brain 不执行 URDF 正向运动学。
+不传 `--scene` 时以 `scenes/1/ur5e_table_empty.json` 为平台模板增加任务对象。
+多个同名资产（例如 basket）需要颜色/tag 或进一步描述，否则返回澄清。
+显式场景不会补造不存在的对象：场景 2 只有苹果，没有篮子；使用上面的场景 3，
+或不传 `--scene` 并输入“把苹果放进蓝色篮子”自动建场景。
+
+首次部署/校验：
+
+```bash
+python scripts/validate_final_models.py --root model/final_models \
+  --cache config/final_models_geometry_cache.json
+```
+
+该脚本检查 29 个模型、14 个机器人、5 个场景及所有资源引用；geometry cache 写在
+`config/`，不会写回 `final_models`。当前 Brain 仍只导出 Scene JSON/Commands，
+不替代 Control、MuJoCo 或机器人执行器。
+
+当前原始包已发现 PR2（robots/13）的 OBJ 引用缺失的 `material.mtl`。
+严格验证会输出 `valid=false` 和缺失列表、返回码 2；仍输出可用的派生 cache，
+未知静态边界保持 null，不伪造。资产原文件不会修补，需资产提供方补全。
+这不影响 UR5e 示例。真实 Qwen 示例见 `demo/final_models/README.md`。
+
 ## 配置与产物
 
 真实 Qwen 的两组多轮样例（首轮建场景、机械臂操作规划、复合场景修改）及一键脚本见

@@ -52,6 +52,7 @@ class BrainConfig(BaseModel):
     library_ref_prefix: str = "$LIBRARY_SERVER/"
     default_table_metadata_ref: str | None = None
     default_robot_metadata_ref: str | None = None
+    default_scene: str | None = None
     default_robot_driver: RobotDriverProperties | None = None
     defaults: str | None = None
     robot: str = "ur5e"
@@ -82,7 +83,7 @@ class BrainConfig(BaseModel):
                 raise ValueError("config_secret_forbidden: use ROBOT_BRAIN_API_KEY")
             values.update(user)
             for key in ("assets", "defaults", "replay_file", "asset_library_root",
-                        "asset_geometry_cache", "asset_category_index", "semantic_aliases"):
+                        "asset_geometry_cache", "asset_category_index", "semantic_aliases", "default_scene"):
                 if user.get(key) and not Path(user[key]).is_absolute():
                     values[key] = str((Path(path).resolve().parent / user[key]).resolve())
         env = os.environ if environ is None else environ
@@ -95,6 +96,10 @@ class BrainConfig(BaseModel):
 
     def load_assets(self):
         if self.asset_library_root is not None:
+            if (Path(self.asset_library_root) / "models" / "model_index.json").is_file():
+                from .adapters.final_models_library import FinalModelsLibraryAdapter
+                return FinalModelsLibraryAdapter(self.asset_library_root, self.asset_geometry_cache,
+                    self.asset_category_index, library_ref_prefix=self.library_ref_prefix)
             from .adapters.local_asset_library import LocalAssetLibraryAdapter
             return LocalAssetLibraryAdapter(self.asset_library_root, self.asset_geometry_cache,
                 self.asset_category_index, library_ref_prefix=self.library_ref_prefix)

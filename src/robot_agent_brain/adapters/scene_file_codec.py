@@ -22,6 +22,12 @@ class SceneFileCodec:
             scene = SceneConfig.model_validate(data)
         except (ValidationError, LookupError) as exc:
             raise BrainError("scene_file_invalid", "scene_import", str(exc)) from exc
+        if getattr(self.assets, "typed_namespaces", False):
+            for obj in scene.objects:
+                for component in obj.components:
+                    if component.component_type == "MetadataRef":
+                        props = component.properties
+                        self.assets.resolve(props["path"], props.get("type"))
         return scene
 
     @staticmethod

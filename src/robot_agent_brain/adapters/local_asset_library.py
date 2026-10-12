@@ -83,7 +83,7 @@ class LocalAssetLibraryAdapter:
                 semantic_name=name, metadata_path=str(path), category=categories.get(str(identifier)),
                 **geometry.model_dump())
 
-    def resolve(self, metadata_ref: str) -> BrainAssetView:
+    def resolve(self, metadata_ref: str, asset_type=None) -> BrainAssetView:
         if not isinstance(metadata_ref, str):
             raise ValueError("metadata_ref_invalid")
         match = re.fullmatch(re.escape(self.library_ref_prefix) + r"(0|[1-9][0-9]*)", metadata_ref)

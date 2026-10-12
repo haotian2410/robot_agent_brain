@@ -18,7 +18,8 @@ class SceneQueryResult(BaseModel):
     states: dict[int, dict] = Field(default_factory=dict)
 
 class SceneQueryEngine:
-    def __init__(self, *, aliases=None, category_aliases=None):
+    def __init__(self, *, aliases=None, category_aliases=None, assets=None):
+        self.assets = assets
         self.aliases = aliases or {}
         self.category_aliases = category_aliases or {}
 
@@ -27,7 +28,7 @@ class SceneQueryEngine:
             raise ValueError("scene_required")
         task = TaskIntent(instruction="query", entities=intent.entities, operations=[], spatial_relations=intent.relations)
         overrides = dialogue.bindings(task, scene) if dialogue else {}
-        items = SemanticEntitySelector(aliases=self.aliases, category_aliases=self.category_aliases).select(
+        items = SemanticEntitySelector(aliases=self.aliases, category_aliases=self.category_aliases, assets=self.assets).select(
             intent.target, intent.entities, intent.relations, scene, bindings_override=overrides)
         index = SceneIndex(scene)
         ids = [item.object_id_in_scene for item in items]

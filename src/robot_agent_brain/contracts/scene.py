@@ -14,15 +14,19 @@ class StrictModel(BaseModel):
 
 
 class TransformProperties(StrictModel):
-    position: tuple[float, float, float]
-    quaternion_xyzw: tuple[float, float, float, float]
+    position: tuple[float, float, float] | None = None
+    quaternion_xyzw: tuple[float, float, float, float] | None = None
     scale: tuple[float, float, float]
     parent: SceneId | None
 
     @model_validator(mode="after")
     def valid_transform(self):
-        if not math.isclose(sum(v * v for v in self.quaternion_xyzw), 1, rel_tol=0, abs_tol=1e-6):
-            raise ValueError("transform_quaternion_not_normalized")
+        if (self.position is None) != (self.quaternion_xyzw is None):
+            raise ValueError("transform_pose_fields_must_be_present_together")
+        if self.quaternion_xyzw is not None:
+            norm = sum(v * v for v in self.quaternion_xyzw)
+            if not math.isfinite(norm) or not math.isclose(norm, 1, rel_tol=0, abs_tol=1e-4):
+                raise ValueError("transform_quaternion_not_normalized")
         if any(v <= 0 for v in self.scale):
             raise ValueError("transform_scale_not_positive")
         return self
@@ -32,6 +36,7 @@ class MetadataRefProperties(StrictModel):
     # The team fixture uses <id> for illustration. Structural load must keep it
     # unchanged; only the asset adapter decides whether it can be resolved.
     path: str = Field(min_length=1)
+    type: Literal["model", "robot"] | None = None
 
 
 class SemanticProperties(StrictModel):
@@ -66,16 +71,51 @@ class CameraProperties(StrictModel):
 
 class RobotDriverProperties(StrictModel):
     joint_sequence: list[str] = Field(min_length=1)
-    joint_limits: dict[str, tuple[float, float]]
+    joint_limits: dict[str, tuple[float, float]] | None = None
+    initial_joint_positions_rad: dict[str, float] | None = None
+    available_connect_joints: list[str] | None = None
 
     @model_validator(mode="after")
     def valid_joints(self):
         if len(set(self.joint_sequence)) != len(self.joint_sequence) or any(not s for s in self.joint_sequence):
             raise ValueError("robot_joint_sequence_invalid")
-        if set(self.joint_sequence) != set(self.joint_limits):
+        if self.joint_limits and set(self.joint_sequence) != set(self.joint_limits):
             raise ValueError("robot_joint_limits_coverage_invalid")
-        if any(low > high for low, high in self.joint_limits.values()):
+        if self.joint_limits is None and self.available_connect_joints is None:
+            raise ValueError("robot_joint_limits_missing")
+        if any(low > high for low, high in (self.joint_limits or {}).values()):
             raise ValueError("robot_joint_limits_invalid")
+        if self.initial_joint_positions_rad is not None and not set(self.initial_joint_positions_rad) <= set(self.joint_sequence):
+            raise ValueError("robot_initial_joint_invalid")
+        if self.available_connect_joints is not None and not set(self.available_connect_joints) <= set(self.joint_sequence):
+            raise ValueError("robot_connect_joint_invalid")
+        return self
+
+
+class RobotAttachmentProperties(StrictModel):
+    parent_object_id: SceneId
+    parent_joint: str = Field(min_length=1)
+    parent_link: str = Field(min_length=1)
+    child_link: str = Field(min_length=1)
+    connection_type: Literal["fixed"]
+    transform: dict[str, list[float] | str]
+
+    @model_validator(mode="after")
+    def valid_attachment_transform(self):
+        required = {"position", "quaternion_xyzw", "reference_frame"}
+        if set(self.transform) != required:
+            raise ValueError("robot_attachment_transform_invalid")
+        position = self.transform["position"]
+        quaternion = self.transform["quaternion_xyzw"]
+        if not isinstance(position, list) or len(position) != 3 or not isinstance(quaternion, list) or len(quaternion) != 4:
+            raise ValueError("robot_attachment_transform_invalid")
+        if not all(math.isfinite(v) for v in [*position, *quaternion]):
+            raise ValueError("robot_attachment_transform_invalid")
+        norm = sum(float(value) ** 2 for value in quaternion)
+        if not math.isfinite(norm) or not math.isclose(norm, 1, rel_tol=0, abs_tol=.04):
+            raise ValueError("robot_attachment_quaternion_not_normalized")
+        if not isinstance(self.transform["reference_frame"], str) or not self.transform["reference_frame"]:
+            raise ValueError("robot_attachment_reference_frame_invalid")
         return self
 
 
@@ -83,6 +123,7 @@ COMPONENT_PROPERTIES = {
     "Transform": TransformProperties, "MetadataRef": MetadataRefProperties,
     "Semantic": SemanticProperties, "MeshRenderer": MeshRendererProperties,
     "Light": LightProperties, "Camera": CameraProperties, "RobotDriver": RobotDriverProperties,
+    "RobotAttachment": RobotAttachmentProperties,
 }
 
 
@@ -128,6 +169,16 @@ class SceneObject(StrictModel):
             raise ValueError("scene_requires_one_transform")
         if len(names) != len(set(names)):
             raise ValueError("scene_component_duplicate")
+        transform = next(c for c in self.components if c.component_type == "Transform")
+        attachment = next((c for c in self.components if c.component_type == "RobotAttachment"), None)
+        if attachment is not None:
+            parent = attachment.properties["parent_object_id"]
+            if transform.properties["parent"] != parent:
+                raise ValueError("robot_attachment_parent_mismatch")
+            if transform.properties.get("position") is not None or transform.properties.get("quaternion_xyzw") is not None:
+                raise ValueError("robot_attachment_transform_must_omit_pose")
+        elif transform.properties.get("position") is None:
+            raise ValueError("transform_pose_required_without_attachment")
         return self
 
 

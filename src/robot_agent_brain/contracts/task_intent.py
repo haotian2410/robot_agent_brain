@@ -64,6 +64,7 @@ class TaskEntity(StrictModel):
     semantic_name: str = Field(min_length=1)
     category: str = Field(min_length=1)
     color: str | None = None
+    tags: list[str] = Field(default_factory=list)
     aliases: list[str] = Field(default_factory=list)
     count: int = Field(default=1, ge=1)
     quantity_mode: QuantityMode = QuantityMode.SINGLE

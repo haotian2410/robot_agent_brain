@@ -14,10 +14,12 @@ class SpatialFactResolver:
         self.tolerance = support_contact_tolerance_m
 
     def asset(self, obj, scene):
-        reference = SceneIndex(scene).metadata_ref(obj.object_id_in_scene)
+        index = SceneIndex(scene)
+        reference = index.metadata_ref(obj.object_id_in_scene)
         if reference is None:
             raise ValueError(f"scene_geometry_metadata_missing: {obj.object_id_in_scene}")
-        return self.assets.resolve(reference)
+        kind = index.metadata_type(obj.object_id_in_scene)
+        return self.assets.resolve(reference, kind) if kind else self.assets.resolve(reference)
 
     @staticmethod
     def bounds(model, transform):

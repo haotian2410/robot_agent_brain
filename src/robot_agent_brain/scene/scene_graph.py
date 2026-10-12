@@ -32,6 +32,8 @@ def inverse(matrix):
 
 
 def quaternion_matrix(q):
+    norm = math.sqrt(sum(value * value for value in q))
+    q = tuple(value / norm for value in q)
     x, y, z, w = q
     return ((1-2*(y*y+z*z), 2*(x*y-z*w), 2*(x*z+y*w)),
             (2*(x*y+z*w), 1-2*(x*x+z*z), 2*(y*z-x*w)),
@@ -93,6 +95,8 @@ def world_transform(scene, object_id):
             raise ValueError("scene_parent_cycle")
         visited.add(identifier)
         transform = index.transform(identifier)
+        if transform.position is None or transform.quaternion_xyzw is None:
+            raise ValueError("scene_attachment_pose_requires_platform")
         chain.append(transform)
         identifier = transform.parent
     world = WorldTransform((0., 0., 0.), ((1., 0., 0.), (0., 1., 0.), (0., 0., 1.)))

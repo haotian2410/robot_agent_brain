@@ -24,7 +24,8 @@ class MotionScaleResolver:
             try:
                 if actor.metadata_ref is None:
                     raise ValueError("scene_geometry_metadata_missing")
-                model = self.assets.resolve(actor.metadata_ref)
+                model = (self.assets.resolve(actor.metadata_ref, actor.metadata_type) if actor.metadata_type
+                         else self.assets.resolve(actor.metadata_ref))
             except (LookupError, ValueError) as exc:
                 raise ValueError(
                     f"motion_scale_geometry_missing: operation={operation.operation_id} metadata_ref={actor.metadata_ref}"

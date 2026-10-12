@@ -22,6 +22,7 @@ class TaskExpander:
                 if object_id in objects:
                     semantic = scene_index.semantic(object_id)
                     data.update(metadata_ref=scene_index.metadata_ref(object_id),
+                                metadata_type=scene_index.metadata_type(object_id),
                                 semantic_name=semantic.semantic_name,
                                 category=semantic.category,
                                 model_scale=world_transform(scene, object_id).scale)

@@ -1,0 +1,13 @@
+{
+  "table_object_id": 1,
+  "robot_object_id": 2,
+  "robot_position": [0.0, 0.0, 0.5],
+  "table_position": [0.525, 0.0, 0.0],
+  "workspace_min": [0.16, -0.70],
+  "workspace_max": [0.89, 0.70],
+  "clearance_m": 0.04,
+  "support_contact_tolerance_m": 0.001,
+  "max_attempts": 400,
+  "coordinate_convention": "x_right_y_front_z_up",
+  "initial_counts": {}
+}

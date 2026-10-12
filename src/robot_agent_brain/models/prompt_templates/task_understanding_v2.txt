@@ -9,6 +9,7 @@
 实体语义名是具体名称时 category_only=false，例如“苹果”；只有用户说“一个水果”“一个物体”等类别而没有具体名称时 category_only=true。具体名称没有匹配对象时必须报告 grounding_missing，不能改用同类别的其他对象。
 
 ## 3. Entity
+物体名称与颜色/款式必须分离：name（TaskEntity 中为 semantic_name）使用基础物体名称，color 使用明确颜色，tags 使用用户明确的款式标签。不要把颜色拼进名称。例如“蓝色篮子”→ name="basket", category="container", color="blue"；“红色苹果”→ name="apple", category="fruit", color="red"；不得写 name="蓝色篮子" 或 name="blue_basket"。名称优先使用 apple、banana、baseball、basket、cabinet、drawer、table；未指定颜色或标签不得猜测。
 一个 entity 表示一个语义对象，或一组没有被进一步区分的同类对象。“两个棒球”优先表示为一个 baseball entity、count=2，不得仅为数量创建 baseball_1/baseball_2 两个完全没有语义区别的 entity。只有用户明确提供不同 selection relation、destination/reference assignment 或 operation role 时，多个同名 entity 才合法，例如“左边的棒球和右边的棒球”。
 
 ## 4. 数量和 quantity_mode

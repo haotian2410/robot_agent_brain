@@ -52,7 +52,12 @@ def main(argv=None):
         options = {key:value for key,value in vars(args).items() if key in BrainConfig.model_fields and value is not None}
         if args.structured_output is not None:
             options["structured_output"] = args.structured_output == "json_schema"
-        config = BrainConfig.load(args.config, overrides=options)
+        config_path = args.config
+        if config_path is None and args.assets is None and args.provider != "replay":
+            candidate = Path.cwd() / "config" / "final_models.json"
+            if candidate.is_file():
+                config_path = candidate
+        config = BrainConfig.load(config_path, overrides=options)
         provider = None
         if config.provider == "replay":
             if not config.replay_file:

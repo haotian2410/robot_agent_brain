@@ -29,6 +29,13 @@ class SceneIndex:
         value = self.properties(identifier, "MetadataRef")
         return value.path if value is not None else None
 
+    def metadata_ref_properties(self, identifier):
+        return self.properties(identifier, "MetadataRef")
+
+    def metadata_type(self, identifier):
+        value = self.metadata_ref_properties(identifier)
+        return value.type if value is not None else None
+
     def semantic(self, identifier):
         return self.properties(identifier, "Semantic")
 

@@ -1,6 +1,7 @@
 """Semantic resource selection through the AssetLibraryPort only."""
 from dataclasses import dataclass
 from ..contracts.asset_library import BrainAssetView
+from .asset_features import matches_features
 
 
 @dataclass
@@ -20,12 +21,18 @@ class AssetResolver:
         name = self.aliases.get(name, name)
         category = entity.category.strip().casefold()
         category = self.category_aliases.get(category, category)
-        if entity.color:
+        if getattr(self.catalog, "typed_namespaces", False) and category == "furniture_component":
+            category = "furniture"
+        if (entity.color or entity.tags) and not getattr(self.catalog, "supports_features", False):
             raise ValueError("asset_color_evidence_missing: " + entity.color)
         candidates = (self.catalog.find_by_category(category) if entity.category_only
                       else self.catalog.find_by_name(name))
         if not candidates:
             raise ValueError("asset_missing: " + entity.semantic_name)
+        if entity.color or entity.tags:
+            candidates = [model for model in candidates if matches_features(model, entity)]
+            if not candidates:
+                raise ValueError("asset_feature_missing: " + entity.semantic_name)
         # Categories are optional resource selection hints, not a requirement
         # for named resource resolution or existing Scene Semantic facts.
         if not infer_category:
@@ -33,6 +40,7 @@ class AssetResolver:
             if not candidates:
                 raise ValueError("asset_category_mismatch: " + entity.category)
         if len(candidates) != 1:
-            raise ValueError("asset_ambiguous: " + entity.semantic_name)
+            raise ValueError("asset_ambiguous: " + entity.semantic_name + "; 请补充颜色或款式: " +
+                             ", ".join(f"{m.asset_type}:{m.library_asset_id} ({' '.join(m.tags)})" for m in candidates))
         assumptions = ["demo_assets: metadata only; no real mesh or rendered material"] if getattr(self.catalog, "demo_assets", False) else []
         return AssetBinding(candidates[0], assumptions)

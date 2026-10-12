@@ -24,6 +24,7 @@ class ParseEntity(BaseModel):
     name: str
     category: str
     color: str | None = None
+    tags: list[str] = Field(default_factory=list)
     count: int = Field(default=1, ge=1)
     quantity_mode: QuantityMode = QuantityMode.SINGLE
     aliases: list[str] = Field(default_factory=list)
@@ -119,6 +120,7 @@ class TaskParseOutput(BaseModel):
                 semantic_name=item.name,
                 category=item.category,
                 color=item.color,
+                tags=item.tags,
                 count=item.count,
                 quantity_mode=item.quantity_mode,
                 aliases=item.aliases, dialogue_ref=item.dialogue_ref, dialogue_ref_set=item.dialogue_ref_set, all_available=item.all_available,

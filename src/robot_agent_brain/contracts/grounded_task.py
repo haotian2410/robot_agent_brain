@@ -13,6 +13,7 @@ class GroundedEntity(BaseModel):
     scene_object_id: SceneId
     scene_object_ids: list[SceneId] = Field(default_factory=list)
     metadata_ref: str | None = None
+    metadata_type: str | None = None
     category: str
     category_only: bool = False
     model_scale: tuple[float, float, float] = (1.0, 1.0, 1.0)

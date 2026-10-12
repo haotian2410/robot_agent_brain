@@ -42,7 +42,7 @@ class SceneEditor:
             raise ValueError("scene_edit_plan_required")
         preview = SceneManager(scene, seen_scene_object_ids=seen_scene_object_ids,
                                next_scene_object_id=next_scene_object_id)
-        selector = SceneObjectSelector(aliases=self.aliases, category_aliases=self.category_aliases)
+        selector = SceneObjectSelector(aliases=self.aliases, category_aliases=self.category_aliases, assets=self.assets)
         bindings = dict(bindings_override or {})
         all_operations = []
         for edit in intent.operations:
@@ -148,7 +148,8 @@ class SceneEditor:
                 raise ValueError("scene_object_ids_exhausted")
             position = self._placement(model, temporary, reference, edit.relation, defaults, identifier)
             obj = make_object(identifier, model.semantic_name, model.metadata_ref, position,
-                              category=model.category or entity.category)
+                              category=model.category or entity.category,
+                              asset_type=model.asset_type if getattr(self.assets, "supports_features", False) else None)
             operations.append(ScenePatchOperation(action="add_object", object_id_in_scene=identifier, object=obj))
             temporary = temporary.model_copy(update={"objects": [*temporary.objects, obj]})
         return operations
@@ -188,7 +189,8 @@ class SceneEditor:
                 spacing = origin_high[axis] - origin_low[axis] + self.layout.clearance_m
                 step = 0 if attempt == 0 else ((attempt + 1) // 2) * (1 if attempt % 2 else -1)
                 position = tuple(value + (step * spacing if i == axis else 0) for i, value in enumerate(world.position))
-            obj = make_object(identifier, model.semantic_name, model.metadata_ref, position, category=model.category or "object")
+            obj = make_object(identifier, model.semantic_name, model.metadata_ref, position, category=model.category or "object",
+                              asset_type=model.asset_type if getattr(self.assets, "supports_features", False) else None)
             candidate = scene.model_copy(update={"objects": [*scene.objects, obj]})
             box = world_bounds(model, WorldTransform(position, world.linear))
             if defaults and any(box[0][i] < defaults.workspace_min[i] or box[1][i] > defaults.workspace_max[i] for i in (0, 1)):

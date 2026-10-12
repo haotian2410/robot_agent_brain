@@ -23,7 +23,7 @@ class DemoAssetLibrary:
                 dimensions_m=model.dimensions_m, local_aabb_min_m=model.aabb_m[:3],
                 local_aabb_max_m=model.aabb_m[3:])
 
-    def resolve(self, metadata_ref):
+    def resolve(self, metadata_ref, asset_type=None):
         try:
             return self._views[metadata_ref].model_copy(deep=True)
         except (KeyError, TypeError) as exc:

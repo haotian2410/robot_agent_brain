@@ -7,17 +7,17 @@ from ..contracts.spatial import ResolvedSelectionRelation
 from ..grounding.scene_relation_resolver import SceneRelationResolver
 from .asset_resolver import AssetResolver
 from .geometry import world_bounds
-from .scene_graph import WorldTransform
+from .scene_graph import WorldTransform, world_transform
 
 IDENTITY = ((1., 0., 0.), (0., 1., 0.), (0., 0., 1.))
 
 
-def make_object(identifier, name, reference, position, *, category=None, support=None, driver=None):
+def make_object(identifier, name, reference, position, *, category=None, support=None, driver=None, asset_type=None):
     components = [
         SceneComponent(component_type="Transform", properties={
             "position": list(position), "quaternion_xyzw": [0, 0, 0, 1],
             "scale": [1, 1, 1], "parent": None}),
-        SceneComponent(component_type="MetadataRef", properties={"path": reference}),
+        SceneComponent(component_type="MetadataRef", properties={"path": reference, **({"type": asset_type} if asset_type else {})}),
     ]
     if category is not None:
         components.append(SceneComponent(component_type="Semantic", properties={
@@ -29,10 +29,11 @@ def make_object(identifier, name, reference, position, *, category=None, support
 
 class SceneBootstrapper:
     def __init__(self, assets, defaults, *, robot="ur5e", seed=0, table_metadata_ref=None,
-                 robot_metadata_ref=None, robot_driver=None, aliases=None, category_aliases=None):
+                 robot_metadata_ref=None, robot_driver=None, template_scene=None, aliases=None, category_aliases=None):
         self.assets, self.defaults, self.robot, self.seed = assets, defaults, robot, seed
         self.table_ref, self.robot_ref = table_metadata_ref, robot_metadata_ref
         self.driver = robot_driver
+        self.template_scene = template_scene
         self.resolver = AssetResolver(assets, aliases=aliases, category_aliases=category_aliases)
 
     def prepare(self, turn, *, scene_id):
@@ -69,17 +70,42 @@ class SceneBootstrapper:
                      "nearest", "farthest", "left_of", "right_of", "front_of", "behind"}
         if any(r.relation.value not in supported for r in initial):
             raise ValueError("bootstrap_relation_unsupported: initial relation requires geometry not supplied")
-        table_model = self.assets.resolve(self.table_ref)
-        self.assets.resolve(self.robot_ref)  # Require a real configured resource.
-        table_id, robot_id = self.defaults.table_object_id, self.defaults.robot_object_id
-        table = make_object(table_id, "table", self.table_ref, self.defaults.table_position, category="surface")
-        robot = make_object(robot_id, self.robot, self.robot_ref, self.defaults.robot_position, driver=driver)
-        table_low, table_high = world_bounds(table_model, WorldTransform(self.defaults.table_position, IDENTITY))
+        table_model = (self.assets.resolve(self.table_ref, "model") if self.template_scene else self.assets.resolve(self.table_ref))
+        if self.template_scene:
+            self.assets.resolve(self.robot_ref, "robot")
+        else:
+            self.assets.resolve(self.robot_ref)
+        if self.template_scene is not None:
+            base_objects = [obj.model_copy(deep=True) for obj in self.template_scene.objects]
+            table_candidates = [obj for obj in base_objects if any(
+                c.component_type == "MetadataRef" and c.properties.get("path") == self.table_ref
+                and c.properties.get("type") == "model" for c in obj.components)]
+            robot_candidates = [obj for obj in base_objects if any(
+                c.component_type == "MetadataRef" and c.properties.get("path") == self.robot_ref
+                and c.properties.get("type") == "robot" for c in obj.components)]
+            if len(table_candidates) != 1 or len(robot_candidates) != 1:
+                raise ValueError("bootstrap_template_platform_objects_missing")
+            table_id, robot_id = table_candidates[0].object_id_in_scene, robot_candidates[0].object_id_in_scene
+            table = table_candidates[0]
+            robot = robot_candidates[0]
+            base_max = max((obj.object_id_in_scene for obj in base_objects), default=-1)
+        else:
+            base_objects = []
+            table_id, robot_id = self.defaults.table_object_id, self.defaults.robot_object_id
+            table = make_object(table_id, "table", self.table_ref, self.defaults.table_position,
+                                category="surface")
+            robot = make_object(robot_id, self.robot, self.robot_ref, self.defaults.robot_position,
+                                driver=driver)
+            base_max = max(table_id, robot_id)
+        table_transform = (world_transform(self.template_scene, table_id)
+                           if self.template_scene is not None
+                           else WorldTransform(self.defaults.table_position, IDENTITY))
+        table_low, table_high = world_bounds(table_model, table_transform)
         if any(self.defaults.workspace_min[i] < table_low[i] or self.defaults.workspace_max[i] > table_high[i] for i in (0, 1)):
             raise ValueError("bootstrap_workspace_outside_support")
         specs, candidates, bindings = [], {}, {}
         assumptions = ["source=system_default: tabletop placement; x right, y front, z up"]
-        next_id = max(table_id, robot_id) + 1
+        next_id = base_max + 1
         for entity in entities:
             binding = self.resolver.resolve(entity)
             model = binding.model
@@ -109,7 +135,8 @@ class SceneBootstrapper:
         for _ in range(self.defaults.max_attempts):
             placed, bounds = [], []
             for identifier, model, category in specs:
-                low, high = model.local_aabb_min_m, model.local_aabb_max_m
+                from .geometry import local_bounds
+                low, high = local_bounds(model)
                 limits = ((xmin - low[0], xmax - high[0]), (ymin - low[1], ymax - high[1]))
                 if any(a > b for a, b in limits):
                     raise ValueError("bootstrap_layout_failed: object exceeds workspace")
@@ -120,12 +147,14 @@ class SceneBootstrapper:
                            for i in (0, 1)) for other in bounds):
                     break
                 placed.append(make_object(identifier, model.semantic_name, model.metadata_ref,
-                                          position, category=category, support=table_id))
+                                          position, category=category, support=table_id,
+                                          asset_type=model.asset_type if self.template_scene else None))
                 bounds.append(box)
             if len(placed) != len(specs):
                 continue
             scene = SceneConfig(scene_schema_version=1, scene_version=1, scene_id=scene_id,
-                                scene_name="Generated task scene", objects=[table, robot, *placed])
+                                scene_name=(self.template_scene.scene_name if self.template_scene else "Generated task scene"),
+                                objects=[*base_objects, *placed] if base_objects else [table, robot, *placed])
             by_id = {o.object_id_in_scene: o for o in scene.objects}
             valid = True
             for entity in entities:

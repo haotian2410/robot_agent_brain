@@ -1,0 +1,37 @@
+{
+  "provider": "qwen",
+  "planner": "qwen",
+  "base_url": "http://127.0.0.1:8080/v1",
+  "model": "Qwen3.8-27B",
+  "asset_library_root": "../model/final_models",
+  "asset_geometry_cache": "final_models_geometry_cache.json",
+  "asset_category_index": "final_models_categories.json",
+  "semantic_aliases": "final_models_aliases.json",
+  "defaults": "final_models_defaults.json",
+  "library_ref_prefix": "$LIBRARY_SERVER/",
+  "default_scene": "../model/final_models/scenes/1/ur5e_table_empty.json",
+  "default_table_metadata_ref": "$LIBRARY_SERVER/29",
+  "default_robot_metadata_ref": "$LIBRARY_SERVER/1",
+  "default_robot_driver": {
+    "joint_sequence": ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"],
+    "joint_limits": {
+      "shoulder_pan_joint": [-6.28319, 6.28319],
+      "shoulder_lift_joint": [-6.28319, 6.28319],
+      "elbow_joint": [-3.1415, 3.1415],
+      "wrist_1_joint": [-6.28319, 6.28319],
+      "wrist_2_joint": [-6.28319, 6.28319],
+      "wrist_3_joint": [-6.28319, 6.28319]
+    },
+    "initial_joint_positions_rad": {
+      "shoulder_pan_joint": 0.0,
+      "shoulder_lift_joint": -2.094395,
+      "elbow_joint": 1.570796,
+      "wrist_1_joint": -1.5707963,
+      "wrist_2_joint": -1.5707963,
+      "wrist_3_joint": 0.0
+    },
+    "available_connect_joints": ["wrist_3_joint"]
+  },
+  "robot": "ur5e",
+  "output_dir": "var/final-models"
+}

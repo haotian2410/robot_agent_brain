@@ -56,6 +56,9 @@ class BrainApplication:
             robot_driver=bootstrap.get("default_robot_driver"),
             aliases=aliases, category_aliases=category_aliases)
         self.codec = SceneFileCodec(self.assets)
+        if self.config.default_scene:
+            template = self.codec.load(self.config.default_scene)
+            self.bootstrapper.template_scene = template
         self.writer = ArtifactWriter(self.config.output_dir)
         self.sessions = {}
         self.store = SessionStore(self.config.output_dir)
