@@ -126,3 +126,45 @@ def test_scene_edit_add_preserves_template_and_typed_reference():
     assert changed.objects[:len(scene.objects)] == scene.objects
     props = next(c.properties for c in changed.objects[-1].components if c.component_type == "MetadataRef")
     assert props == {"path": "$LIBRARY_SERVER/2", "type": "model"}
+
+
+def test_real_metadata_scale_and_color_mapping():
+    assets=final_config().load_assets()
+    apple=assets.resolve("$LIBRARY_SERVER/1","model")
+    basket=assets.resolve("$LIBRARY_SERVER/4","model")
+    assert apple.scalable is False and apple.scale_range==(1,1) and apple.color_tags==("red",)
+    assert basket.scalable is True and basket.scale_range==(1,1.8) and basket.color_tags==("blue",)
+    assert assets.resolve("$LIBRARY_SERVER/7","model").color_tags==("black","red")
+
+
+def test_application_scale_restore_color_and_failure_keeps_dialogue(tmp_path):
+    from robot_agent_brain.application import BrainApplication
+    from robot_agent_brain.contracts.turn import SceneEditPlan, SceneEditIntent, SceneQueryIntent
+    from robot_agent_brain.scene.component_access import SceneIndex
+    from test_application_artifacts import Provider
+    entity=TaskEntity(entity_id="basket",semantic_name="basket",category="container",color="blue")
+    create=BrainTurn(status="accepted",turn_kind="scene_edit",instruction="create",scene_edit=SceneEditPlan(
+        entities=[entity],operations=[SceneEditIntent(operation="add",target="basket")]))
+    config=final_config().model_copy(update={"provider":"replay","planner":"recipe","output_dir":str(tmp_path)})
+    provider=Provider(create)
+    app=BrainApplication(config,provider=provider)
+    first=app.handle("create",session_id="edit")
+    assert first.run_status=="success",first.reply
+    original=app.get_session("edit").scene
+    props=SceneIndex(original).transform(original.objects[-1].object_id_in_scene)
+    assert props.scale==(1,1,1)
+    provider.turn=BrainTurn(status="accepted",turn_kind="scene_edit",instruction="scale",scene_edit=SceneEditPlan(
+        entities=[entity],operations=[SceneEditIntent(operation="scale",target="basket",scale_direction="enlarge",scale_amount="small")]))
+    app=BrainApplication(config,provider=provider)
+    second=app.handle("scale",session_id="edit")
+    assert second.run_status=="success",second.reply
+    assert second.scene_version==first.scene_version+1
+    before=app.get_session("edit").scene.model_dump()
+    dialogue=app.get_session("edit").dialogue.model_dump()
+    provider.turn.scene_edit.operations=[SceneEditIntent(operation="update_properties",target="basket",properties={"color":"red"}),
+        SceneEditIntent(operation="scale",target="basket",scale_mode="set",scale_xyz=[20]*3)]
+    failed=app.handle("bad",session_id="edit")
+    assert failed.run_status=="blocked"
+    assert app.get_session("edit").scene.model_dump()==before
+    assert app.get_session("edit").dialogue.model_dump()==dialogue
+    assert "commands" not in failed.artifacts and "scene_patch" not in failed.artifacts

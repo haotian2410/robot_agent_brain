@@ -1,5 +1,22 @@
 # final_models / 本地 Qwen
 
+## 缩放与颜色多轮 demo
+
+```bash
+env -u ALL_PROXY -u all_proxy -u HTTP_PROXY -u http_proxy \
+  -u HTTPS_PROXY -u https_proxy NO_PROXY=127.0.0.1,localhost \
+  python demo/final_models/scale_color_demo.py --model Qwen3.8-27B
+```
+
+结果在 `var/scale-color-demo/scale_color_summary.json`，逐轮记录 Scene、patch、模型调用、
+commands（仅机器人任务）和失败原因。脚本会核对预期拒绝时场景没有改变。
+包含篮子模糊/绝对缩放、苹果禁止缩放、改蓝后查询、机器人规划、混合编辑与回滚。
+
+这是 Brain 协议与语义验证，不是物理或渲染验证。当前资产包的参考渲染器仍可能把
+颜色与原纹理相乘，且没有完整处理 alpha；不保证视觉纯色，也不修改该外部脚本。
+
+## 资产接入 demo
+
 在仓库根目录、安装好 Brain 的 Python 3.11/3.12 环境运行：
 
 ```bash

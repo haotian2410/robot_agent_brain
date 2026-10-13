@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from ..contracts.asset_library import AssetGeometry, BrainAssetView
+from ..scene.colors import color_tags
 
 
 class FinalModelsLibraryAdapter:
@@ -35,11 +36,13 @@ class FinalModelsLibraryAdapter:
                     raise ValueError(f"asset_metadata_name_mismatch: {kind}/{identifier}")
                 key = f"{kind}:{identifier}"
                 geometry = AssetGeometry.model_validate(cache[key])
+                tags = tuple(tag.strip().casefold() for tag in semantic.get("tag", "").split(",") if tag.strip())
                 view = BrainAssetView(
                     **geometry.model_dump(), library_asset_id=identifier,
                     metadata_ref=f"{self.prefix}{identifier}", semantic_name=name,
                     metadata_path=str(metadata), asset_type=kind,
-                    tags=tuple(tag.strip().casefold() for tag in semantic.get("tag", "").split(",") if tag.strip()),
+                    tags=tags, color_tags=color_tags(tags), scalable=semantic.get("scalable"),
+                    scale_range=data.get("physical_properties", {}).get("scale"),
                     category=categories.get(key) or categories.get(str(identifier)),
                     physical_properties=data.get("physical_properties", {}),
                     grasp_properties=data.get("grasp_properties", {}),

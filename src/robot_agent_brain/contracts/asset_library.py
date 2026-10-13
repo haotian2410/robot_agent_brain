@@ -36,5 +36,16 @@ class BrainAssetView(AssetGeometry):
     category: str | None = None
     asset_type: str = "model"
     tags: tuple[str, ...] = ()
+    color_tags: tuple[str, ...] = ()
+    scalable: bool | None = None
+    scale_range: tuple[float, float] | None = None
     physical_properties: dict = Field(default_factory=dict)
     grasp_properties: dict = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def valid_scale_range(self):
+        if self.scale_range is not None:
+            low, high = self.scale_range
+            if not (0 < low <= high) or not all(math.isfinite(v) for v in self.scale_range):
+                raise ValueError("asset_scale_range_invalid")
+        return self

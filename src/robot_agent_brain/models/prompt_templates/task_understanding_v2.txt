@@ -9,6 +9,10 @@
 实体语义名是具体名称时 category_only=false，例如“苹果”；只有用户说“一个水果”“一个物体”等类别而没有具体名称时 category_only=true。具体名称没有匹配对象时必须报告 grounding_missing，不能改用同类别的其他对象。
 
 ## 3. Entity
+场景缩放和改色是 scene_edit，不是机器人移动。缩放使用 operation="scale"，只能选择以下一种表示：scale_mode="multiply" + scale_xyz=[x,y,z]（相对当前局部缩放倍率）；scale_mode="set" + scale_xyz=[x,y,z]（绝对局部缩放）；或 scale_direction="enlarge"/"shrink" + scale_amount="small"/"medium"/"large"（模糊缩放，不写数值）。其他缩放字段留 null。XYZ 是对象局部轴，明确要求沿世界轴缩放时返回 unsupported_task，不改成局部轴。
+例如“把蓝色篮子放大一点”→ basket 实体 color="blue"，scale_direction="enlarge", scale_amount="small"；“篮子缩小很多”→ shrink/large；“篮子 X 方向放大20%”→ multiply/[1.2,1,1]；“整体缩小到原来的80%”→ multiply/[0.8,0.8,0.8]；“XYZ缩放设为1.2、1.0、0.8”→ set/[1.2,1.0,0.8]。不要输出 Transform、世界坐标或四元数。资产是否允许缩放由 Python 判断，不得据此删除用户请求。
+“把苹果改成蓝色”→ operation="update_properties", target="apple", properties={"color":"blue"}；目标颜色只能放在 properties.color，不能误写成选择实体的 color。“把红色苹果改蓝色”才在实体 color="red"，properties.color="blue"。禁止生成其他属性。用户没有输入 HEX 时不要自己生成 HEX；中文或英文颜色词原样交给 Python 规范化。
+“把篮子右移2厘米，再放大一点，再改成蓝色”必须输出三个有序 operations：translate(direction="right",distance_m=0.02) → scale(enlarge/small) → update_properties({"color":"blue"})。多对象数量、它/它们等指代规则同其他场景编辑。
 物体名称与颜色/款式必须分离：name（TaskEntity 中为 semantic_name）使用基础物体名称，color 使用明确颜色，tags 使用用户明确的款式标签。不要把颜色拼进名称。例如“蓝色篮子”→ name="basket", category="container", color="blue"；“红色苹果”→ name="apple", category="fruit", color="red"；不得写 name="蓝色篮子" 或 name="blue_basket"。名称优先使用 apple、banana、baseball、basket、cabinet、drawer、table；未指定颜色或标签不得猜测。
 一个 entity 表示一个语义对象，或一组没有被进一步区分的同类对象。“两个棒球”优先表示为一个 baseball entity、count=2，不得仅为数量创建 baseball_1/baseball_2 两个完全没有语义区别的 entity。只有用户明确提供不同 selection relation、destination/reference assignment 或 operation role 时，多个同名 entity 才合法，例如“左边的棒球和右边的棒球”。
 

@@ -55,6 +55,9 @@ Replay 验证工程链路，不证明真实 Qwen 理解质量。模型连接失�
 
 ### final_models 资产库
 
+支持 Scene Edit 缩放与实例改色，规则和配置见 [缩放/颜色说明](docs/scene_scale_color.md)。
+真实 Qwen 多轮示例：`python demo/final_models/scale_color_demo.py`。
+
 本仓库默认检测 `config/final_models.json`，使用 `model/final_models` 下的新资产库。
 该目录由 `/home/cscvlab/下载/final_models.7z` 解压得到，已加入 gitignore，不会提交模型文件。
 显式场景可以直接传入：

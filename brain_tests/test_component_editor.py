@@ -104,8 +104,8 @@ def test_later_failure_never_changes_input_scene_or_allocates_id():
     before = scene.model_dump()
     plan = SceneEditPlan(entities=[TaskEntity(entity_id="new", semantic_name="screwdriver", category="tool")],
         operations=[SceneEditIntent(operation="add", target="new"),
-                    SceneEditIntent(operation="update_properties", target="new", properties={"color": "red"})])
-    with pytest.raises(ValueError, match="properties_unsupported"):
+                        SceneEditIntent(operation="update_properties", target="new", properties={"mass": 1})])
+    with pytest.raises(ValueError, match="property_unsupported"):
         SceneEditor(library).edit_result(plan, scene, defaults=LayoutDefaults())
     assert scene.model_dump() == before
 

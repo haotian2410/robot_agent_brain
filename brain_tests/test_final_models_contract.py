@@ -67,3 +67,21 @@ def test_quaternion_tolerance_preserves_raw_and_rejects_invalid():
         RobotAttachmentProperties(parent_object_id=1, parent_joint="j", parent_link="a", child_link="b",
             connection_type="fixed", transform={"position": [0, 0, 0], "quaternion_xyzw": [0, 0, 0, 2],
                                                "reference_frame": "parent_link"})
+
+
+def test_metadata_changes_affect_fingerprint_without_geometry_rebuild(library):
+    from robot_agent_brain.diagnostics import fingerprint
+    root=library.root
+    cache=root/"cache.json"
+    before_cache=cache.read_bytes()
+    before=fingerprint(library.configuration_payload())
+    metadata=root/"models/1/apple.json"
+    data=json.loads(metadata.read_text())
+    data["semantic_properties"].update(scalable=True,tag="blue")
+    data["physical_properties"]["scale"]=[.5,2]
+    metadata.write_text(json.dumps(data))
+    updated=FinalModelsLibraryAdapter(root,cache)
+    assert fingerprint(updated.configuration_payload())!=before
+    assert updated.resolve("$LIBRARY_SERVER/1","model").color_tags==("blue",)
+    assert updated.resolve("$LIBRARY_SERVER/1","model").scale_range==(.5,2)
+    assert cache.read_bytes()==before_cache

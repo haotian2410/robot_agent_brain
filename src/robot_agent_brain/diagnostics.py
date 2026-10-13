@@ -9,6 +9,7 @@ def fingerprint(value):
 
 
 def configuration_summary(config, assets, defaults):
+    from .scene.colors import COLOR_POLICY_VERSION
     from .models.prompts import TASK_UNDERSTANDING_PROMPT, SKILL_PLANNING_PROMPT
     from .skills.registry import REGISTRY
     url = urlsplit(config.base_url)
@@ -17,6 +18,8 @@ def configuration_summary(config, assets, defaults):
     asset_payload = (assets.configuration_payload() if hasattr(assets, "configuration_payload")
                      else metadata.model_dump(mode="json"))
     return {"provider":config.provider, "model":config.model, "base_url":endpoint,
+            "scene_scale_policy": config.scale_policy().model_dump(mode="json"),
+            "color_policy_version": COLOR_POLICY_VERSION,
             "planner":config.planner, "planner_max_completion_tokens":config.planner_max_completion_tokens,
             "skill_planning_prompt_sha256":fingerprint(SKILL_PLANNING_PROMPT),
             "skill_catalog_sha256":fingerprint(REGISTRY.prompt_catalog()),

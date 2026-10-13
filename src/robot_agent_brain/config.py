@@ -61,9 +61,20 @@ class BrainConfig(BaseModel):
     seed: int = 0
     replay_file: str | None = None
     debug: bool = False
+    scene_scale_min: float = Field(default=.1, gt=0)
+    scene_scale_max: float = Field(default=10., gt=0)
+    scene_scale_small: float = Field(default=1.1, gt=1)
+    scene_scale_medium: float = Field(default=1.5, gt=1)
+    scene_scale_large: float = Field(default=2., gt=1)
+
+    def scale_policy(self):
+        from .scene.scale_policy import SceneScalePolicy
+        return SceneScalePolicy(minimum=self.scene_scale_min, maximum=self.scene_scale_max,
+                                small=self.scene_scale_small, medium=self.scene_scale_medium, large=self.scene_scale_large)
 
     @model_validator(mode="after")
     def valid_library_configuration(self):
+        self.scale_policy()
         if (self.asset_library_root is None) != (self.asset_geometry_cache is None):
             raise ValueError("asset_library_config_missing: root and geometry cache must be configured together")
         if self.asset_category_index is not None and self.asset_library_root is None:

@@ -20,7 +20,11 @@ class TurnKind(StrEnum):
 class SceneEditIntent(BaseModel):
     """One operation in a SceneEditPlan; never a standalone turn payload."""
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["add", "remove", "translate", "rotate", "move_relative", "update_properties", "update"]
+    operation: Literal["add", "remove", "translate", "rotate", "move_relative", "update_properties", "update", "scale"]
+    scale_mode: Literal["multiply", "set"] | None = None
+    scale_xyz: tuple[float, float, float] | None = None
+    scale_direction: Literal["enlarge", "shrink"] | None = None
+    scale_amount: Literal["small", "medium", "large"] | None = None
     target: str = Field(min_length=1)
     relation: str | None = None
     reference: str | None = None
@@ -36,6 +40,17 @@ class SceneEditIntent(BaseModel):
 
     @model_validator(mode="after")
     def paired_relation(self):
+        import math
+        scale_fields = (self.scale_mode, self.scale_xyz, self.scale_direction, self.scale_amount)
+        if self.operation == "scale":
+            numeric = self.scale_mode is not None and self.scale_xyz is not None and self.scale_direction is None and self.scale_amount is None
+            fuzzy = self.scale_mode is None and self.scale_xyz is None and self.scale_direction is not None and self.scale_amount is not None
+            if not (numeric or fuzzy):
+                raise ValueError("scene_scale_modes_exclusive")
+            if self.scale_xyz is not None and not all(math.isfinite(v) and v > 0 for v in self.scale_xyz):
+                raise ValueError("scene_scale_invalid")
+        elif any(v is not None for v in scale_fields):
+            raise ValueError("scene_edit_fields_forbidden: scale")
         if (self.relation is None) != (self.reference is None):
             raise ValueError("task_semantic_invalid: scene edit relation/reference must be paired")
         if self.operation in {"translate", "move_relative"} and not (self.direction or self.relation):
@@ -51,7 +66,7 @@ class SceneEditIntent(BaseModel):
             "add": {"relation", "reference"}, "remove": set(),
             "translate": {"direction", "distance_m", "motion_scale"},
             "move_relative": {"relation", "reference"},
-            "rotate": {"axis", "angle_deg"}, "update_properties": set(),
+            "rotate": {"axis", "angle_deg"}, "update_properties": set(), "scale": set(),
             "update": {"relation", "reference"},  # combined layout/property operation
         }[self.operation]
         if any(value is not None and key not in allowed for key, value in fields.items()):

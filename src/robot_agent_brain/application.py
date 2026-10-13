@@ -43,7 +43,9 @@ class BrainApplication:
                    else getattr(getattr(self.assets, "metadata", None), "aliases", {}))
         category_aliases = getattr(getattr(self.assets, "metadata", None), "category_aliases", {})
         editor = SceneEditor(self.assets, SceneLayoutPolicy(clearance_m=self.defaults.clearance_m), seed=self.config.seed,
-                             aliases=aliases, category_aliases=category_aliases)
+                             aliases=aliases, category_aliases=category_aliases,
+                             scale_policy=self.config.scale_policy(), scale_defaults=self.defaults,
+                             table_metadata_ref=self.config.bootstrap_settings().get("default_table_metadata_ref"))
         self.pipeline = BrainPipeline(provider, self.assets, scene_editor=editor,
                                       vision_provider=provider if self.config.vision else None,
                                       skill_planning_provider=provider if hasattr(provider, "plan") else None,
@@ -59,6 +61,8 @@ class BrainApplication:
         if self.config.default_scene:
             template = self.codec.load(self.config.default_scene)
             self.bootstrapper.template_scene = template
+            from .scene.scene_graph import world_transform
+            editor.scale_table_transform = world_transform(template, self.defaults.table_object_id)
         self.writer = ArtifactWriter(self.config.output_dir)
         self.sessions = {}
         self.store = SessionStore(self.config.output_dir)
@@ -213,6 +217,10 @@ class BrainApplication:
                 debug["traceback"] = traceback.format_exc()
             report.error = self._issue(exc, stage)
             report.run_status = "blocked" if report.error.code.startswith(("scene_required", "grounding_", "bootstrap_", "asset_", "holding_", "plan_", "capability_", "dialogue_", "motion_", "execution_pending", "session_paused", "scene_sync_")) else "failed"
+            if report.error.code.startswith("scene_scale_") or report.error.code == "scene_edit_color_unknown":
+                report.run_status = "blocked"
+            if report.error.code == "scene_edit_color_unknown":
+                report.error.clarification_question = "请提供明确的颜色名称或 #RRGGBB / #RRGGBBAA。"
             report.reply = report.error.message
             if session.sync_state == "unknown":
                 report.scene_commit_status = "unknown"

@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 
 from ..contracts.asset_library import AssetGeometry, BrainAssetView
+from ..scene.colors import color_tags
 
 
 def read_library_index(root):
@@ -76,11 +77,15 @@ class LocalAssetLibraryAdapter:
                 raise ValueError("asset_category_index_invalid")
         self._assets = {}
         for identifier, name in index.items():
-            path, _ = read_asset_metadata(self.asset_root, identifier, name)
+            path, data = read_asset_metadata(self.asset_root, identifier, name)
+            semantic = data.get("semantic_properties", {})
+            tags = tuple(tag.strip() for tag in semantic.get("tag", "").split(",") if tag.strip())
             geometry = AssetGeometry.model_validate(cache[str(identifier)])
             self._assets[identifier] = BrainAssetView(
                 library_asset_id=identifier, metadata_ref=f"{library_ref_prefix}{identifier}",
                 semantic_name=name, metadata_path=str(path), category=categories.get(str(identifier)),
+                tags=tags, color_tags=color_tags(tags), scalable=semantic.get("scalable"),
+                scale_range=data.get("physical_properties", {}).get("scale"),
                 **geometry.model_dump())
 
     def resolve(self, metadata_ref: str, asset_type=None) -> BrainAssetView:

@@ -15,6 +15,8 @@ from .scene_layout import SceneLayoutPolicy
 from .scene_manager import SceneManager
 from .spatial_facts import SpatialFactResolver
 from .transform_editor import translate, rotate
+from .scale_policy import SceneScalePolicy
+from .colors import ColorResolver
 
 
 @dataclass
@@ -27,11 +29,15 @@ class SceneEditResult:
 
 
 class SceneEditor:
-    def __init__(self, assets, layout=None, *, seed=0, aliases=None, category_aliases=None):
+    def __init__(self, assets, layout=None, *, seed=0, aliases=None, category_aliases=None,
+                 scale_policy=None, scale_defaults=None, table_metadata_ref=None):
         self.assets, self.seed = assets, seed
         self.layout = layout or SceneLayoutPolicy()
         self.aliases, self.category_aliases = aliases or {}, category_aliases or {}
         self.motion_policy = MotionPolicy()
+        self.scale_policy = scale_policy or SceneScalePolicy()
+        self.scale_defaults, self.table_metadata_ref = scale_defaults, table_metadata_ref
+        self.scale_table_transform = None
 
     def edit(self, intent, scene, **kwargs):
         return self.edit_result(intent, scene, **kwargs).patch
@@ -44,15 +50,21 @@ class SceneEditor:
                                next_scene_object_id=next_scene_object_id)
         selector = SceneObjectSelector(aliases=self.aliases, category_aliases=self.category_aliases, assets=self.assets)
         bindings = dict(bindings_override or {})
+        selected_targets = {}
         all_operations = []
         for edit in intent.operations:
-            if edit.properties:
+            if edit.operation == "update_properties":
+                if set(edit.properties) != {"color"}:
+                    raise ValueError("scene_edit_property_unsupported: only color is supported")
+                ColorResolver.resolve(edit.properties["color"])
+            elif edit.properties:
                 raise ValueError("scene_edit_properties_unsupported: shared Scene has no arbitrary properties")
             current = preview.scene
             reference = None
             if edit.reference is not None:
-                references = selector.resolve(edit.reference, intent.entities, intent.relations,
-                                              current, dialogue, bindings)
+                references = ([SceneIndex(current).object(i) for i in selected_targets[edit.reference]]
+                              if edit.reference in selected_targets else
+                              selector.resolve(edit.reference, intent.entities, intent.relations, current, dialogue, bindings))
                 if len(references) != 1:
                     raise ValueError("scene_edit_reference_ambiguous")
                 reference = references[0]
@@ -60,7 +72,10 @@ class SceneEditor:
             if edit.operation == "add":
                 operations = self._add(edit, entity, current, preview.next_scene_object_id, reference, defaults)
             else:
-                matches = selector.resolve(edit.target, intent.entities, intent.relations, current, dialogue, bindings)
+                matches = ([SceneIndex(current).object(i) for i in selected_targets[edit.target]]
+                           if edit.target in selected_targets else
+                           selector.resolve(edit.target, intent.entities, intent.relations, current, dialogue, bindings))
+                selected_targets[edit.target] = [obj.object_id_in_scene for obj in matches]
                 operations = self._modify(edit, matches, reference, current)
             patch = ScenePatch(scene_id=current.scene_id, base_scene_version=current.scene_version, operations=operations)
             candidate = SceneManager(current, seen_scene_object_ids=preview.seen_scene_object_ids,
@@ -77,6 +92,12 @@ class SceneEditor:
                 if semantic is None:
                     continue
                 support = facts.infer_support(obj, candidate)
+                if edit.operation == "scale":
+                    previous_semantic = SceneIndex(current).semantic(identifier)
+                    if previous_semantic is None or previous_semantic.support is None:
+                        support = None
+                    elif support != previous_semantic.support:
+                        raise ValueError("scene_scale_support_invalid")
                 if edit.operation == "add" and (reference is None or edit.relation in {"left_of", "right_of", "front_of", "behind"}) and support is None:
                     raise ValueError("scene_edit_support_unknown")
                 operations.append(ScenePatchOperation(action="upsert_component", object_id_in_scene=identifier,
@@ -86,6 +107,7 @@ class SceneEditor:
             preview.apply_patch(patch)
             if edit.operation == "add":
                 bindings[edit.target] = [op.object_id_in_scene for op in operations if op.action == "add_object"]
+                selected_targets[edit.target] = bindings[edit.target]
             all_operations.extend(operations)
         result = ScenePatch(scene_id=scene.scene_id, base_scene_version=scene.scene_version, operations=all_operations)
         SceneManager(scene, seen_scene_object_ids=seen_scene_object_ids,
@@ -105,6 +127,16 @@ class SceneEditor:
         facts = self._facts()
         for obj in matches:
             identifier = obj.object_id_in_scene
+            if edit.operation == "update_properties":
+                renderer = SceneIndex(scene).component(identifier, "MeshRenderer")
+                properties = dict(renderer.properties) if renderer else {}
+                properties["forceOverrideColor"] = ColorResolver.resolve(edit.properties["color"])
+                operations.append(ScenePatchOperation(action="upsert_component", object_id_in_scene=identifier,
+                    component=SceneComponent(component_type="MeshRenderer", properties=properties)))
+                continue
+            if edit.operation == "scale":
+                operations.append(self._scale(edit, obj, scene))
+                continue
             if edit.operation == "remove":
                 operations.append(ScenePatchOperation(action="remove_object", object_id_in_scene=identifier))
                 continue
@@ -129,6 +161,61 @@ class SceneEditor:
             operations.append(ScenePatchOperation(action="upsert_component", object_id_in_scene=identifier,
                 component=SceneComponent(component_type="Transform", properties=local.model_dump(mode="json"))))
         return operations
+
+    def _scale(self, edit, obj, scene):
+        index, facts = SceneIndex(scene), self._facts(self.scale_defaults)
+        identifier = obj.object_id_in_scene
+        asset = facts.asset(obj, scene)
+        if asset.asset_type == "robot" or index.robot_driver(identifier) or index.component(identifier, "RobotAttachment"):
+            raise ValueError("scene_scale_target_unsupported: robot or attachment")
+        for other in scene.objects:
+            if other.object_id_in_scene == identifier:
+                continue
+            transform = index.transform(other.object_id_in_scene)
+            semantic = index.semantic(other.object_id_in_scene)
+            if (transform and transform.parent == identifier) or (semantic and semantic.support == identifier):
+                raise ValueError("scene_scale_target_unsupported: has children or supported objects")
+        original = index.transform(identifier)
+        new_scale = self.scale_policy.calculate(original.scale, edit, asset)
+        # Copy raw properties to preserve quaternion rounding and parent exactly.
+        properties = dict(index.component(identifier, "Transform").properties)
+        properties["scale"] = list(new_scale)
+        def preview():
+            updated = obj.model_copy(update={"components": [
+                SceneComponent(component_type="Transform", properties=properties) if c.component_type == "Transform" else c
+                for c in obj.components]})
+            return scene.model_copy(update={"objects": [updated if o.object_id_in_scene == identifier else o for o in scene.objects]})
+        candidate = preview()
+        before_world = world_transform(scene, identifier)
+        box = world_bounds(asset, world_transform(candidate, identifier))
+        semantic = index.semantic(identifier)
+        support_id = semantic.support if semantic else None
+        if support_id is not None:
+            support = index.object(support_id)
+            if facts.infer_support(obj, scene) != support_id:
+                raise ValueError("scene_scale_support_invalid")
+            top = world_bounds(facts.asset(support, scene), world_transform(scene, support_id))[1][2]
+            moved = WorldTransform((before_world.position[0], before_world.position[1],
+                                    before_world.position[2] + top - box[0][2]), before_world.linear)
+            # Convert position using the original linear transform, avoiding a
+            # needless decomposition of the newly scaled/sheared world matrix.
+            local = local_from_world(scene, identifier, moved)
+            properties["position"] = list(local.position)
+            candidate = preview()
+            if not facts.footprint_contains(index.object(identifier), support, candidate):
+                raise ValueError("scene_scale_support_footprint_exceeded")
+            defaults = self.scale_defaults
+            if (defaults is not None and support_id == defaults.table_object_id
+                    and self.table_metadata_ref is not None and index.metadata_ref(support_id) == self.table_metadata_ref
+                    and index.metadata_type(support_id) != "robot"
+                    and (self.scale_table_transform is None or world_transform(scene, support_id) == self.scale_table_transform)):
+                bounds = world_bounds(asset, world_transform(candidate, identifier))
+                if any(bounds[0][i] < defaults.workspace_min[i] or bounds[1][i] > defaults.workspace_max[i] for i in (0, 1)):
+                    raise ValueError("scene_scale_workspace_exceeded")
+        if self._overlaps(index.object(identifier), candidate):
+            raise ValueError("scene_edit_transform_collision")
+        return ScenePatchOperation(action="upsert_component", object_id_in_scene=identifier,
+            component=SceneComponent(component_type="Transform", properties=properties))
 
     def _add(self, edit, entity, scene, next_id, reference, defaults):
         binding = AssetResolver(self.assets, aliases=self.aliases, category_aliases=self.category_aliases).resolve(entity)

@@ -32,6 +32,11 @@
     },
     "available_connect_joints": ["wrist_3_joint"]
   },
+  "scene_scale_min": 0.1,
+  "scene_scale_max": 10.0,
+  "scene_scale_small": 1.1,
+  "scene_scale_medium": 1.5,
+  "scene_scale_large": 2.0,
   "robot": "ur5e",
   "output_dir": "var/final-models"
 }
