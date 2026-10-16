@@ -22,6 +22,7 @@ robot-brain = "robot_agent_brain.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/robot_agent_brain"]
+exclude = ["**/.idea/**", "src/robot_agent_brain/robot_agent.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["brain_tests"]

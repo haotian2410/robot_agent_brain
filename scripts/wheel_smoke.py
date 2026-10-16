@@ -14,6 +14,8 @@ from robot_agent_brain.contracts.commands import CommandsFile
 from robot_agent_brain.contracts.scene import SceneConfig
 from robot_agent_brain.scene.component_access import SceneIndex
 from robot_agent_brain.models.prompts import TASK_UNDERSTANDING_PROMPT, SKILL_PLANNING_PROMPT
+from robot_agent_brain.models.prompts import DUAL_SKILL_PLANNING_PROMPT
+from robot_agent_brain.contracts.commands_v3 import CommandsFileV3
 from robot_agent_brain.skills.registry import REGISTRY
 
 
@@ -23,8 +25,11 @@ def main():
     assert not installed.is_relative_to(checkout), installed
     assert not Path.cwd().resolve().is_relative_to(checkout), Path.cwd()
     assert installed.is_relative_to(Path(sys.prefix).resolve()), installed
+    assert not (installed.parent / ".idea").exists()
+    assert not (installed.parent / "robot_agent.md").exists()
     assert TASK_UNDERSTANDING_PROMPT
     assert SKILL_PLANNING_PROMPT and REGISTRY.prompt_catalog()
+    assert DUAL_SKILL_PLANNING_PROMPT
     assert files("robot_agent_brain.resources").joinpath("config.json").is_file()
     config = BrainConfig()
     assert config.planner == "recipe"
@@ -41,6 +46,7 @@ def main():
     run("schemas", "--output-dir", str(directory / "schemas"))
     schema = json.loads((directory / "schemas" / "commands.schema.json").read_text())
     assert schema == CommandsFile.model_json_schema()
+    assert json.loads((directory / "schemas" / "commands_v3.schema.json").read_text()) == CommandsFileV3.model_json_schema()
     scene_schema = json.loads((directory / "schemas" / "scene_config.schema.json").read_text())
     assert scene_schema == SceneConfig.model_json_schema()
     instruction = "把两个苹果放进篮子"

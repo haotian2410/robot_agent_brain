@@ -50,7 +50,7 @@ class ArtifactWriter:
                 if result.commands is not None:
                     if scene is None or (result.commands.scene_id, result.commands.scene_version) != (scene.scene_id, scene.scene_version):
                         raise ValueError("artifact_scene_commands_mismatch")
-                    self._write(staged / "commands.json", canonical_commands(result.commands), CommandsFile.model_json_schema())
+                    self._write(staged / "commands.json", canonical_commands(result.commands), type(result.commands).model_json_schema())
                     artifacts["commands"] = str(destination / "commands.json")
                 for key in ("scene_patch", "scene_query_result"):
                     value = getattr(result, key)

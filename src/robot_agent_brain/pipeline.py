@@ -6,6 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .contracts.camera import CameraFrame
 from .contracts.commands import CommandsFile
+from .contracts.commands_v3 import CommandsFileV3
+from .contracts.robot_setup import RobotSetup
 from .contracts.grounded_task import GroundedTask
 from .contracts.scene import SceneConfig, ScenePatch, SceneId
 from .contracts.skill_plan import SkillPlan
@@ -32,8 +34,12 @@ class BrainResult(BaseModel):
     task_intent: TaskIntent | None = Field(default=None, alias="intent")
     grounded_task: GroundedTask | None = None
     skill_plan: SkillPlan | None = None
-    commands: CommandsFile | None = None
+    commands: CommandsFile | CommandsFileV3 | None = None
     scene_patch: ScenePatch | None = None
+    scene_replacement: SceneConfig | None = None
+    scene_source_snapshot: str | None = None
+    scene_id_remap: dict[int, int] | None = None
+    robot_setup_changed: RobotSetup | None = None
     scene_query_result: SceneQueryResult | None = None
     session_action: SessionControlIntent | None = None
     focus_object_ids: list[SceneId] | None = None
@@ -48,11 +54,22 @@ class BrainResult(BaseModel):
     @model_validator(mode="after")
     def turn_payload(self):
         groups = {
+            TurnKind.ROBOT_CONFIG: (self.robot_setup_changed,),
             TurnKind.ROBOT_TASK: (self.task_intent, self.grounded_task, self.skill_plan, self.commands),
             TurnKind.SCENE_EDIT: (self.scene_patch,),
             TurnKind.SCENE_QUERY: (self.scene_query_result,),
             TurnKind.SESSION_CONTROL: (self.session_action,),
         }
+        if isinstance(self.commands, CommandsFileV3):
+            # A staged v3 plan is not a flattened v2 SkillPlan.
+            groups[TurnKind.ROBOT_TASK] = (self.task_intent, self.grounded_task, self.commands)
+        if self.turn_kind == TurnKind.ROBOT_TASK and self.robot_setup_changed is not None:
+            groups[TurnKind.ROBOT_TASK] = (*groups[TurnKind.ROBOT_TASK], self.robot_setup_changed)
+            groups[TurnKind.ROBOT_CONFIG] = ()
+        if self.scene_replacement is not None:
+            if self.scene_patch is not None:
+                raise ValueError("brain_result_patch_and_replacement_exclusive")
+            groups[TurnKind.SCENE_EDIT] = (self.scene_replacement,)
         if self.status != TurnStatus.ACCEPTED:
             if any(v is not None for values in groups.values() for v in values):
                 raise ValueError("brain_result_rejected_payload")
@@ -89,7 +106,8 @@ class BrainPipeline:
         """Call understanding once; keep injected context out of the user text."""
         deferred_reference_error = None
         try:
-            provider_instruction = dialogue.contextualize(instruction, scene) if dialogue and scene is not None else instruction
+            original_requested = any(token in instruction.casefold() for token in ("原始场景", "初始场景", "最开始的场景", "original scene", "initial scene"))
+            provider_instruction = dialogue.contextualize(instruction, scene) if dialogue and scene is not None and not original_requested else instruction
         except ValueError as exc:
             if str(exc) not in {"dialogue_reference_missing", "dialogue_reference_ambiguous"}:
                 raise
@@ -124,9 +142,11 @@ class BrainPipeline:
                 raise deferred_reference_error
         if turn.task_intent is not None:
             turn = turn.model_copy(update={"task_intent": turn.task_intent.model_copy(update={"instruction": instruction})})
-        if dialogue is not None and scene is not None:
+        if dialogue is not None and scene is not None and not (turn.scene_edit and turn.scene_edit.scene_basis == "original"):
             turn = dialogue.apply_exclusions(turn, scene, aliases=self.aliases)
         turn = self.domain_policy.classify(turn, instruction)
+        if turn.scene_edit is not None and turn.scene_edit.scene_basis == "original" and not original_requested:
+            raise ValueError("original_scene_requires_explicit_request")
         if turn.status == TurnStatus.ACCEPTED and turn.turn_kind == TurnKind.ROBOT_TASK:
             turn = turn.model_copy(update={"task_intent": normalize_motion_language(turn.task_intent)})
         return turn
@@ -135,11 +155,19 @@ class BrainPipeline:
                      dialogue=None, bindings_override=None, edit_defaults=None,
                      capture: Callable[[], CameraFrame] | None = None,
                      held_object: SceneId | None = None,
+                     robot_profile=None, robot_setup_revision=0, arm_states=None,
                      seen_scene_object_ids=None, next_scene_object_id=None) -> BrainResult:
         """Consume an understood turn without another provider call or normalization."""
         self.skill_planner.last_trace = None
         if turn.status != TurnStatus.ACCEPTED:
             return BrainResult(status=turn.status, turn_kind=turn.turn_kind)
+        dual = robot_profile is not None and robot_profile.setup.mode == "dual"
+        if not dual:
+            turn.require_legacy_execution()
+        elif turn.robot_setup_request is not None:
+            request = turn.robot_setup_request
+            if request.mode != "dual" or request.profile_id not in {None, robot_profile.setup.profile_id}:
+                raise ValueError("robot_setup_switch_required")
         if turn.turn_kind == TurnKind.SESSION_CONTROL:
             return BrainResult(turn_kind=turn.turn_kind, session_action=turn.session_control)
         if scene is None:
@@ -156,6 +184,12 @@ class BrainPipeline:
             query = SceneQueryEngine(aliases=self.aliases, category_aliases=self.category_aliases, assets=self.assets).query(turn.scene_query, scene, dialogue)
             return BrainResult(turn_kind=turn.turn_kind, scene_query_result=query, focus_object_ids=query.object_ids)
         intent = turn.task_intent
+        if robot_profile is not None and not dual:
+            if arm_states is None or not arm_states.arms["single"].state_known:
+                raise ValueError("robot_runtime_state_unknown")
+            if robot_profile.v2_robot is None:
+                raise ValueError("robot_profile_v2_robot_missing")
+            held_object = arm_states.arms["single"].holding_object
         overrides = dialogue.bindings(intent, scene) if dialogue else {}
         for entity_id, ids in (bindings_override or {}).items():
             if entity_id in overrides and overrides[entity_id] != ids:
@@ -175,9 +209,40 @@ class BrainPipeline:
                 overrides[exc.entity.entity_id] = ids
         grounded = self.expander.expand(grounded, scene)
         grounded = self.motion.resolve(grounded)
+        if dual:
+            from .planning.dual_arm_recipe_planner import DualArmRecipePlanner
+            if arm_states is None:
+                raise ValueError("robot_runtime_state_unknown")
+            operations = []
+            for op in grounded.operations:
+                arm = op.arm or robot_profile.default_task_arm
+                if arm not in {"left", "right"}:
+                    raise ValueError("dual_arm_assignment_required")
+                operations.append(op.model_copy(update={"arm": arm}))
+            grounded = grounded.model_copy(update={"operations": operations})
+            if any(op.parallel_required for op in operations) and not robot_profile.coordinated_execution:
+                raise ValueError("dual_coordinated_execution_not_registered")
+            from .planning.skill_planner_router import PlanningTrace
+            mode = "qwen" if self.skill_planner.mode == "qwen" else "recipe"
+            trace = self.skill_planner.last_trace = PlanningTrace(self.skill_planner.mode, used_planner=mode)
+            if mode == "qwen":
+                from .planning.dual_qwen_planner import DualQwenPlanner
+                commands = DualQwenPlanner().plan(request_id, grounded, scene, robot_profile,
+                    robot_setup_revision, arm_states, self.skill_planner.provider, REGISTRY, trace)
+            else:
+                commands = DualArmRecipePlanner().plan(request_id, grounded, scene, robot_profile.setup,
+                                                      robot_setup_revision, arm_states)
+            if any(command.skill_name.value not in robot_profile.supported_skills for stage in commands.steps
+                   for command in (stage.arms.left, stage.arms.right) if command is not None):
+                raise ValueError("dual_profile_skill_unsupported")
+            by_entity = {e.entity_id: e.scene_object_id for e in grounded.entities}
+            return BrainResult(task_intent=intent, grounded_task=grounded, commands=commands,
+                focus_object_ids=list(dict.fromkeys(by_entity[op.source or op.target] for op in operations)),
+                planner_used=mode, planner_trace=trace.debug_payload())
         planning = self.skill_planner.plan(grounded, held_object=held_object, scene=scene)
         plan = planning.plan
-        commands = self.exporter.export(request_id, grounded, plan, scene, held_object=held_object)
+        exporter = CommandExporter(robot=robot_profile.v2_robot) if robot_profile is not None else self.exporter
+        commands = exporter.export(request_id, grounded, plan, scene, held_object=held_object)
         by_entity = {e.entity_id:e.scene_object_id for e in grounded.entities}
         focus = list(dict.fromkeys(by_entity[op.source or op.target] for op in grounded.operations))
         return BrainResult(task_intent=intent, grounded_task=grounded, skill_plan=plan, commands=commands,

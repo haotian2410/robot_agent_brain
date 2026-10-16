@@ -46,6 +46,8 @@ class SceneEditor:
                     seen_scene_object_ids=None, next_scene_object_id=None):
         if not isinstance(intent, SceneEditPlan):
             raise ValueError("scene_edit_plan_required")
+        if intent.scene_basis != "current":
+            raise ValueError("original_scene_requires_session_routing")
         preview = SceneManager(scene, seen_scene_object_ids=seen_scene_object_ids,
                                next_scene_object_id=next_scene_object_id)
         selector = SceneObjectSelector(aliases=self.aliases, category_aliases=self.category_aliases, assets=self.assets)
@@ -76,7 +78,11 @@ class SceneEditor:
                            if edit.target in selected_targets else
                            selector.resolve(edit.target, intent.entities, intent.relations, current, dialogue, bindings))
                 selected_targets[edit.target] = [obj.object_id_in_scene for obj in matches]
-                operations = self._modify(edit, matches, reference, current)
+                if edit.operation == "replace":
+                    replacement = next(e for e in intent.entities if e.entity_id == edit.replacement_entity)
+                    operations = self._replace(matches, replacement, current, preview.next_scene_object_id)
+                else:
+                    operations = self._modify(edit, matches, reference, current)
             patch = ScenePatch(scene_id=current.scene_id, base_scene_version=current.scene_version, operations=operations)
             candidate = SceneManager(current, seen_scene_object_ids=preview.seen_scene_object_ids,
                                      next_scene_object_id=preview.next_scene_object_id).apply_patch(patch)
@@ -108,6 +114,10 @@ class SceneEditor:
             if edit.operation == "add":
                 bindings[edit.target] = [op.object_id_in_scene for op in operations if op.action == "add_object"]
                 selected_targets[edit.target] = bindings[edit.target]
+            elif edit.operation == "replace":
+                bindings[edit.replacement_entity] = [op.object_id_in_scene for op in operations if op.action == "add_object"]
+                selected_targets[edit.replacement_entity] = bindings[edit.replacement_entity]
+                selected_targets[edit.target] = []
             all_operations.extend(operations)
         result = ScenePatch(scene_id=scene.scene_id, base_scene_version=scene.scene_version, operations=all_operations)
         SceneManager(scene, seen_scene_object_ids=seen_scene_object_ids,
@@ -121,6 +131,58 @@ class SceneEditor:
 
     def _facts(self, defaults=None):
         return SpatialFactResolver(self.assets, support_contact_tolerance_m=defaults.support_contact_tolerance_m if defaults else .001)
+
+    def _replace(self, matches, entity, scene, next_id):
+        if len(matches) != entity.count or entity.all_available:
+            raise ValueError("scene_replace_cardinality_mismatch")
+        model = AssetResolver(self.assets, aliases=self.aliases, category_aliases=self.category_aliases).resolve(entity).model
+        if getattr(model, "asset_type", None) == "robot":
+            raise ValueError("scene_replace_robot_unsupported")
+        index, facts = SceneIndex(scene), self._facts(self.scale_defaults)
+        operations = []
+        for offset, old in enumerate(matches):
+            old_id, identifier = old.object_id_in_scene, next_id + offset
+            if index.robot_driver(old_id) or index.component(old_id, "RobotAttachment") or index.metadata_type(old_id) == "robot":
+                raise ValueError("scene_replace_robot_unsupported")
+            for other in scene.objects:
+                if other.object_id_in_scene == old_id:
+                    continue
+                semantic = index.semantic(other.object_id_in_scene)
+                if index.transform(other.object_id_in_scene).parent == old_id or semantic and semantic.support == old_id:
+                    raise ValueError("scene_replace_dependent_object_unsupported")
+            # Resolve old geometry too: absence is not evidence of a safe edit.
+            world_bounds(facts.asset(old, scene), world_transform(scene, old_id))
+            original = index.transform(old_id)
+            semantic = index.semantic(old_id)
+            support_id = semantic.support if semantic else None
+            if support_id is not None and facts.infer_support(old, scene) != support_id:
+                raise ValueError("scene_replace_support_invalid")
+            obj = make_object(identifier, model.semantic_name, model.metadata_ref, original.position,
+                category=model.category or entity.category, support=support_id,
+                asset_type=model.asset_type if getattr(self.assets, "supports_features", False) else None)
+            transform = next(c for c in obj.components if c.component_type == "Transform")
+            transform.properties.update(quaternion_xyzw=list(original.quaternion_xyzw), parent=original.parent)
+            candidate = scene.model_copy(update={"objects": [o for o in scene.objects if o.object_id_in_scene != old_id] + [obj]})
+            world = world_transform(candidate, identifier)
+            bounds = world_bounds(model, world)
+            if support_id is not None:
+                support = index.object(support_id)
+                top = world_bounds(facts.asset(support, scene), world_transform(scene, support_id))[1][2]
+                moved = WorldTransform((world.position[0], world.position[1], world.position[2] + top - bounds[0][2]), world.linear)
+                transform.properties["position"] = list(local_from_world(candidate, identifier, moved).position)
+                if not facts.footprint_contains(obj, support, candidate) or facts.infer_support(obj, candidate) != support_id:
+                    raise ValueError("scene_replace_support_footprint_invalid")
+                defaults = self.scale_defaults
+                if (defaults is not None and support_id == defaults.table_object_id
+                        and self.table_metadata_ref is not None and index.metadata_ref(support_id) == self.table_metadata_ref
+                        and index.metadata_type(support_id) != "robot"
+                        and (self.scale_table_transform is None or world_transform(scene, support_id) == self.scale_table_transform)):
+                    bounds = world_bounds(model, world_transform(candidate, identifier))
+                    if any(bounds[0][i] < defaults.workspace_min[i] or bounds[1][i] > defaults.workspace_max[i] for i in (0, 1)):
+                        raise ValueError("scene_replace_workspace_exceeded")
+            operations.extend([ScenePatchOperation(action="remove_object", object_id_in_scene=old_id),
+                               ScenePatchOperation(action="add_object", object_id_in_scene=identifier, object=obj)])
+        return operations
 
     def _modify(self, edit, matches, reference, scene):
         operations = []

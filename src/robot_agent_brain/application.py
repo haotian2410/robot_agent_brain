@@ -75,8 +75,13 @@ class BrainApplication:
         if session_id not in self.sessions or state is not None and state.revision > self.revisions.get(session_id, 0):
             # Scene Semantic queries do not require mesh resources. Resolve
             # MetadataRef only when geometry is actually needed, not on restore.
-            session = BrainSession(None, self.pipeline, self.platform_factory())
+            session = BrainSession(None, self.pipeline, self.platform_factory(), robot_profiles=self.config.robot_profiles)
             self.sessions[session_id] = self.store.restore(state, session) if state else session
+            from .session.original_scene_store import OriginalSceneStore
+            self.sessions[session_id].original_store = OriginalSceneStore(self.store.directory(session_id))
+            # LocalScenePlatform edits metadata only. External platforms must
+            # explicitly opt into destructive scene resets via configuration.
+            self.sessions[session_id].scene_reset_allowed = self.platform_factory is LocalScenePlatform or self.config.allow_scene_reset
             self.sessions[session_id].restored_config_fingerprint = state.config_fingerprint if state else None
             self.revisions[session_id] = state.revision if state else 0
         return self.sessions[session_id]
@@ -90,7 +95,18 @@ class BrainApplication:
     def _load_scene(self, session_id, path):
         session = self.get_session(session_id)
         scene = self.codec.load(path)
+        profile = None
+        if self.config.scene_robot_profile is not None:
+            profile = self.config.robot_profiles.profiles[self.config.scene_robot_profile]
+            profile.validate_scene(scene)
+        elif self.config.scene_platform_object_ids is not None:
+            if not self.config.scene_platform_object_ids <= {o.object_id_in_scene for o in scene.objects}:
+                raise ValueError("scene_platform_manifest_invalid")
         session.initialize_scene(scene)
+        if profile is not None:
+            session.bind_imported_profile(profile)
+        elif self.config.scene_platform_object_ids is not None:
+            session.platform_object_ids = set(self.config.scene_platform_object_ids)
         return session.scene
 
     def handle(self, instruction, *, session_id=None, scene_path=None):
@@ -133,6 +149,13 @@ class BrainApplication:
             finally:
                 self._save_session(session_id)
 
+    def confirm_robot_state(self, session_id, state, *, scene_id, scene_version, robot_setup_revision, source="external"):
+        with self.store.lock(session_id):
+            session = self.get_session(session_id)
+            session.confirm_robot_state(state, scene_id=scene_id, scene_version=scene_version,
+                                        robot_setup_revision=robot_setup_revision, source=source)
+            self._save_session(session_id)
+
     def _handle(self, instruction, *, session_id, scene_path=None):
         request_id = uuid.uuid4().hex
         session = self.get_session(session_id)
@@ -170,33 +193,62 @@ class BrainApplication:
                 session.check_turn(turn)
                 bindings = None
                 initial_robot = None
+                initial_profile = None
+                active_bootstrapper = self.bootstrapper
                 if session.scene is None and turn.turn_kind not in {"scene_query", "session_control"}:
                     stage = "bootstrap"
                     from secrets import randbits
-                    initial = self.bootstrapper.prepare(turn, scene_id=randbits(53))
+                    from .contracts.robot_setup import RobotSetupRequest
+                    setup_request = turn.robot_setup_request
+                    if setup_request is None and self.config.robot_profiles.default_single is not None:
+                        setup_request = RobotSetupRequest(mode="single")
+                    if setup_request is not None:
+                        initial_profile = self.config.robot_profiles.resolve(setup_request)
+                        active_bootstrapper = self.bootstrapper.for_profile(initial_profile)
+                    if turn.turn_kind == "robot_config":
+                        if initial_profile is None:
+                            raise ValueError("robot_setup_profile_not_registered")
+                        template = active_bootstrapper.template_scene.model_copy(update={"scene_id": randbits(53), "scene_version": 1})
+                        session.initialize_scene(template)
+                        session.bind_imported_profile(initial_profile)
+                        report.scene_created = True
+                        report.scene_commit_status = "committed"
+                        initial = None
+                    else:
+                        initial = active_bootstrapper.prepare(turn, scene_id=randbits(53))
                     report.scene_source = "generated"
-                    report.assumptions = initial.assumptions
+                    report.assumptions = initial.assumptions if initial is not None else []
                     if turn.turn_kind == "robot_task":
                         initial_robot = initial
-                    else:
+                    elif initial is not None:
                         session.initialize_scene(initial.scene)
                         report.scene_created = True
                         report.scene_commit_status = "committed"
                         bindings = initial.bindings_for(session.scene)
+                        if initial_profile is not None:
+                            session.bind_imported_profile(initial_profile)
                 stage = "processing"
                 if initial_robot is not None:
                     result = session.process_initial_robot_turn(request_id, turn, initial_robot.scene,
-                        bindings_override=initial_robot.bindings_for(initial_robot.scene))
+                        bindings_override=initial_robot.bindings_for(initial_robot.scene), profile=initial_profile)
                     report.scene_created = True
                     report.scene_commit_status = "committed"
                 else:
                     result = session.process_turn(request_id, turn, bindings_override=bindings,
                                                   edit_defaults=self.defaults if report.scene_created else None)
                 report.run_status = "success"
+                if result.robot_setup_changed is not None:
+                    report.scene_commit_status = "committed"
+                if report.scene_created:
+                    session.platform_object_ids = ({o.object_id_in_scene for o in active_bootstrapper.template_scene.objects}
+                        if active_bootstrapper.template_scene is not None else {self.defaults.table_object_id, self.defaults.robot_object_id})
                 if result.commands is not None:
                     report.delivery_status = "commands_exported"
                     report.reply = "已生成任务计划，尚未执行。"
-                elif result.scene_patch is not None:
+                elif result.robot_setup_changed is not None:
+                    report.delivery_status = "robot_configured"
+                    report.reply = "机器人配置已更新（未执行机器人动作）。"
+                elif result.scene_patch is not None or result.scene_replacement is not None:
                     report.delivery_status = "scene_updated"
                     report.scene_commit_status = "committed"
                     report.reply = "场景元数据已更新（未运行仿真）。"
@@ -244,6 +296,11 @@ class BrainApplication:
                   "restored_config_fingerprint":previous_config,
                   "scene_source":report.scene_source, "before_version":before.scene_version if before else None,
                   "after_version":report.scene_version}
+        if result is not None and result.scene_replacement is not None:
+            record.update(scene_basis="original", source_snapshot=result.scene_source_snapshot,
+                          id_remap={str(k): v for k, v in result.scene_id_remap.items()})
+        record.update(robot_setup=session.robot_setup.model_dump(mode="json") if session.robot_setup else None,
+                      robot_setup_revision=session.robot_setup_revision)
         secret = self.config.api_key.get_secret_value() if self.config.api_key else None
         if self.config.debug:
             if planning_trace is not None:
@@ -271,6 +328,12 @@ class BrainApplication:
                         debug[key] = value.model_dump(mode="json")
         report = BrainRunReport.model_validate(redact(report.model_dump(mode="json"), secret))
         try:
+            if report.run_status == "success" and session.scene is not None and session.original_scene_manifest is None:
+                from .session.original_scene_store import OriginalSceneStore
+                session.original_scene_manifest = OriginalSceneStore(self.store.directory(session_id)).capture_once(
+                    session.scene, platform_object_ids=session.platform_object_ids, request_id=request_id,
+                    source=report.scene_source, robot_setup=session.robot_setup, config_fingerprint=self.config_fingerprint,
+                    profile_object_map=session.profile_object_map)
             self._save_session(session_id)
             return self.writer.publish(report, scene=session.scene, result=result,
                                        request_record=redact(record, secret), debug=redact(debug, secret))

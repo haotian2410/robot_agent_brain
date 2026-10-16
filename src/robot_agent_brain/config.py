@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from .contracts.scene import SceneId, RobotDriverProperties
+from .contracts.robot_profile import RobotProfileRegistry
 
 
 class LayoutDefaults(BaseModel):
@@ -56,6 +57,10 @@ class BrainConfig(BaseModel):
     default_robot_driver: RobotDriverProperties | None = None
     defaults: str | None = None
     robot: str = "ur5e"
+    robot_profiles: RobotProfileRegistry = Field(default_factory=RobotProfileRegistry)
+    scene_robot_profile: str | None = None
+    scene_platform_object_ids: set[SceneId] | None = None
+    allow_scene_reset: bool = False
     output_dir: str = "var/manual-tests"
     vision: bool = False
     seed: int = 0
@@ -75,6 +80,8 @@ class BrainConfig(BaseModel):
     @model_validator(mode="after")
     def valid_library_configuration(self):
         self.scale_policy()
+        if self.scene_robot_profile is not None and self.scene_robot_profile not in self.robot_profiles.profiles:
+            raise ValueError("robot_setup_profile_not_registered")
         if (self.asset_library_root is None) != (self.asset_geometry_cache is None):
             raise ValueError("asset_library_config_missing: root and geometry cache must be configured together")
         if self.asset_category_index is not None and self.asset_library_root is None:

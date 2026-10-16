@@ -3,11 +3,25 @@
 `robot_agent_brain` is the simulator-independent semantic-planning layer split
 from `robot_agent_stack`. It owns user intent, dialogue semantics, scene
 semantics, grounding, task decomposition, vague-motion distance resolution,
-Atomic Skill ordering, and `commands.json` v2 export.
+Atomic Skill ordering, and single-arm `commands.json` v2 / dual-arm v3 export.
 
 It intentionally does **not** depend on MuJoCo, `robot_agent_control`, MJCF,
 IK, robot collision checking, reachability, path/trajectory planning, gripper
 simulation, runtime playback, or execution verification.
+
+## 双臂与原始场景扩展
+
+已支持部署 profile 驱动的单/双臂配置、双臂分阶段抓取/放置/移动规划、逐臂反馈，
+以及不可变原始场景快照和 current/original 物体替换。双臂命令使用 v3：阶段间等待，
+阶段内允许两臂并行，`null` 臂保持已有状态；不是两份独立的单臂命令。
+
+- [实现范围、配置字段与验证记录](docs/dual_arm_implementation_status.md)
+- [真实 Qwen 双臂 demo 与产物目录](demo/dual_arm/README.md)
+
+双臂需要显式注册真实机器人映射；演示中的 `DEMO_ONLY` 接口不能用于 Control。
+原始场景首次成功且含任务物体时保存为会话目录下的 `original_scene.json`，不随
+后续编辑覆盖。恢复原始场景需要重置授权和已知空闲状态，并使旧计划失效。
+倒水暂不实现，等待控制端新版 `skill.md`；Brain 规划通过不代表物理执行成功。
 
 ## 安装与自测
 

@@ -171,8 +171,22 @@ class ExecutionFeedback(BaseModel):
 
 def canonical_commands(commands: CommandsFile) -> dict:
     """The sole wire representation. Validate models and the public schema."""
+    from .commands_v3 import CommandsFileV3, canonical_commands_v3
+    if isinstance(commands, CommandsFileV3):
+        return canonical_commands_v3(commands)
     payload = commands.model_dump(mode="json", exclude_none=True)
     CommandsFile.model_validate(payload)
     json.dumps(payload, allow_nan=False)
     Draft202012Validator(CommandsFile.model_json_schema()).validate(payload)
     return payload
+
+
+def parse_commands(payload):
+    """Version dispatch is explicit; never interpret v3 as a v2 flat list."""
+    from .commands_v3 import CommandsFileV3
+    version = payload.get("schema_version")
+    if version == "2.0":
+        return CommandsFile.model_validate(payload)
+    if version == "3.0":
+        return CommandsFileV3.model_validate(payload)
+    raise ValueError("commands_schema_version_unsupported")

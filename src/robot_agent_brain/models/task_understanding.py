@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from ..semantics.motion_evidence import _extract_motion_spans, resolve_motion_evidence
-from typing import Protocol
+from typing import Protocol, Literal
+from ..contracts.robot_setup import RobotSetupRequest
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from ..contracts.turn import BrainTurn, SceneEditPlan, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
 
@@ -46,6 +47,9 @@ class ParseOperation(BaseModel):
     motion_scale: MotionScale | None = None
     placement_target: PlacementTarget | None = None
     depends_on: list[str] = Field(default_factory=list)
+    arm: Literal["left", "right", "single"] | None = None
+    parallel_group: str | None = Field(default=None, min_length=1)
+    parallel_required: bool = False
     assignment_mode: str = Field(default="broadcast", pattern=r"^(broadcast|pairwise|repeat_all|relation_matched)$")
 
 
@@ -64,6 +68,7 @@ class TaskParseOutput(BaseModel):
     scene_edit: SceneEditPlan | None = None
     scene_query: SceneQueryIntent | None = None
     session_control: SessionControlIntent | None = None
+    robot_setup_request: RobotSetupRequest | None = None
     entities: list[ParseEntity] = Field(default_factory=list)
     operations: list[ParseOperation] = Field(default_factory=list)
     relations: list[ParseRelation] = Field(default_factory=list)
@@ -72,12 +77,17 @@ class TaskParseOutput(BaseModel):
     def validate_turn(self):
         payloads = {TurnKind.SCENE_EDIT: self.scene_edit, TurnKind.SCENE_QUERY: self.scene_query, TurnKind.SESSION_CONTROL: self.session_control}
         if self.status != TurnStatus.ACCEPTED:
-            if self.entities or self.operations or self.relations or any(v is not None for v in payloads.values()):
+            if self.robot_setup_request is not None or self.entities or self.operations or self.relations or any(v is not None for v in payloads.values()):
                 raise ValueError("task_semantic_invalid: rejected turn has payload")
             return self
+        if self.robot_setup_request is not None and self.turn_kind not in {TurnKind.ROBOT_CONFIG, TurnKind.ROBOT_TASK}:
+            raise ValueError("task_semantic_invalid: robot setup requires robot turn")
         if self.turn_kind == TurnKind.ROBOT_TASK:
             if not self.entities or not self.operations or any(v is not None for v in payloads.values()):
                 raise ValueError("task_semantic_invalid: robot task needs only entities and operations")
+        elif self.turn_kind == TurnKind.ROBOT_CONFIG:
+            if self.robot_setup_request is None or self.entities or self.operations or self.relations or any(v is not None for v in payloads.values()):
+                raise ValueError("task_semantic_invalid: robot config payload mismatch")
         elif self.turn_kind in payloads:
             if self.entities or self.operations or self.relations or payloads[self.turn_kind] is None or sum(v is not None for v in payloads.values()) != 1:
                 raise ValueError("task_semantic_invalid: turn payload mismatch")
@@ -133,7 +143,7 @@ class TaskParseOutput(BaseModel):
     def to_brain_turn(self, instruction: str) -> BrainTurn:
         task = self.to_task_intent(instruction) if self.status == TurnStatus.ACCEPTED and self.turn_kind == TurnKind.ROBOT_TASK else None
         status = self.status
-        return BrainTurn(status=status, turn_kind=self.turn_kind, instruction=instruction, task_intent=task, scene_edit=self.scene_edit, scene_query=self.scene_query, session_control=self.session_control)
+        return BrainTurn(status=status, turn_kind=self.turn_kind, instruction=instruction, task_intent=task, scene_edit=self.scene_edit, scene_query=self.scene_query, session_control=self.session_control, robot_setup_request=self.robot_setup_request)
 
 
 

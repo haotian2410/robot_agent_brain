@@ -28,6 +28,8 @@ class TaskExpander:
                                 model_scale=world_transform(scene, object_id).scale)
                 entities.append(entity.model_copy(update=data))
         operations, expanded_ids = [], {}
+        previous_block, current_block = [], []
+        active_group = None
         pairwise_cursors = {}
         distributed_counts = {}
         for operation in task.operations:
@@ -40,6 +42,11 @@ class TaskExpander:
             if count != len(members[actor]):
                 raise ValueError("task_expansion_pairwise_coverage_mismatch")
         for operation_index, operation in enumerate(task.operations):
+            # Explicit parallel peers share the same preceding barrier. Default
+            # operations and members expanded on a single arm remain serial.
+            if operation.parallel_group is None or operation.parallel_group != active_group:
+                previous_block, current_block = current_block, []
+            active_group = operation.parallel_group
             actor = operation.source or operation.target
             if actor not in members:
                 raise ValueError("task_semantic_invalid: operation has no bound actor")
@@ -81,12 +88,14 @@ class TaskExpander:
                 if operation.placement_target:
                     data["placement_target"]["reference"] = select(operation.placement_target.reference, index)
                 dependencies = [i for dep in operation.depends_on for i in expanded_ids[dep]]
-                if operations:
-                    dependencies.append(operations[-1].operation_id)
+                dependencies.extend(previous_block)
+                if ids:
+                    dependencies.append(ids[-1])
                 data["depends_on"] = list(dict.fromkeys(dependencies))
                 operations.append(Operation.model_validate(data))
                 ids.append(data["operation_id"])
             expanded_ids[operation.operation_id] = ids
+            current_block.extend(ids)
         relations = []
         for rel in task.spatial_relations:
             sources = members[rel.subject]

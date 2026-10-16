@@ -34,7 +34,26 @@ class SceneBootstrapper:
         self.table_ref, self.robot_ref = table_metadata_ref, robot_metadata_ref
         self.driver = robot_driver
         self.template_scene = template_scene
+        self.robot_profile = None
         self.resolver = AssetResolver(assets, aliases=aliases, category_aliases=category_aliases)
+
+    def for_profile(self, profile):
+        from .component_access import SceneIndex
+        if "table" not in profile.platform_roles:
+            raise ValueError("bootstrap_profile_table_role_missing")
+        table_id = profile.platform_roles["table"]
+        index = SceneIndex(profile.template)
+        robot_id = next(iter(profile.setup.arms.values())).robot_object_id
+        template = profile.template.model_copy(update={"objects": [obj.model_copy(deep=True) for obj in profile.template.objects
+                                                                   if obj.object_id_in_scene in profile.platform_object_ids]})
+        template = SceneConfig.model_validate(template.model_dump())
+        bootstrap = SceneBootstrapper(self.assets, self.defaults.model_copy(update={"table_object_id": table_id, "robot_object_id": robot_id}),
+            robot=profile.v2_robot or profile.setup.profile_id, seed=self.seed,
+            table_metadata_ref=index.metadata_ref(table_id), robot_metadata_ref=index.metadata_ref(robot_id),
+            robot_driver=index.robot_driver(robot_id), template_scene=template,
+            aliases=self.resolver.aliases, category_aliases=self.resolver.category_aliases)
+        bootstrap.robot_profile = profile
+        return bootstrap
 
     def prepare(self, turn, *, scene_id):
         if turn.status != "accepted" or turn.turn_kind not in {"robot_task", "scene_edit"}:
@@ -46,7 +65,7 @@ class SceneBootstrapper:
             entities, relations = turn.task_intent.entities, turn.task_intent.spatial_relations
         else:
             plan = turn.scene_edit
-            if all(op.operation == "remove" for op in plan.operations):
+            if all(op.operation in {"remove", "replace"} for op in plan.operations):
                 raise ValueError("scene_required: cannot create objects only to remove them")
             defined, needed = set(), set()
             for op in plan.operations:
@@ -83,7 +102,15 @@ class SceneBootstrapper:
             robot_candidates = [obj for obj in base_objects if any(
                 c.component_type == "MetadataRef" and c.properties.get("path") == self.robot_ref
                 and c.properties.get("type") == "robot" for c in obj.components)]
-            if len(table_candidates) != 1 or len(robot_candidates) != 1:
+            if self.robot_profile is not None:
+                self.robot_profile.validate_scene(self.template_scene)
+                selected = {arm.robot_object_id for arm in self.robot_profile.setup.arms.values()}
+                robot_candidates = [obj for obj in base_objects if obj.object_id_in_scene in selected]
+                for obj in base_objects:
+                    for component in obj.components:
+                        if component.component_type == "MetadataRef":
+                            self.assets.resolve(component.properties["path"], component.properties.get("type"))
+            if len(table_candidates) != 1 or not robot_candidates or (self.robot_profile is None and len(robot_candidates) != 1):
                 raise ValueError("bootstrap_template_platform_objects_missing")
             table_id, robot_id = table_candidates[0].object_id_in_scene, robot_candidates[0].object_id_in_scene
             table = table_candidates[0]

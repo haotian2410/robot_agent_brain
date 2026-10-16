@@ -13,6 +13,7 @@ def _load_prompt(filename: str) -> str:
 TASK_UNDERSTANDING_PROMPT = _load_prompt("task_understanding_v2.txt") + "\n" + RobotInteractionLexicon.prompt_rules()
 VISION_GROUNDING_PROMPT = _load_prompt("vision_grounding_v1.txt")
 SKILL_PLANNING_PROMPT = _load_prompt("skill_planning_v2.txt")
+DUAL_SKILL_PLANNING_PROMPT = _load_prompt("dual_skill_planning_v3.txt")
 
 
 def prompt_payload(value) -> str:

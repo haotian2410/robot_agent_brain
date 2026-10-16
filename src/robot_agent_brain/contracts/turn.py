@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .task_intent import TaskIntent, TaskEntity, Direction, MotionScale
 from .spatial import SpatialRelation
+from .robot_setup import RobotSetupRequest
 
 class TurnStatus(StrEnum):
     ACCEPTED = "accepted"
@@ -11,6 +12,7 @@ class TurnStatus(StrEnum):
     UNSUPPORTED_TASK = "unsupported_task"
 
 class TurnKind(StrEnum):
+    ROBOT_CONFIG = "robot_config"
     ROBOT_TASK = "robot_task"
     SCENE_EDIT = "scene_edit"
     SCENE_QUERY = "scene_query"
@@ -20,7 +22,8 @@ class TurnKind(StrEnum):
 class SceneEditIntent(BaseModel):
     """One operation in a SceneEditPlan; never a standalone turn payload."""
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["add", "remove", "translate", "rotate", "move_relative", "update_properties", "update", "scale"]
+    operation: Literal["add", "remove", "replace", "translate", "rotate", "move_relative", "update_properties", "update", "scale"]
+    replacement_entity: str | None = None
     scale_mode: Literal["multiply", "set"] | None = None
     scale_xyz: tuple[float, float, float] | None = None
     scale_direction: Literal["enlarge", "shrink"] | None = None
@@ -41,6 +44,10 @@ class SceneEditIntent(BaseModel):
     @model_validator(mode="after")
     def paired_relation(self):
         import math
+        if (self.operation == "replace") != (self.replacement_entity is not None):
+            raise ValueError("scene_replace_entity_required_or_forbidden")
+        if self.replacement_entity == self.target:
+            raise ValueError("scene_replace_requires_distinct_entities")
         scale_fields = (self.scale_mode, self.scale_xyz, self.scale_direction, self.scale_amount)
         if self.operation == "scale":
             numeric = self.scale_mode is not None and self.scale_xyz is not None and self.scale_direction is None and self.scale_amount is None
@@ -63,7 +70,7 @@ class SceneEditIntent(BaseModel):
             "motion_scale": self.motion_scale, "axis": self.axis, "angle_deg": self.angle_deg,
         }
         allowed = {
-            "add": {"relation", "reference"}, "remove": set(),
+            "add": {"relation", "reference"}, "remove": set(), "replace": set(),
             "translate": {"direction", "distance_m", "motion_scale"},
             "move_relative": {"relation", "reference"},
             "rotate": {"axis", "angle_deg"}, "update_properties": set(), "scale": set(),
@@ -85,6 +92,7 @@ class SceneEditIntent(BaseModel):
 class SceneEditPlan(BaseModel):
     """Ordered edits sharing the same entity/selection contract as robot tasks."""
     model_config = ConfigDict(extra="forbid")
+    scene_basis: Literal["current", "original"] = "current"
     entities: list[TaskEntity] = Field(min_length=1)
     relations: list[SpatialRelation] = Field(default_factory=list)
     operations: list[SceneEditIntent] = Field(min_length=1)
@@ -97,6 +105,8 @@ class SceneEditPlan(BaseModel):
         for op in self.operations:
             if op.target not in ids:
                 raise ValueError("scene_edit_unknown_selector")
+            if op.replacement_entity is not None and op.replacement_entity not in ids:
+                raise ValueError("scene_replace_unknown_entity")
             if op.reference and op.reference not in ids:
                 raise ValueError("scene_edit_unknown_reference_selector")
         return self
@@ -130,10 +140,22 @@ class BrainTurn(BaseModel):
     scene_edit: SceneEditPlan | None = None
     scene_query: SceneQueryIntent | None = None
     session_control: SessionControlIntent | None = None
+    robot_setup_request: RobotSetupRequest | None = None
+
+    def require_legacy_execution(self):
+        """Temporary fail-closed boundary until session v3 routing is installed."""
+        if self.status != TurnStatus.ACCEPTED:
+            return
+        if self.robot_setup_request is not None or self.turn_kind == TurnKind.ROBOT_CONFIG:
+            raise ValueError("robot_setup_profile_not_registered")
+        if self.task_intent and any(op.arm in {"left", "right"} or op.parallel_group is not None
+                                    for op in self.task_intent.operations):
+            raise ValueError("dual_arm_execution_not_configured")
 
     @model_validator(mode="after")
     def one_payload(self):
         payloads = {
+            TurnKind.ROBOT_CONFIG: self.robot_setup_request,
             TurnKind.ROBOT_TASK: self.task_intent,
             TurnKind.SCENE_EDIT: self.scene_edit,
             TurnKind.SCENE_QUERY: self.scene_query,
@@ -145,8 +167,11 @@ class BrainTurn(BaseModel):
             return self
         if self.turn_kind == TurnKind.UNSUPPORTED_TASK:
             raise ValueError("unsupported turn must have unsupported_task status")
+        if self.robot_setup_request is not None and self.turn_kind not in {TurnKind.ROBOT_CONFIG, TurnKind.ROBOT_TASK}:
+            raise ValueError("robot_setup_request_requires_robot_turn")
         if self.turn_kind in payloads and payloads[self.turn_kind] is None:
             raise ValueError("turn payload is missing")
-        if self.turn_kind in payloads and sum(value is not None for value in (self.task_intent, self.scene_edit, self.scene_query, self.session_control)) != 1:
+        expected = 2 if self.turn_kind == TurnKind.ROBOT_TASK and self.robot_setup_request is not None else 1
+        if sum(value is not None for value in payloads.values()) != expected:
             raise ValueError("turn must contain exactly one payload")
         return self

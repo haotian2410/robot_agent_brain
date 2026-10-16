@@ -147,6 +147,14 @@ class QwenHTTPProvider:
                           SkillPlanLLMOutput.model_json_schema(), SkillPlanLLMOutput.model_validate,
                           max_completion_tokens=budget)
 
+    def plan_dual(self, request):
+        from .dual_skill_planning import DualSkillPlanOutput
+        from .prompts import DUAL_SKILL_PLANNING_PROMPT
+        return self._call("skill_planning", DUAL_SKILL_PLANNING_PROMPT,
+                          prompt_payload({**request.context, "skills": request.skill_catalog}),
+                          DualSkillPlanOutput.model_json_schema(), DualSkillPlanOutput.model_validate,
+                          max_completion_tokens=self.planner_max_completion_tokens)
+
     def detect(self, frame: CameraFrame, entities: list[VisionEntity]) -> VisionGroundingOutput:
         if frame.rgb is None:
             raise QwenProviderError("vision_grounding: RGB frame is missing")

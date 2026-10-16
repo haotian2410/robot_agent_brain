@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .spatial import SpatialRelation
 from .scene import SceneId
@@ -87,10 +88,15 @@ class Operation(StrictModel):
     motion_scale: MotionScale | None = None
     placement_target: PlacementTarget | None = None
     depends_on: list[str] = Field(default_factory=list)
+    arm: Literal["left", "right", "single"] | None = None
+    parallel_group: str | None = Field(default=None, min_length=1)
+    parallel_required: bool = False
     assignment_mode: str = Field(default="broadcast", pattern=r"^(broadcast|pairwise|repeat_all|relation_matched)$")
 
     @model_validator(mode="after")
     def validate_operation(self):
+        if self.parallel_required and self.parallel_group is None:
+            raise ValueError("task_semantic_invalid: parallel_required needs parallel_group")
         from ..semantics.operation_contracts import validate_operation_contract
         validate_operation_contract(self)
         return self
@@ -111,7 +117,21 @@ class TaskIntent(StrictModel):
         if len(operation_ids) != len(self.operations):
             raise ValueError("task_semantic_invalid: operation ids must be unique")
         previous = set()
+        groups = {}
+        closed_groups = set()
+        active_group = None
         for operation in self.operations:
+            if operation.parallel_group != active_group:
+                if active_group is not None:
+                    closed_groups.add(active_group)
+                if operation.parallel_group in closed_groups:
+                    raise ValueError("task_semantic_invalid: parallel group must be contiguous")
+                active_group = operation.parallel_group
+            if operation.parallel_group is not None:
+                peers = groups.setdefault(operation.parallel_group, set())
+                if peers.intersection(operation.depends_on):
+                    raise ValueError("task_semantic_invalid: parallel dependency conflict")
+                peers.add(operation.operation_id)
             refs = {value for value in (operation.source, operation.destination, operation.target, operation.reference) if value}
             if not refs <= entity_ids:
                 raise ValueError(f"task_semantic_invalid: operation references unknown entities: {sorted(refs - entity_ids)}")
