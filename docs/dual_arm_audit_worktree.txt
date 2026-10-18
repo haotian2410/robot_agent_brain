@@ -1,0 +1,86 @@
+2026-10-16 audit delivery; no commit or push.
+Snapshot before adding this generated inventory; git diff --stat excludes untracked new modules/tests.
+User-owned .idea/ and robot_agent.md are not part of this delivery.
+
+f41b66a792ee79ee26f9fb0371033a6ee8b42bdb
+ M brain_tests/test_coordinated_validator.py
+ M brain_tests/test_dual_delivery.py
+ M brain_tests/test_qwen_http.py
+ M demo/dual_arm/README.md
+ M demo/dual_arm/run_qwen_demo.py
+ M docs/dual_arm_implementation_status.md
+ M src/robot_agent_brain/application.py
+ M src/robot_agent_brain/config.py
+ M src/robot_agent_brain/contracts/commands_v3.py
+ M src/robot_agent_brain/contracts/feedback_v3.py
+ M src/robot_agent_brain/contracts/grounded_task.py
+ M src/robot_agent_brain/contracts/task_intent.py
+ M src/robot_agent_brain/contracts/turn.py
+ M src/robot_agent_brain/diagnostics.py
+ M src/robot_agent_brain/grounding/scene_grounder.py
+ M src/robot_agent_brain/models/dual_skill_planning.py
+ M src/robot_agent_brain/models/prompt_templates/dual_skill_planning_v3.txt
+ M src/robot_agent_brain/models/prompt_templates/task_understanding_v2.txt
+ M src/robot_agent_brain/models/qwen_http.py
+ M src/robot_agent_brain/models/task_understanding.py
+ M src/robot_agent_brain/pipeline.py
+ M src/robot_agent_brain/planning/coordinated_validator.py
+ M src/robot_agent_brain/planning/dual_arm_recipe_planner.py
+ M src/robot_agent_brain/planning/dual_qwen_planner.py
+ M src/robot_agent_brain/planning/task_expander.py
+ M src/robot_agent_brain/scene/id_remapper.py
+ M src/robot_agent_brain/scene/robot_setup_manager.py
+ M src/robot_agent_brain/semantics/task_domain_policy.py
+ M src/robot_agent_brain/session/brain_session.py
+ M src/robot_agent_brain/session/original_scene_store.py
+ M src/robot_agent_brain/session/store.py
+?? brain_tests/test_domain_robot_semantics.py
+?? brain_tests/test_dual_arm_assignment.py
+?? brain_tests/test_dual_coordinated_capability.py
+?? brain_tests/test_dual_recovery.py
+?? brain_tests/test_dual_temporal_constraints.py
+?? brain_tests/test_original_scene_recovery.py
+?? brain_tests/test_publication_recovery.py
+?? brain_tests/test_robot_config_noop.py
+?? brain_tests/test_scene_component_reference_registry.py
+?? demo/dual_arm/run_scene_continuity_demo.py
+?? src/robot_agent_brain/.idea/
+?? src/robot_agent_brain/planning/arm_assignment_resolver.py
+?? src/robot_agent_brain/planning/coordinated_scheduler.py
+?? src/robot_agent_brain/planning/dual_capability.py
+?? src/robot_agent_brain/planning/dual_condition_builder.py
+?? src/robot_agent_brain/robot_agent.md
+?? src/robot_agent_brain/scene/component_reference_registry.py
+?? src/robot_agent_brain/session/publication_store.py
+ brain_tests/test_coordinated_validator.py          |  7 +-
+ brain_tests/test_dual_delivery.py                  |  5 +-
+ brain_tests/test_qwen_http.py                      |  1 +
+ demo/dual_arm/README.md                            | 20 ++++-
+ demo/dual_arm/run_qwen_demo.py                     | 43 +++++++++-
+ docs/dual_arm_implementation_status.md             | 91 ++++++++++++++++++++++
+ src/robot_agent_brain/application.py               | 54 +++++++++++--
+ src/robot_agent_brain/config.py                    |  3 +
+ src/robot_agent_brain/contracts/commands_v3.py     | 29 +++++++
+ src/robot_agent_brain/contracts/feedback_v3.py     | 16 ++++
+ src/robot_agent_brain/contracts/grounded_task.py   |  3 +-
+ src/robot_agent_brain/contracts/task_intent.py     | 27 +++++++
+ src/robot_agent_brain/contracts/turn.py            |  5 +-
+ src/robot_agent_brain/diagnostics.py               |  1 +
+ src/robot_agent_brain/grounding/scene_grounder.py  |  1 +
+ .../models/dual_skill_planning.py                  |  1 +
+ .../prompt_templates/dual_skill_planning_v3.txt    |  3 +
+ .../prompt_templates/task_understanding_v2.txt     | 13 ++++
+ src/robot_agent_brain/models/qwen_http.py          |  6 +-
+ src/robot_agent_brain/models/task_understanding.py | 27 +++++++
+ src/robot_agent_brain/pipeline.py                  | 16 ++--
+ .../planning/coordinated_validator.py              |  9 ++-
+ .../planning/dual_arm_recipe_planner.py            | 31 +++-----
+ .../planning/dual_qwen_planner.py                  | 27 ++-----
+ src/robot_agent_brain/planning/task_expander.py    | 32 +++++++-
+ src/robot_agent_brain/scene/id_remapper.py         | 20 ++---
+ src/robot_agent_brain/scene/robot_setup_manager.py | 21 ++---
+ .../semantics/task_domain_policy.py                | 11 +++
+ src/robot_agent_brain/session/brain_session.py     | 90 ++++++++++++++++++++-
+ .../session/original_scene_store.py                | 61 ++++++++++++++-
+ src/robot_agent_brain/session/store.py             | 16 +++-
+ 31 files changed, 578 insertions(+), 112 deletions(-)

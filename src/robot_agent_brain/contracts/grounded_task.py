@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from .task_intent import Operation
+from .task_intent import Operation, TaskHoldConstraint
 from .spatial import SpatialRelation
 from .scene import SceneId
 
@@ -30,6 +30,7 @@ class GroundedEntity(BaseModel):
 class GroundedTask(BaseModel):
     model_config = ConfigDict(extra="forbid")
     instruction: str
+    hold_constraints: list[TaskHoldConstraint] = Field(default_factory=list)
     entities: list[GroundedEntity]
     operations: list[Operation]
     spatial_relations: list[SpatialRelation] = Field(default_factory=list)

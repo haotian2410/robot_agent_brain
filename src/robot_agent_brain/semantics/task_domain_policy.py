@@ -12,6 +12,8 @@ class TaskDomainPolicy:
         if turn.status != TurnStatus.ACCEPTED:
             return turn
         text = instruction.casefold()
+        if any(token in text for token in ("倒水", "倾倒", "pour water", "pouring water")):
+            return BrainTurn(status="unsupported_task", turn_kind="unsupported_task", instruction=instruction)
         explicit_robot = (turn.robot_setup_request is not None
                           or bool(turn.task_intent and any(op.arm is not None for op in turn.task_intent.operations))
                           or any(token in text for token in ("用机械臂", "让机械臂", "用机器人", "让机器人", "using the robot", "左臂", "右臂", "双臂")))
@@ -25,6 +27,13 @@ class TaskDomainPolicy:
             turn = turn.model_copy(update={"scene_edit": edits})
             plan = edits
             if explicit_robot or any(op.explicit_robot for op in plan.operations):
+                # A scene-edit payload has no typed per-operation arm/time fields.
+                # Only a single unambiguous arm can be recovered safely.
+                sides = {side for side, words in (("left", ("左臂", "left arm")), ("right", ("右臂", "right arm")))
+                         if any(word in text for word in words)}
+                if (plan.scene_basis == "original" or "双臂" in text or "both arms" in text
+                        or len(sides) > 1 or any(word in text for word in ("同时", "期间", "simultaneously"))):
+                    return self._clarify(instruction)
                 if any(op.operation != "translate" or op.reference for op in plan.operations):
                     return self._clarify(instruction)
                 entities = list(plan.entities)
@@ -32,9 +41,11 @@ class TaskDomainPolicy:
                 for index, edit in enumerate(plan.operations, 1):
                     target = edit.target
                     operations.append(Operation(operation_id=f"op-{index}", task_type="move", target=target,
+                                                arm=next(iter(sides), None),
                                                 motion_direction=edit.direction, distance_m=edit.distance_m,
                                                 motion_scale=edit.motion_scale))
                 return BrainTurn(status="accepted", turn_kind="robot_task", instruction=instruction,
+                                 robot_setup_request=turn.robot_setup_request,
                                  task_intent=TaskIntent(instruction=instruction, entities=entities,
                                                         operations=operations, spatial_relations=plan.relations))
             if interaction and not explicit_scene:

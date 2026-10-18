@@ -14,9 +14,12 @@ class RemappedScene:
     next_scene_object_id: int
 
 
-def remap_scene(scene, *, new_scene_id, next_object_id, robot_setup=None):
+def remap_scene(scene, *, new_scene_id, next_object_id, robot_setup=None, reference_registry=None):
     """Allocate every restored object above the session allocator high-water mark."""
     scene = SceneConfig.model_validate(scene.model_dump())
+    from .component_reference_registry import ComponentReferenceRegistry
+    registry = reference_registry or ComponentReferenceRegistry()
+    registry.validate_scene(scene)
     TypeAdapter(SceneId).validate_python(new_scene_id)
     if new_scene_id == scene.scene_id:
         raise ValueError("scene_remap_requires_new_scene_id")
@@ -29,17 +32,7 @@ def remap_scene(scene, *, new_scene_id, next_object_id, robot_setup=None):
     payload.update(scene_id=new_scene_id, scene_version=1)
     for obj in payload["objects"]:
         obj["object_id_in_scene"] = mapping[obj["object_id_in_scene"]]
-        for component in obj["components"]:
-            kind = component["component_type"]
-            if kind not in COMPONENT_PROPERTIES:
-                raise ValueError("scene_component_remap_rule_missing: " + kind)
-            props = component["properties"]
-            field = {"Transform": "parent", "Semantic": "support", "RobotAttachment": "parent_object_id"}.get(kind)
-            if field is not None and props.get(field) is not None:
-                try:
-                    props[field] = mapping[props[field]]
-                except KeyError as exc:
-                    raise ValueError("scene_remap_reference_missing") from exc
+        obj["components"] = [registry.remap_component(component, mapping) for component in obj["components"]]
     setup = None
     if robot_setup is not None:
         values = robot_setup.model_dump()
@@ -48,4 +41,5 @@ def remap_scene(scene, *, new_scene_id, next_object_id, robot_setup=None):
                 raise ValueError("scene_remap_robot_missing")
             arm["robot_object_id"] = mapping[arm["robot_object_id"]]
         setup = RobotSetup.model_validate(values)
-    return RemappedScene(SceneConfig.model_validate(payload), mapping, setup, next_object_id + len(scene.objects))
+    candidate = registry.validate_scene(SceneConfig.model_validate(payload))
+    return RemappedScene(candidate, mapping, setup, next_object_id + len(scene.objects))

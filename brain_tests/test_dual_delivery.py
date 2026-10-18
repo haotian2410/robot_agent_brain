@@ -17,9 +17,10 @@ from test_coordinated_validator import runtime
 
 
 def prepared():
-    _, scene, setup = fixture()
-    session = BrainSession(scene, None, LocalScenePlatform())
+    registry, scene, setup = fixture()
+    session = BrainSession(scene, None, LocalScenePlatform(), robot_profiles=registry)
     session.robot_setup = setup
+    session.profile_object_map = {2: 2, 3: 3}
     session.robot_setup_revision = 1
     session.arm_states = runtime()
     commands = CommandsFileV3.model_validate(example())

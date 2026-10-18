@@ -1,5 +1,96 @@
 # 双臂与原始场景扩展：实现与验收
 
+## 2026-10-16 审计整改交付（当前结果）
+
+本轮基线为 `f41b66a792ee79ee26f9fb0371033a6ee8b42bdb`。以下改动在工作区，
+尚未 commit、未 push，没有新的提交 SHA 或本轮远程 CI 结果。
+按 A→B→C→D→E→F 先补失败用例再修复。保留单臂 v2、双臂 v3 单文件以及两个 nullable arm 槽。
+没有实现 pour；明确倒水请求即使被模型误转为 grasp 也拒绝。
+
+### 文件、函数与验收矩阵
+
+路径均相对仓库；源码位于 `src/robot_agent_brain/`，测试位于 `brain_tests/`。
+
+| 项目 | 已实现的文件／函数 | 行为证据与限制 |
+|---|---|---|
+| A-01～A-05、A-07 | `contracts/task_intent.py`、`models/task_understanding.py`：arm_usage；`planning/arm_assignment_resolver.py::resolve_arms`；`pipeline.py`；`planning/task_expander.py::expand` | `test_dual_arm_assignment.py`、原单臂回归；集合展开后按稳定顺序分臂，显式分臂优先，独占同一实例拒绝；不是可达性判断；保留依赖与并行要求 |
+| A-06 | `semantics/task_domain_policy.py::classify`；`contracts/turn.py` | `test_domain_robot_semantics.py`；简单显式左／右 translate 保留角色和配置，复杂双臂或 original 语义不足则澄清 |
+| B-01～B-06 | `planning/dual_condition_builder.py::{build_conditions,required_invariants,require_condition_coverage}`；`planning/coordinated_scheduler.py::{schedule_stages,validate_stage_order}`；两个 dual Planner 的 `plan`；`coordinated_validator.py::validate` | `test_dual_temporal_constraints.py`、`test_coordinated_validator.py`；四种受限谓词、同前态、必需条件覆盖、持续保持、到位→对臂动作→释放。另测右臂移动后继续放置、左最后释放；Qwen 错序只拒绝，不修复 |
+| C-01～C-03 | `planning/dual_capability.py::validate_dual_capability`；`pipeline.py`；`session/brain_session.py::mark_dispatched` | `test_dual_coordinated_capability.py`；最终双非空 stage 才触发协调能力门禁，dispatch 重查当前能力及模板到实例映射，禁止旧映射绕过；串行 v3 可用 |
+| D-01～D-04 | `contracts/feedback_v3.py`；`session/brain_session.py::{_apply_dual_feedback,reconcile_scene_and_robot_state}`；`application.py::reconcile_scene_and_robot_state`；`session/store.py` | `test_dual_recovery.py`、`test_dual_delivery.py`；partial→unknown→权威 scene＋双臂 known 恢复；校验请求来源、版本、setup、机器人对象、持物、ID 集合；平台超时仍 unknown；旧计划作废，恢复上下文可重启 |
+| E-01～E-04 | `scene/component_reference_registry.py::{remap_component,validate_scene}`；`scene/id_remapper.py::remap_scene`；`scene/robot_setup_manager.py`；`config.py`；`session/brain_session.py` | `test_scene_component_reference_registry.py`；声明无引用或精确 single/list/map_values 路径，nullable、类型检查；未知组件拒绝；切换后清理失效 Dialogue ID；规则进入配置指纹 |
+| E-05 | `session/original_scene_store.py::{capture_once,_recover_prepared,load}` | `test_original_scene_recovery.py`；prepare journal＋哈希＋no-replace 双文件＋commit marker/fsync；各中断点恢复。孤儿／损坏文件无可信准备记录时拒绝，不冻结最新场景替代基线 |
+| E-06～E-07 | 保留 original/current replace、支撑重建、新实例／scene ID、危险重置门禁 | 原 `test_original_scene_*`、`test_scene_replace.py`；下面 Replay 实际产物验证连续 original 不累计，原 SHA 不变 |
+| E4 发布失败 | `session/publication_store.py::{write,read,require_checkpoint}`；`application.py::{_handle,get_publication_status,get_session}` | `test_publication_recovery.py`；持久化 request、scene_commit_status、snapshot_id、publication_status 和 checkpoint revision；发布失败可查事实，旧 checkpoint 不冒充恢复成功 |
+| F-01 | `diagnostics.py::BrainResult.robot_setup_was_changed`；`session/brain_session.py::_process_setup_turn`；`application.py::_handle` | `test_robot_config_noop.py`；同 profile unchanged，版本／持物／对话／导出不改变；真实切换仍 committed |
+| F-02～F-03 | TXT prompts、`models/task_understanding.py::task_understanding_wire_schema`、`models/qwen_http.py`；demo 校验 | 全量回归、`test_qwen_http.py`、`test_domain_robot_semantics.py`；wire schema 要求模式／保持字段，特定明确语义遗漏运行时拒绝；不保证任意自然语言理解无误 |
+
+### 契约与恢复入口
+
+- 第一阶段 `arm_usage=unspecified|both_required`；设备 dual 不等于必须双臂参与。
+- `hold_constraints` 使用 `hold_during_operation|hold_until_operation`，语义实体／操作 ID
+  在 Grounding 后变成实例 ID。后者使用 holder_operation、region_entity、placement_region、while_operation；
+  release 必须在 peer 完整结束后。多个连续 peer 操作分别声明约束；歧义集合保持、任意 DAG／XYZ 不支持。
+- v3 附带绑定后的 typed `hold_constraints`，preconditions/invariants 仅 holding、gripper_empty、located、at_region。
+  完整单操作先通过旧 v2 exporter 终态检查，再排阶段并做协同检查；所有效果均 symbolic_only。
+- 恢复调用 `BrainApplication.reconcile_scene_and_robot_state(session_id, confirmed_scene=..., confirmed_arms=...,
+  source_request_id=..., robot_setup_revision=..., source="external"|"simulated")`。
+  接口由可信适配器调用；source 字符串不是认证凭据。无完整权威场景不能靠 confirm_robot_state 恢复。
+- 发布故障用 `get_publication_status(session_id, request_id)` 查询。外部平台与本地文件不是全局事务；
+  checkpoint 丢失而已提交记录存在时显式 recovery_required，不自动拼造旧状态或重放动作。
+  存储设备完全不可写时不能保证写出持久化故障记录。
+
+### 实测结果（本轮）
+
+- Python 3.11／3.12 全量 pytest：各 **617 passed，0 skipped**。本机装有 final_models，含 9 项外部资产集成测试。
+- 附件审计记录的基线远程 CI 是各 **545 passed、1 skipped**（外部 final_models 未安装），不是 554；
+  本轮没有 push，不能声称新远程 CI 通过。现有 CI 仍跑 3.11／3.12 全量与 wheel，外部缺包 skip 保留。
+- 独立 wheel 在仓库外 `/tmp` 安装运行，`PYTHONPATH` 已移除，smoke passed（Replay，不是 Qwen）。
+  安装模块：`/tmp/brain-audit-wheel-0xAcGU/env/lib/python3.12/site-packages/robot_agent_brain/__init__.py`。
+  产物：`/tmp/brain-wheel-smoke-_1c1uzot`。
+- wheel：`/tmp/brain-audit-wheel-0xAcGU/robot_agent_brain-0.1.0-py3-none-any.whl`；
+  SHA256 `b4864d593b0c9f65c0856757464282f2e26032b4745132a10ef66cd646bf9dee`。
+  构建后仅增加测试及本说明，无运行时代码变更。
+
+### 真实 Qwen 与 actual JSON
+
+本机 Qwen3.8-27B-UD-Q4_K_M.gguf，`http://127.0.0.1:8080/v1`，每成功例一次理解＋一次技能规划。
+`demo/dual_arm/run_qwen_demo.py::verify_report` 检查实际 scene／commands，而非只看 success：
+不同 actor ID、双臂参与、数量、版本、null、符号阶段／持续条件以及原快照。
+以下目录内都有实际 `commands.json`、`scene_config.json` 和 debug 模型调用：
+
+| 场景 | `var/dual-arm-audit-qwen/` 下成功请求目录 |
+|---|---|
+| 双臂抓取／并行槽 | `dual-9c053a6cbe-1/12e71d6012254a8fa7c9e8b9cf43b652/` |
+| 左抓放＋右移动 | `dual-9c053a6cbe-2/37da6904532141b185bc6d646b75d58b/` |
+| 两苹果集合自动分臂 | `dual-4d026d2f59-3/dad6444037694a1baf8067542f205897/` |
+| 左到位保持→右移动释放→左释放 | `dual-f4bb1b7a27-4/3b025044ed784d368b4b33530376c346/` |
+
+早期漏 arm_usage、hold_constraints、setup 及非法并行均曾失败，记录保留在同一产物根目录；
+随后加强 wire schema、运行时缺失门禁、TXT 示例后重新单独运行成功，不是一次全成功或自动回退。
+这些产物是规划验收，全部 `executed=false`。物理双臂、相机、IK、接触、碰撞均未执行。
+
+纯 Replay（非 Qwen）的 `demo/dual_arm/run_scene_continuity_demo.py` 实际输出：
+`var/dual-arm-audit-scenes/a7b5fc1bfb/summary.json`，其 reports 包含每轮绝对 JSON 路径。
+初始 apple/banana → original 替换 banana/banana → current 替换 apple/banana → original 再次 banana/banana；
+original SHA 始终为 `34cd7de0f12914d05a90de90975ddb2e8c5401b84877cad2ad28453b987b4500`。
+运行方法见 [demo README](../demo/dual_arm/README.md)。本地 var 产物不加入模型资产或 wheel。
+
+### 尚需 Control 联调与风险
+
+1. 真实 robot_object_id／planning_group／end_effector／gripper 映射；demo 的 DEMO_ONLY 名称不能投递硬件。
+2. v3 单文件 consumer、阶段 barrier、协调启动、typed hold_constraints／preconditions／invariants 的持续监测。
+3. grasp/move/release 的真实轨迹、IK、碰撞、稳定接触与终态反馈；Brain 符号通过不证明可执行。
+4. 唯一 command ID、逐臂反馈、版本化完整 scene＋known 状态、可信来源认证和平台 ACK／超时约定。
+5. 倒水、共同抓取／交接、自由行为树均未实现；等待新版 skill.md，不添加假参数。
+
+用户 `.idea/`、`robot_agent.md`、资产和私有配置未修改；不提交或推送。
+完整工作区清单与统计见同目录 `dual_arm_audit_worktree.txt`。
+
+---
+
+## 历史实现记录（旧基线；以下数字不是本轮验收）
+
 基线 a4ed6b8，依据用户提供的双臂与原始场景扩展方案。倒水按最新要求只占位：
 等待 Control 新版 skill.md，不新增 pour、倒水区域、液体条件或倒水 recipe。
 

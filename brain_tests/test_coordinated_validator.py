@@ -16,7 +16,7 @@ def runtime(left=None, right=None):
 def plan(stages):
     data = example()
     data["operations"] = [{"operation_id": side, "semantic_intent": "fixture",
-                           "task_type": "pick_and_place", "arm": side}
+                           "task_type": "pick_and_place", "arm": side, "parallel_group": "fixture"}
                           for side in ("left", "right") if any(side in stage for stage in stages)]
     data["steps"] = []
     for i, stage in enumerate(stages):
@@ -25,7 +25,8 @@ def plan(stages):
             slots[side] = {"command_id": f"cmd-{i}-{side}", "source_skill_step_id": f"skill-{i}-{side}",
                            "operation_id": side, "skill_name": skill, "parameters": params}
         data["steps"].append({"step_id": str(i), "semantic_intent": "fixture", "arms": slots})
-    return CommandsFileV3.model_validate(data)
+    from robot_agent_brain.planning.dual_condition_builder import build_conditions
+    return build_conditions(CommandsFileV3.model_validate(data), runtime())
 
 
 def test_parallel_pick_place_and_null_holding_are_symbolic_only():
@@ -54,7 +55,7 @@ def test_parallel_pick_place_and_null_holding_are_symbolic_only():
 def test_same_stage_does_not_share_new_locate_effect():
     candidate = plan([{"left": ("locate", {"target": 7}),
                        "right": ("move", {"target": 7, "region": "grasp_region"})}])
-    with pytest.raises(ValueError, match="requires_located"):
+    with pytest.raises(ValueError, match="requires_located|condition_unproven"):
         CoordinatedValidator().validate(candidate, runtime())
 
 

@@ -5,6 +5,7 @@ from ..models.dual_skill_planning import DualSkillPlanningRequest, DualSkillPlan
 from .context_builder import operation_valid_roles
 from .command_exporter import CommandExporter
 from .coordinated_validator import CoordinatedValidator
+from .dual_condition_builder import required_conditions, build_conditions, bind_hold_constraints
 from .skill_planner_router import PlanningTrace
 
 
@@ -64,7 +65,7 @@ class DualQwenPlanner:
         for op in task.operations:
             if not gathered[op.operation_id]:
                 raise ValueError("dual_planner_operation_missing")
-            single = task.model_copy(update={"operations": [op]})
+            single = task.model_copy(update={"operations": [op.model_copy(update={"depends_on": []})]})
             wire = CommandExporter(profile.setup.profile_id).export(request_id, single,
                 SkillPlan(steps=gathered[op.operation_id]), scene, held_object=held[op.arm])
             for i, cmd in enumerate(wire.commands):
@@ -92,28 +93,10 @@ class DualQwenPlanner:
             stages.append(CoordinatedStep(step_id=f"stage-{i+1}", semantic_intent="; ".join(ops[key[0]].task_type.value for key in slots.values()), arms=arms,
                                           preconditions=required_conditions(arms)))
         commands = CommandsFileV3(request_id=request_id, scene_id=scene.scene_id, scene_version=scene.scene_version,
-            robot_setup=profile.setup, robot_setup_revision=revision, operations=operations, steps=stages)
+            robot_setup=profile.setup, robot_setup_revision=revision, operations=operations, steps=stages,
+            hold_constraints=bind_hold_constraints(task))
+        commands = build_conditions(commands, runtime)
         CoordinatedValidator().validate(commands, runtime)
         trace.normalized = commands
         trace.validation = {"valid": True, "scope": "symbolic_not_physical"}
         return commands
-
-
-def required_conditions(arms):
-    result = []
-    for side, cmd in arms.items():
-        if cmd is None:
-            continue
-        p, skill = cmd.parameters, cmd.skill_name.value
-        if skill == "move" and p.region is not None:
-            result.append({"predicate": "located", "object_id": p.target})
-            if p.reference is not None:
-                result.append({"predicate": "holding", "arm": side, "object_id": p.reference})
-        if skill == "grasp":
-            result.extend([{"predicate": "gripper_empty", "arm": side},
-                           {"predicate": "at_region", "arm": side, "object_id": p.target, "region": "grasp_region"}])
-        if skill == "release" or skill == "move" and p.region is None:
-            result.append({"predicate": "holding", "arm": side, "object_id": p.target})
-        if skill == "release" and p.region is not None:
-            result.append({"predicate": "at_region", "arm": side, "object_id": p.reference if p.reference is not None else p.target, "region": p.region})
-    return result

@@ -126,19 +126,21 @@ class QwenHTTPProvider:
             self.calls.append(record)
 
     def understand(self, request: TaskUnderstandingRequest) -> TaskIntent:
+        from .task_understanding import task_understanding_wire_schema
         return self._call(
             "task_understanding",
             TASK_UNDERSTANDING_PROMPT,
             prompt_payload({"instruction": request.instruction}),
-            TaskParseOutput.model_json_schema(),
+            task_understanding_wire_schema(),
             lambda value: TaskParseOutput.model_validate(value).to_task_intent(request.instruction),
         )
 
     def understand_turn(self, request: TaskUnderstandingRequest):
+        from .task_understanding import task_understanding_wire_schema
         def parse(value):
             return TaskParseOutput.model_validate(value).to_brain_turn(request.instruction)
         return self._call("task_understanding", TASK_UNDERSTANDING_PROMPT,
-                          prompt_payload({"instruction": request.instruction}), TaskParseOutput.model_json_schema(), parse)
+                          prompt_payload({"instruction": request.instruction}), task_understanding_wire_schema(), parse)
 
     def plan(self, request: SkillPlanningRequest) -> SkillPlanLLMOutput:
         content = {**request.context.model_dump(mode="json"), "skills": request.skill_catalog}

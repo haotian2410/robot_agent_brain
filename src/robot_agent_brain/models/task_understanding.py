@@ -3,11 +3,20 @@ from __future__ import annotations
 from ..semantics.motion_evidence import _extract_motion_spans, resolve_motion_evidence
 from typing import Protocol, Literal
 from ..contracts.robot_setup import RobotSetupRequest
+from ..contracts.task_intent import TaskHoldConstraint
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from ..contracts.turn import BrainTurn, SceneEditPlan, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
 
 from ..contracts.spatial import RelationScope, SpatialRelation, SpatialRelationType
 from ..contracts.task_intent import Direction, MotionScale, Operation, PlacementTarget, QuantityMode, TaskEntity, TaskIntent, TaskType
+
+
+def task_understanding_wire_schema():
+    """Require explicit new semantic choices from live models, not old Replay."""
+    schema = TaskParseOutput.model_json_schema()
+    schema["required"] = list(dict.fromkeys([*schema.get("required", []), "status", "turn_kind",
+                                            "robot_setup_request", "arm_usage", "hold_constraints"]))
+    return schema
 
 
 class TaskUnderstandingRequest(BaseModel):
@@ -63,6 +72,8 @@ class ParseRelation(BaseModel):
 
 class TaskParseOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    arm_usage: Literal["unspecified", "both_required"] = "unspecified"
+    hold_constraints: list[TaskHoldConstraint] = Field(default_factory=list)
     status: TurnStatus = TurnStatus.ACCEPTED
     turn_kind: TurnKind = TurnKind.ROBOT_TASK
     scene_edit: SceneEditPlan | None = None
@@ -75,6 +86,10 @@ class TaskParseOutput(BaseModel):
 
     @model_validator(mode="after")
     def validate_turn(self):
+        if self.hold_constraints and (self.status != TurnStatus.ACCEPTED or self.turn_kind != TurnKind.ROBOT_TASK):
+            raise ValueError("task_semantic_invalid: hold constraints require accepted robot task")
+        if self.arm_usage != "unspecified" and (self.status != TurnStatus.ACCEPTED or self.turn_kind != TurnKind.ROBOT_TASK):
+            raise ValueError("task_semantic_invalid: arm usage requires accepted robot task")
         payloads = {TurnKind.SCENE_EDIT: self.scene_edit, TurnKind.SCENE_QUERY: self.scene_query, TurnKind.SESSION_CONTROL: self.session_control}
         if self.status != TurnStatus.ACCEPTED:
             if self.robot_setup_request is not None or self.entities or self.operations or self.relations or any(v is not None for v in payloads.values()):
@@ -101,6 +116,16 @@ class TaskParseOutput(BaseModel):
     def to_task_intent(self, instruction: str) -> TaskIntent:
         if self.status != TurnStatus.ACCEPTED or self.turn_kind != TurnKind.ROBOT_TASK:
             raise ValueError("task_semantic_invalid: no robot task payload")
+        # Narrow evidence gates catch omitted explicit constraints. They do not
+        # invent roles, repair model output, or infer physical feasibility.
+        text = instruction.casefold()
+        both = any(token in text for token in ("两只手各", "两臂分别", "用双臂分别", "both hands", "both arms must"))
+        if both and self.arm_usage != "both_required" and {op.arm for op in self.operations} != {"left", "right"}:
+            raise ValueError("task_semantic_invalid: arm_usage_required")
+        stable = (any(token in text for token in ("左臂保持", "右臂保持", "先不要松手", "hold position"))
+                  and any(token in text for token in ("左臂", "右臂", "left arm", "right arm")))
+        if stable and not self.hold_constraints:
+            raise ValueError("task_semantic_invalid: hold_constraint_required")
         moves = [o for o in self.operations if o.type == TaskType.MOVE]
         spans = resolve_motion_evidence(instruction, len(moves)) if moves else []
         operation_values = []
@@ -125,6 +150,8 @@ class TaskParseOutput(BaseModel):
             raise ValueError("task_semantic_invalid: relation references unknown entities")
         return TaskIntent(
             instruction=instruction,
+            arm_usage=self.arm_usage,
+            hold_constraints=self.hold_constraints,
             entities=[TaskEntity(
                 entity_id=item.id,
                 semantic_name=item.name,

@@ -17,6 +17,10 @@ class PreparedRobotSetup:
 
 
 class RobotSetupManager:
+    def __init__(self, *, reference_registry=None):
+        from .component_reference_registry import ComponentReferenceRegistry
+        self.reference_registry = reference_registry or ComponentReferenceRegistry()
+
     def prepare(self, scene, *, current_robot_ids, target_profile, platform_bindings, next_object_id):
         """platform_bindings explicitly maps target template anchors to live IDs.
 
@@ -48,10 +52,7 @@ class RobotSetupManager:
             if obj.object_id_in_scene in removed:
                 continue
             for component in obj.components:
-                if component.component_type not in COMPONENT_PROPERTIES:
-                    raise ValueError("robot_setup_component_reference_rule_missing: " + component.component_type)
-                field = {"Transform": "parent", "Semantic": "support", "RobotAttachment": "parent_object_id"}.get(component.component_type)
-                if field and component.properties.get(field) in removed:
+                if set(self.reference_registry.references(component)) & removed:
                     raise ValueError("robot_setup_task_depends_on_old_robot")
         mapping = dict(platform_bindings)
         mapping.update({identifier: next_object_id + i for i, identifier in enumerate(sorted(target.robot_object_ids))})
@@ -61,21 +62,13 @@ class RobotSetupManager:
                 continue
             value = obj.model_dump(mode="json")
             value["object_id_in_scene"] = mapping[obj.object_id_in_scene]
-            for component in value["components"]:
-                kind = component["component_type"]
-                if kind not in COMPONENT_PROPERTIES:
-                    raise ValueError("scene_component_remap_rule_missing: " + kind)
-                field = {"Transform": "parent", "Semantic": "support", "RobotAttachment": "parent_object_id"}.get(kind)
-                if field is not None and component["properties"].get(field) is not None:
-                    reference = component["properties"][field]
-                    if reference not in mapping:
-                        raise ValueError("robot_setup_template_reference_unbound")
-                    component["properties"][field] = mapping[reference]
+            value["components"] = [self.reference_registry.remap_component(component, mapping) for component in value["components"]]
             additions.append(value)
         payload = scene.model_dump(mode="json")
         payload["objects"] = [o for o in payload["objects"] if o["object_id_in_scene"] not in removed] + additions
         payload["scene_version"] += 1
         candidate = SceneConfig.model_validate(payload)
+        self.reference_registry.validate_scene(candidate)
         setup = target.setup.model_dump()
         for arm in setup["arms"].values():
             arm["robot_object_id"] = mapping[arm["robot_object_id"]]

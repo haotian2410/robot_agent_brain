@@ -6,12 +6,14 @@ from .dialogue_state import DialogueState
 
 class BrainSession:
     """Local semantic state commits only after platform acknowledgement."""
-    def __init__(self, scene, pipeline, platform, *, robot_profiles=None):
+    def __init__(self, scene, pipeline, platform, *, robot_profiles=None, reference_registry=None):
         self.scene_manager = None
         self.seen_scene_object_ids = set()
         self.next_scene_object_id = 0
         self.pipeline, self.platform = pipeline, platform
         self.robot_profiles = robot_profiles
+        from ..scene.component_reference_registry import ComponentReferenceRegistry
+        self.reference_registry = reference_registry or ComponentReferenceRegistry()
         self.dialogue = DialogueState()
         self.session_action = None
         self.sync_state = "synchronized"
@@ -30,6 +32,7 @@ class BrainSession:
         self.dispatched_requests = set()
         self.pending_commands = None
         self.pending_execution_request = None
+        self.recovery_context = None
         if scene is not None:
             self.initialize_scene(scene)
 
@@ -65,6 +68,8 @@ class BrainSession:
         self.exported_commands.clear()
         self.last_exported_request = None
         self.last_request_id = None
+
+        self.recovery_context = None
 
     def _candidate_manager(self, scene):
         current = {obj.object_id_in_scene for obj in self.scene.objects} if self.scene else set()
@@ -214,8 +219,8 @@ class BrainSession:
         prepared, result = self.switch_robot_setup(target, platform_bindings=bindings,
             plan_candidate=plan if turn.turn_kind == "robot_task" else None)
         if result is None:
-            return BrainResult(turn_kind="robot_config", robot_setup_changed=prepared.setup)
-        result = result.model_copy(update={"robot_setup_changed": prepared.setup})
+            return BrainResult(turn_kind="robot_config", robot_setup_changed=prepared.setup, robot_setup_was_changed=True)
+        result = result.model_copy(update={"robot_setup_changed": prepared.setup, "robot_setup_was_changed": True})
         return self._accept_result(request_id, result)
 
     def bind_imported_profile(self, profile):
@@ -251,7 +256,7 @@ class BrainSession:
         current_profile = self.robot_profiles.resolve(RobotSetupRequest(mode=self.robot_setup.mode, profile_id=self.robot_setup.profile_id))
         if not current_profile.robot_object_ids <= set(self.profile_object_map):
             raise ValueError("robot_setup_current_mapping_unavailable")
-        prepared = RobotSetupManager().prepare(self.require_scene(),
+        prepared = RobotSetupManager(reference_registry=self.reference_registry).prepare(self.require_scene(),
             current_robot_ids={self.profile_object_map[i] for i in current_profile.robot_object_ids},
             target_profile=target_profile, platform_bindings=platform_bindings, next_object_id=self.next_scene_object_id)
         initial = (target_profile.initial_state.model_copy(deep=True) if target_profile.initial_state is not None else
@@ -267,6 +272,10 @@ class BrainSession:
             raise
         self._commit_manager(manager)
         self.robot_setup = prepared.setup
+        surviving = {obj.object_id_in_scene for obj in prepared.scene.objects}
+        focus = self.dialogue.last_entity_ids or ([self.dialogue.last_entity_id] if self.dialogue.last_entity_id is not None else [])
+        self.dialogue.last_entity_ids = [identifier for identifier in focus if identifier in surviving]
+        self.dialogue.last_entity_id = self.dialogue.last_entity_ids[0] if len(self.dialogue.last_entity_ids) == 1 else None
         self.robot_setup_revision = revision
         self.arm_states = initial
         self.holding_object = None
@@ -304,6 +313,62 @@ class BrainSession:
         self.last_exported_request = None
         self.last_request_id = None
 
+    def reconcile_scene_and_robot_state(self, *, confirmed_scene, confirmed_arms,
+                                        source_request_id, robot_setup_revision, source="external"):
+        """Trusted adapter API, not natural-language confirmation or execution.
+
+        The adapter must authenticate its measurements. This in-process API
+        validates provenance/versions but is not an authentication boundary.
+        """
+        from ..contracts.robot_setup import RobotRuntimeState, RobotSetupRequest
+        if confirmed_scene is None:
+            raise ValueError("authoritative_scene_required")
+        if source not in {"external", "simulated"}:
+            raise ValueError("execution_feedback_source_invalid")
+        if self.pending_execution_request is not None:
+            raise ValueError("execution_pending")
+        context = self.recovery_context
+        if (context is None or source_request_id != context.request_id
+                or source_request_id not in self.dispatched_requests or source != context.source):
+            raise ValueError("execution_recovery_source_unproven")
+        if (self.robot_setup is None or self.robot_setup.mode != "dual"
+                or robot_setup_revision != self.robot_setup_revision
+                or robot_setup_revision != context.robot_setup_revision):
+            raise ValueError("execution_robot_setup_mismatch")
+        scene = self.require_scene()
+        candidate = SceneConfig.model_validate(confirmed_scene.model_dump() if hasattr(confirmed_scene, "model_dump") else confirmed_scene)
+        if (candidate.scene_id != scene.scene_id or candidate.scene_id != context.scene_id
+                or candidate.scene_version <= scene.scene_version
+                or candidate.scene_version < context.minimum_scene_version):
+            raise ValueError("execution_recovery_scene_mismatch")
+        known = {o.object_id_in_scene for o in candidate.objects}
+        if known != {o.object_id_in_scene for o in scene.objects}:
+            raise ValueError("execution_recovery_object_set_changed")
+        state = RobotRuntimeState.model_validate(confirmed_arms.model_dump() if hasattr(confirmed_arms, "model_dump") else confirmed_arms)
+        if set(state.arms) != set(self.robot_setup.arms) or any(not a.state_known for a in state.arms.values()):
+            raise ValueError("robot_runtime_state_unknown")
+        held = [a.holding_object for a in state.arms.values() if a.holding_object is not None]
+        if not set(held) <= known or len(held) != len(set(held)):
+            raise ValueError("robot_state_confirmation_holding_invalid")
+        if self.robot_profiles is None:
+            raise ValueError("robot_setup_profile_not_registered")
+        profile = self.robot_profiles.resolve(RobotSetupRequest(mode="dual", profile_id=self.robot_setup.profile_id))
+        profile.validate_scene(candidate, self.robot_setup)
+        manager = self._candidate_manager(candidate)
+        # Once platform I/O begins, a timeout may mean it accepted the load.
+        # Keep provenance and unknown state for retry; never claim rollback.
+        self.sync_state = "unknown"
+        self.recovery_context = context.model_copy(update={"minimum_scene_version": candidate.scene_version})
+        self._check_snapshot(self.platform.load_scene(candidate), candidate)
+        self._commit_manager(manager)
+        self.arm_states = state.model_copy(deep=True)
+        self.sync_state = "synchronized"
+        self.last_feedback_source = source
+        self.recovery_context = None
+        self.exported_commands.clear()
+        self.last_exported_request = None
+        self.last_request_id = None
+
     def derive_original_scene(self, original_store, transform, *, reset_allowed=False):
         """Commit a validated edit of the immutable original via one platform load.
 
@@ -334,6 +399,7 @@ class BrainSession:
         while identifier in {original.scene_id, self.require_scene().scene_id}:
             identifier = randbits(53)
         remapped = remap_scene(edited, new_scene_id=identifier, next_object_id=self.next_scene_object_id,
+                              reference_registry=self.reference_registry,
                                robot_setup=manifest.robot_setup)
         if not set(manifest.platform_object_ids) <= set(remapped.id_map):
             raise ValueError("original_scene_platform_object_removed")
@@ -410,6 +476,17 @@ class BrainSession:
                 raise ValueError("execution_robot_setup_mismatch")
             if self.arm_states is None or any(not arm.state_known for arm in self.arm_states.arms.values()):
                 raise ValueError("robot_runtime_state_unknown")
+            from ..contracts.robot_setup import RobotSetupRequest
+            from ..planning.dual_capability import validate_dual_capability
+            if self.robot_profiles is None:
+                raise ValueError("robot_setup_profile_not_registered")
+            profile = self.robot_profiles.resolve(RobotSetupRequest(mode="dual", profile_id=self.robot_setup.profile_id))
+            if self.profile_object_map is None or any(
+                    self.profile_object_map.get(binding.robot_object_id) != self.robot_setup.arms[side].robot_object_id
+                    for side, binding in profile.setup.arms.items()):
+                raise ValueError("execution_robot_setup_mismatch")
+            profile.validate_scene(scene, self.robot_setup)
+            validate_dual_capability(commands, profile)
         elif self.robot_setup is not None and self.robot_setup.mode == "dual":
             raise ValueError("execution_commands_version_mismatch")
         if (commands.scene_id, commands.scene_version) != (scene.scene_id, scene.scene_version):
@@ -495,6 +572,10 @@ class BrainSession:
                                                   for side in ("left", "right")})
         self.sync_state = "unknown"
         self.last_feedback_source = feedback_source
+        from ..contracts.feedback_v3 import ExecutionRecoveryContext
+        self.recovery_context = ExecutionRecoveryContext(request_id=feedback.request_id, scene_id=scene.scene_id,
+            base_scene_version=scene.scene_version, minimum_scene_version=candidate.scene_version if candidate else scene.scene_version + 1,
+            robot_setup_revision=self.robot_setup_revision, feedback_status=feedback.status, source=feedback_source)
         self.pending_execution_request = None
         self.pending_commands = None
         if candidate is not None:
@@ -502,4 +583,5 @@ class BrainSession:
             self._check_snapshot(self.platform.load_scene(candidate), candidate)
             self._commit_manager(manager)
             self.sync_state = "synchronized"
+            self.recovery_context = None
         return feedback.status

@@ -72,10 +72,14 @@ class BrainApplication:
     def get_session(self, session_id):
         safe_identifier(session_id)
         state = self.store.load(session_id)
+        from .session.publication_store import PublicationStore
+        PublicationStore(self.store.directory(session_id)).require_checkpoint(state)
         if session_id not in self.sessions or state is not None and state.revision > self.revisions.get(session_id, 0):
             # Scene Semantic queries do not require mesh resources. Resolve
             # MetadataRef only when geometry is actually needed, not on restore.
-            session = BrainSession(None, self.pipeline, self.platform_factory(), robot_profiles=self.config.robot_profiles)
+            from .scene.component_reference_registry import ComponentReferenceRegistry
+            session = BrainSession(None, self.pipeline, self.platform_factory(), robot_profiles=self.config.robot_profiles,
+                reference_registry=ComponentReferenceRegistry(self.config.component_reference_rules))
             self.sessions[session_id] = self.store.restore(state, session) if state else session
             from .session.original_scene_store import OriginalSceneStore
             self.sessions[session_id].original_store = OriginalSceneStore(self.store.directory(session_id))
@@ -126,6 +130,12 @@ class BrainApplication:
                 metrics={"understanding_calls":0, "vision_calls":0, "skill_planning_calls":0,
                          "planner_requested":self.config.planner, "planner_used":None, "model_calls":[]})
 
+    def get_publication_status(self, session_id, request_id):
+        """Read commit facts even when checkpoint restoration is blocked."""
+        from .session.publication_store import PublicationStore
+        with self.store.lock(session_id):
+            return PublicationStore(self.store.directory(session_id)).read(request_id)
+
     def _save_session(self, session_id):
         self.revisions[session_id] = self.store.save(session_id, self.sessions[session_id],
             revision=self.revisions.get(session_id, 0) + 1, config_fingerprint=self.config_fingerprint)
@@ -146,6 +156,17 @@ class BrainApplication:
             try:
                 return session.apply_execution_feedback(feedback, confirmed_scene=confirmed_scene,
                                                         feedback_source=feedback_source)
+            finally:
+                self._save_session(session_id)
+
+    def reconcile_scene_and_robot_state(self, session_id, *, confirmed_scene, confirmed_arms,
+                                        source_request_id, robot_setup_revision, source="external"):
+        with self.store.lock(session_id):
+            session = self.get_session(session_id)
+            try:
+                return session.reconcile_scene_and_robot_state(confirmed_scene=confirmed_scene,
+                    confirmed_arms=confirmed_arms, source_request_id=source_request_id,
+                    robot_setup_revision=robot_setup_revision, source=source)
             finally:
                 self._save_session(session_id)
 
@@ -237,7 +258,7 @@ class BrainApplication:
                     result = session.process_turn(request_id, turn, bindings_override=bindings,
                                                   edit_defaults=self.defaults if report.scene_created else None)
                 report.run_status = "success"
-                if result.robot_setup_changed is not None:
+                if result.robot_setup_was_changed:
                     report.scene_commit_status = "committed"
                 if report.scene_created:
                     session.platform_object_ids = ({o.object_id_in_scene for o in active_bootstrapper.template_scene.objects}
@@ -247,7 +268,8 @@ class BrainApplication:
                     report.reply = "已生成任务计划，尚未执行。"
                 elif result.robot_setup_changed is not None:
                     report.delivery_status = "robot_configured"
-                    report.reply = "机器人配置已更新（未执行机器人动作）。"
+                    report.reply = ("机器人配置已更新（未执行机器人动作）。" if result.robot_setup_was_changed or report.scene_created
+                                    else "已是该机器人配置，场景未改变。")
                 elif result.scene_patch is not None or result.scene_replacement is not None:
                     report.delivery_status = "scene_updated"
                     report.scene_commit_status = "committed"
@@ -327,7 +349,17 @@ class BrainApplication:
                     if value is not None:
                         debug[key] = value.model_dump(mode="json")
         report = BrainRunReport.model_validate(redact(report.model_dump(mode="json"), secret))
+        from .session.publication_store import PublicationStore
+        publication = PublicationStore(self.store.directory(session_id))
+        publication_record = {"request_id": request_id, "session_id": session_id,
+            "scene_commit_status": report.scene_commit_status, "scene_id": report.scene_id,
+            "scene_version": report.scene_version, "snapshot_id": None, "publication_status": "pending",
+            "checkpoint_revision": self.revisions.get(session_id, 0) + 1}
         try:
+            publication.write(publication_record)
+            # Save the confirmed scene before freezing/publishing derived files.
+            # A later crash must not cause the next turn to invent a new scene.
+            self._save_session(session_id)
             if report.run_status == "success" and session.scene is not None and session.original_scene_manifest is None:
                 from .session.original_scene_store import OriginalSceneStore
                 session.original_scene_manifest = OriginalSceneStore(self.store.directory(session_id)).capture_once(
@@ -335,14 +367,26 @@ class BrainApplication:
                     source=report.scene_source, robot_setup=session.robot_setup, config_fingerprint=self.config_fingerprint,
                     profile_object_map=session.profile_object_map)
             self._save_session(session_id)
-            return self.writer.publish(report, scene=session.scene, result=result,
-                                       request_record=redact(record, secret), debug=redact(debug, secret))
+            publication_record["snapshot_id"] = session.original_scene_manifest.snapshot_id if session.original_scene_manifest else None
+            publication.write(publication_record)
+            published = self.writer.publish(report, scene=session.scene, result=result,
+                                            request_record=redact(record, secret), debug=redact(debug, secret))
+            publication_record["publication_status"] = "published"
+            publication.write(publication_record)
+            return published
         except Exception as exc:
+            publication_record["publication_status"] = "failed"
+            publication_record["snapshot_id"] = session.original_scene_manifest.snapshot_id if session.original_scene_manifest else None
+            try:
+                publication.write(publication_record)
+            except Exception:
+                report.assumptions.append("publication_status_not_durable: storage unavailable; inspect external platform before retry")
             report.run_status = "failed"
             report.delivery_status = "none"
             report.artifacts = {}
             report.error = BrainIssue(code="artifact_write_failed", stage="publication", message=str(exc))
             report.reply = "产物保存失败；场景提交状态：" + report.scene_commit_status
+            report.assumptions.append("query_commit: get_publication_status(session_id, request_id); do not replay robot commands")
             return report
 
     @staticmethod

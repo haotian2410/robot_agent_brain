@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator, field_valida
 from ..adapters.artifact_writer import safe_identifier
 from ..contracts.commands import CommandsFile, canonical_commands, parse_commands
 from ..contracts.robot_setup import RobotSetup, RobotRuntimeState
+from ..contracts.feedback_v3 import ExecutionRecoveryContext
 from ..contracts.scene import SceneConfig, SceneId
 from ..scene.scene_manager import SceneManager
 from .dialogue_state import DialogueState
@@ -42,6 +43,7 @@ class SessionState(BaseModel):
     pending_commands: dict | None = None
     pending_execution_request: str | None = None
     last_feedback_source: Literal["external", "simulated"] | None = None
+    recovery_context: ExecutionRecoveryContext | None = None
 
     @field_validator("profile_object_map", mode="before")
     @classmethod
@@ -60,7 +62,7 @@ class SessionState(BaseModel):
             # Old checkpoints contain neither an explicit deployed binding nor
             # evidence for arm state. Preserve legacy holding without inventing
             # a profile, empty gripper, or historical original snapshot.
-            if any(key in value for key in ("robot_setup", "robot_setup_revision", "arm_states", "original_scene_manifest", "platform_object_ids", "profile_object_map")):
+            if any(key in value for key in ("robot_setup", "robot_setup_revision", "arm_states", "original_scene_manifest", "platform_object_ids", "profile_object_map", "recovery_context")):
                 raise ValueError("session_v1_contains_v2_fields")
             value["version"] = "2.0"
         return value
@@ -68,6 +70,14 @@ class SessionState(BaseModel):
     @model_validator(mode="after")
     def consistent(self):
         safe_identifier(self.session_id)
+        if self.recovery_context is not None:
+            recovery = self.recovery_context
+            if (self.scene is None or self.robot_setup is None or self.sync_state != "unknown"
+                    or self.pending_execution_request is not None or recovery.request_id not in self.dispatched_requests
+                    or recovery.robot_setup_revision != self.robot_setup_revision
+                    or recovery.scene_id != self.scene.scene_id or recovery.base_scene_version != self.scene.scene_version
+                    or recovery.minimum_scene_version <= recovery.base_scene_version):
+                raise ValueError("session_recovery_context_invalid")
         known = {o.object_id_in_scene for o in self.scene.objects} if self.scene else set()
         if self.profile_object_map is not None:
             if self.robot_setup is None or not set(self.profile_object_map.values()) <= known or len(set(self.profile_object_map.values())) != len(self.profile_object_map):
@@ -166,7 +176,7 @@ class SessionStore:
             profile_object_map=session.profile_object_map,
             exported_commands=session.exported_commands, dispatched_requests=session.dispatched_requests,
             pending_commands=session.pending_commands, pending_execution_request=session.pending_execution_request,
-            last_feedback_source=getattr(session, "last_feedback_source", None))
+            last_feedback_source=getattr(session, "last_feedback_source", None), recovery_context=session.recovery_context)
         parent = self.directory(session_id)
         fd, temporary = tempfile.mkstemp(prefix=".state-", dir=parent)
         try:
@@ -193,7 +203,7 @@ class SessionStore:
             session.next_scene_object_id = state.next_scene_object_id
         for name in ("dialogue", "session_action", "sync_state", "holding_object", "last_exported_request",
                      "exported_commands", "dispatched_requests", "pending_commands", "pending_execution_request",
-                     "last_feedback_source"):
+                     "last_feedback_source", "recovery_context"):
             setattr(session, name, getattr(state.model_copy(deep=True), name))
         for name in ("robot_setup", "robot_setup_revision", "arm_states", "original_scene_manifest", "platform_object_ids", "profile_object_map"):
             setattr(session, name, getattr(state.model_copy(deep=True), name))

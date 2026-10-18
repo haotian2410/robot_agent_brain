@@ -15,6 +15,17 @@ class DualActionFeedback(BaseModel):
     status: Literal["success", "failed"]
 
 
+class ExecutionRecoveryContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: str
+    scene_id: SceneId
+    base_scene_version: int = Field(strict=True, ge=0)
+    minimum_scene_version: int = Field(strict=True, ge=0)
+    robot_setup_revision: int = Field(strict=True, ge=1)
+    feedback_status: Literal["success", "failed", "partial"]
+    source: Literal["external", "simulated"]
+
+
 class ExecutionFeedbackV3(BaseModel):
     model_config = ConfigDict(extra="forbid")
     schema_version: Literal["3.0"] = "3.0"
@@ -48,6 +59,11 @@ class ExecutionFeedbackV3(BaseModel):
         if self.status == "success" and (set(actual) != set(expected) or any(v != "success" for v in actual.values())
                                          or set(self.arms) != {"left", "right"} or any(not a.state_known for a in self.arms.values())):
             raise ValueError("execution_feedback_incomplete_success")
+        complete_success = (set(actual) == set(expected) and all(v == "success" for v in actual.values())
+                            and set(self.arms) == {"left", "right"} and all(a.state_known for a in self.arms.values()))
+        if ((self.status == "failed" and actual and "failed" not in actual.values())
+                or (self.status == "partial" and ("success" not in actual.values() or complete_success))):
+            raise ValueError("execution_feedback_status_mismatch")
         held = [a.holding_object for a in self.arms.values() if a.holding_object is not None]
         if len(held) != len(set(held)):
             raise ValueError("execution_feedback_shared_ownership_unsupported")

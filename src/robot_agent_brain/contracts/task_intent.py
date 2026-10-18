@@ -102,8 +102,30 @@ class Operation(StrictModel):
         return self
 
 
+class TaskHoldConstraint(StrictModel):
+    kind: Literal["hold_during_operation", "hold_until_operation"]
+    holder_arm: Literal["left", "right"]
+    object_entity: str
+    while_operation: str
+    holder_operation: str | None = None
+    region_entity: str | None = None
+    region: Literal["placement_region"] | None = None
+
+    @model_validator(mode="after")
+    def complete_milestone(self):
+        if (self.region is None) != (self.region_entity is None):
+            raise ValueError("dual_hold_region_incomplete")
+        if self.kind == "hold_until_operation" and (self.holder_operation is None or self.region is None):
+            raise ValueError("dual_hold_milestone_incomplete")
+        if self.kind == "hold_during_operation" and self.holder_operation is not None:
+            raise ValueError("dual_hold_unexpected_holder_operation")
+        return self
+
+
 class TaskIntent(StrictModel):
     instruction: str = Field(min_length=1)
+    arm_usage: Literal["unspecified", "both_required"] = "unspecified"
+    hold_constraints: list[TaskHoldConstraint] = Field(default_factory=list)
     entities: list[TaskEntity]
     operations: list[Operation]
     spatial_relations: list[SpatialRelation] = Field(default_factory=list)
@@ -116,6 +138,11 @@ class TaskIntent(StrictModel):
         operation_ids = {item.operation_id for item in self.operations}
         if len(operation_ids) != len(self.operations):
             raise ValueError("task_semantic_invalid: operation ids must be unique")
+        for hold in self.hold_constraints:
+            if (hold.object_entity not in entity_ids or hold.region_entity is not None and hold.region_entity not in entity_ids
+                    or hold.while_operation not in operation_ids
+                    or hold.holder_operation is not None and hold.holder_operation not in operation_ids):
+                raise ValueError("task_semantic_invalid: hold constraint reference missing")
         previous = set()
         groups = {}
         closed_groups = set()

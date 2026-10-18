@@ -148,8 +148,9 @@ class BrainTurn(BaseModel):
             return
         if self.robot_setup_request is not None or self.turn_kind == TurnKind.ROBOT_CONFIG:
             raise ValueError("robot_setup_profile_not_registered")
-        if self.task_intent and any(op.arm in {"left", "right"} or op.parallel_group is not None
-                                    for op in self.task_intent.operations):
+        if self.task_intent and (self.task_intent.arm_usage == "both_required" or self.task_intent.hold_constraints or
+                                any(op.arm in {"left", "right"} or op.parallel_group is not None
+                                    for op in self.task_intent.operations)):
             raise ValueError("dual_arm_execution_not_configured")
 
     @model_validator(mode="after")

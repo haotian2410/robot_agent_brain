@@ -5,6 +5,7 @@ import os
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 from ..contracts.scene import SceneConfig, SceneId
@@ -25,12 +26,21 @@ class OriginalSceneManifest(BaseModel):
     config_fingerprint: str | None = None
 
 
+class PreparedOriginalScene(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: Literal["1.0"] = "1.0"
+    scene_json: str
+    manifest_json: str
+    manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class OriginalSceneStore:
     def __init__(self, directory):
         self.directory = Path(directory)
 
     def load(self, expected=None):
         try:
+            self._recover_prepared(expected)
             paths = [self.directory / name for name in ("original_scene.json", "original_scene_manifest.json")]
             if any(p.is_symlink() for p in paths):
                 raise ValueError("snapshot_symlink")
@@ -49,9 +59,46 @@ class OriginalSceneStore:
         except (OSError, ValueError) as exc:
             raise ValueError("original_scene_unavailable: " + str(exc)) from exc
 
+    def _recover_prepared(self, expected=None):
+        journal = self.directory / "original_scene_prepare.json"
+        paths = [self.directory / name for name in ("original_scene.json", "original_scene_manifest.json")]
+        marker = self.directory / "original_scene_commit.json"
+        if any(p.is_symlink() for p in [journal, marker, *paths]):
+            raise ValueError("snapshot_symlink")
+        if not journal.exists():
+            if any(p.exists() for p in paths) and not all(p.exists() for p in paths):
+                raise ValueError("original_scene_recovery_required: no durable prepare record")
+            if marker.exists():
+                raise ValueError("original_scene_recovery_required: missing prepare record")
+            return  # Legacy complete pairs remain readable, not re-frozen.
+        prepared = PreparedOriginalScene.model_validate_json(journal.read_bytes())
+        scene_bytes, manifest_bytes = prepared.scene_json.encode(), prepared.manifest_json.encode()
+        manifest = OriginalSceneManifest.model_validate_json(manifest_bytes)
+        if (hashlib.sha256(scene_bytes).hexdigest() != manifest.scene_sha256
+                or hashlib.sha256(manifest_bytes).hexdigest() != prepared.manifest_sha256):
+            raise ValueError("snapshot_prepare_hash_mismatch")
+        if expected is not None and manifest != expected:
+            raise ValueError("snapshot_manifest_mismatch")
+        scene = SceneConfig.model_validate_json(scene_bytes)
+        ids = {o.object_id_in_scene for o in scene.objects}
+        tasks, platform = set(manifest.task_object_ids), set(manifest.platform_object_ids)
+        if tasks & platform or tasks | platform != ids:
+            raise ValueError("snapshot_manifest_objects_invalid")
+        marker_bytes = json.dumps({"snapshot_id": manifest.snapshot_id, "scene_sha256": manifest.scene_sha256,
+                                  "manifest_sha256": prepared.manifest_sha256}, sort_keys=True).encode()
+        outputs = [*zip(paths, (scene_bytes, manifest_bytes)), (marker, marker_bytes)]
+        # Validate every existing part before publishing anything missing.
+        for path, payload in outputs:
+            if path.exists() and path.read_bytes() != payload:
+                raise ValueError("snapshot_prepare_existing_content_mismatch")
+        for path, payload in outputs:
+            if not path.exists():
+                self._write_once(path, payload)
+
     def capture_once(self, scene, *, platform_object_ids, request_id, source, robot_setup=None, config_fingerprint=None, profile_object_map=None):
         paths = [self.directory / name for name in ("original_scene.json", "original_scene_manifest.json")]
-        if any(p.exists() or p.is_symlink() for p in paths):
+        recovery_paths = [*paths, self.directory / "original_scene_prepare.json", self.directory / "original_scene_commit.json"]
+        if any(p.exists() or p.is_symlink() for p in recovery_paths):
             # A partial write is an explicit recovery case, never permission to
             # overwrite the first scene with the newest scene.
             return self.load()[1]
@@ -69,8 +116,11 @@ class OriginalSceneStore:
             platform_object_ids=sorted(platform_object_ids), robot_setup=robot_setup, config_fingerprint=config_fingerprint,
             profile_object_map={str(k): v for k, v in profile_object_map.items()} if profile_object_map is not None else None)
         self.directory.mkdir(parents=True, exist_ok=True)
-        self._write_once(paths[0], payload)
-        self._write_once(paths[1], manifest.model_dump_json(indent=2).encode())
+        manifest_json = manifest.model_dump_json(indent=2)
+        prepared = PreparedOriginalScene(scene_json=payload.decode(), manifest_json=manifest_json,
+            manifest_sha256=hashlib.sha256(manifest_json.encode()).hexdigest())
+        self._write_once(self.directory / "original_scene_prepare.json", prepared.model_dump_json().encode())
+        self._recover_prepared(manifest)
         return self.load(manifest)[1]
 
     @staticmethod
@@ -82,5 +132,10 @@ class OriginalSceneStore:
                 stream.flush()
                 os.fsync(stream.fileno())
             os.link(temp, path)  # atomic no-replace, including existing symlinks
+            directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
         finally:
             Path(temp).unlink(missing_ok=True)

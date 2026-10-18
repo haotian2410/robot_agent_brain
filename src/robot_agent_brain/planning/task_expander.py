@@ -88,8 +88,17 @@ class TaskExpander:
                 if operation.placement_target:
                     data["placement_target"]["reference"] = select(operation.placement_target.reference, index)
                 dependencies = [i for dep in operation.depends_on for i in expanded_ids[dep]]
-                dependencies.extend(previous_block)
-                if ids:
+                # A user milestone supersedes only the automatically inserted
+                # full-operation barrier between its holder and peer. Explicit
+                # depends_on stays intact and conflicting constraints fail.
+                milestone_holders = {h.holder_operation for h in task.hold_constraints
+                                     if h.kind == "hold_until_operation" and h.while_operation == operation.operation_id}
+                excluded = {i for h in milestone_holders for i in expanded_ids.get(h, [])}
+                dependencies.extend(i for i in previous_block if i not in excluded)
+                # Explicit parallel sets are assigned to arms after expansion.
+                # Keep user dependencies and the preceding group barrier, but
+                # do not invent a serial dependency inside that parallel set.
+                if ids and operation.parallel_group is None:
                     dependencies.append(ids[-1])
                 data["depends_on"] = list(dict.fromkeys(dependencies))
                 operations.append(Operation.model_validate(data))
@@ -103,4 +112,21 @@ class TaskExpander:
             pairs = zip(sources, references) if len(sources) == len(references) else product(sources, references)
             for subject, reference in pairs:
                 relations.append(rel.model_copy(update={"subject": subject, "reference": reference}))
-        return task.model_copy(update={"entities": entities, "operations": operations, "spatial_relations": relations})
+        holds = []
+        for hold in task.hold_constraints:
+            data = hold.model_dump()
+            for field in ("object_entity", "region_entity"):
+                key = data[field]
+                if key is not None:
+                    if len(members[key]) != 1:
+                        raise ValueError("dual_hold_ambiguous_collection")
+                    data[field] = members[key][0]
+            for field in ("while_operation", "holder_operation"):
+                key = data[field]
+                if key is not None:
+                    if len(expanded_ids[key]) != 1:
+                        raise ValueError("dual_hold_ambiguous_operation_collection")
+                    data[field] = expanded_ids[key][0]
+            holds.append(type(hold).model_validate(data))
+        return task.model_copy(update={"entities": entities, "operations": operations, "spatial_relations": relations,
+                                       "hold_constraints": holds})

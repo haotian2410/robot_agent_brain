@@ -36,6 +36,7 @@ def dual_context(task, runtime):
     from ..planning.context_builder import build_planner_context
     context = build_planner_context(task).model_dump(mode="json")
     context.pop("initial_state")
+    context["hold_constraints"] = [hold.model_dump(mode="json", exclude_none=True) for hold in task.hold_constraints]
     by_object = {e.scene_object_id: e.entity_id for e in task.entities}
     context["arms"] = {side: {"state_known": a.state_known,
                                "gripper_occupied": a.holding_object is not None,

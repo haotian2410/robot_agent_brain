@@ -19,6 +19,8 @@ class CoordinatedState:
 
 class CoordinatedValidator:
     def validate(self, plan: CommandsFileV3, runtime: RobotRuntimeState) -> CoordinatedState:
+        from .coordinated_scheduler import validate_stage_order
+        validate_stage_order(plan)
         if set(runtime.arms) != {"left", "right"}:
             raise ValueError("robot_runtime_arm_mapping_invalid")
         if any(not arm.state_known for arm in runtime.arms.values()):
@@ -27,7 +29,7 @@ class CoordinatedValidator:
         if len(held) != len(set(held)):
             raise ValueError("dual_shared_ownership_unsupported")
         state = CoordinatedState({side: a.holding_object for side, a in runtime.arms.items()})
-        for stage in plan.steps:
+        for index, stage in enumerate(plan.steps):
             before = deepcopy(state)
             for condition in [*stage.preconditions, *stage.invariants]:
                 if not self._holds(condition, before):
@@ -37,6 +39,8 @@ class CoordinatedValidator:
             resources = []
             for side, action in actions:
                 resources.append(self._check_action(side, action, before))
+            from .dual_condition_builder import require_condition_coverage
+            require_condition_coverage(stage, plan, index)
             if len(resources) == 2:
                 reads_a, writes_a = resources[0]
                 reads_b, writes_b = resources[1]
@@ -48,6 +52,9 @@ class CoordinatedValidator:
                 candidate = deepcopy(before)
                 self._apply(side, action, candidate)
                 for condition in stage.invariants:
+                    if (condition.predicate == "holding" and condition.arm == side
+                            and action.skill_name.value in {"move", "release"}):
+                        raise ValueError("dual_invariant_conflict: explicit stable hold")
                     if (condition.predicate == "at_region" and condition.arm == side
                             and action.skill_name.value == "move"):
                         raise ValueError("dual_invariant_conflict")

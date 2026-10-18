@@ -9,6 +9,7 @@ from ..contracts.commands_v3 import CommandsFileV3, DualCommand, DualOperation, 
 from .recipe_planner import RecipePlanner
 from .command_exporter import CommandExporter
 from .coordinated_validator import CoordinatedValidator
+from .dual_condition_builder import required_conditions, build_conditions, bind_hold_constraints
 
 
 class DualArmRecipePlanner:
@@ -43,7 +44,9 @@ class DualArmRecipePlanner:
                 raise ValueError("dual_parallel_peer_missing")
             sequences = {}
             for op in block:
-                single_task = task.model_copy(update={"operations": [op]})
+                # Full dependencies remain on v3 operations; validate only the
+                # isolated complete skill sequence through the v2 validator.
+                single_task = task.model_copy(update={"operations": [op.model_copy(update={"depends_on": []})]})
                 recipe = RecipePlanner().plan(single_task, held_object=held[op.arm])
                 # Reuse the existing per-operation semantic and geometry gates.
                 wire = CommandExporter(robot=setup.profile_id).export(request_id, single_task, recipe, scene,
@@ -67,27 +70,15 @@ class DualArmRecipePlanner:
                     depends_on=op.depends_on, parallel_group=op.parallel_group,
                     parallel_required=op.parallel_required))
             for left, right in zip_longest(sequences.get("left", []), sequences.get("right", [])):
-                conditions = []
-                for side, command in (("left", left), ("right", right)):
-                    if command is None:
-                        continue
-                    p, skill = command.parameters, command.skill_name.value
-                    if skill == "move" and p.region is not None:
-                        conditions.append({"predicate": "located", "object_id": p.target})
-                        if p.reference is not None:
-                            conditions.append({"predicate": "holding", "arm": side, "object_id": p.reference})
-                    if skill == "grasp":
-                        conditions.extend([{"predicate": "gripper_empty", "arm": side},
-                            {"predicate": "at_region", "arm": side, "object_id": p.target, "region": "grasp_region"}])
-                    if skill == "release" or (skill == "move" and p.region is None):
-                        conditions.append({"predicate": "holding", "arm": side, "object_id": p.target})
-                    if skill == "release" and p.region is not None:
-                        conditions.append({"predicate": "at_region", "arm": side,
-                                           "object_id": p.reference if p.reference is not None else p.target,
-                                           "region": p.region})
+                conditions = required_conditions({"left": left, "right": right})
                 stages.append(CoordinatedStep(step_id=f"stage-{len(stages)+1}", semantic_intent="; ".join(o.semantic_intent for o in operations[-len(block):]),
                                               arms=ArmSlots(left=left, right=right), preconditions=conditions))
+        from .coordinated_scheduler import schedule_stages
+        holds = bind_hold_constraints(task)
+        stages = schedule_stages(stages, operations, holds)
         result = CommandsFileV3(request_id=request_id, scene_id=scene.scene_id, scene_version=scene.scene_version,
-                                robot_setup_revision=revision, robot_setup=setup, operations=operations, steps=stages)
+                                robot_setup_revision=revision, robot_setup=setup, operations=operations, steps=stages,
+                                hold_constraints=holds)
+        result = build_conditions(result, runtime)
         CoordinatedValidator().validate(result, runtime)
         return result

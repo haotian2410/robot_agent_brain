@@ -27,6 +27,7 @@ def configuration_summary(config, assets, defaults):
             "timeout":config.timeout, "structured_output":config.structured_output,
             "robot":config.robot, "seed":config.seed, "vision":config.vision,
             "robot_profiles_sha256": fingerprint(config.robot_profiles.model_dump(mode="json")),
+            "component_reference_rules_sha256": fingerprint(config.component_reference_rules),
             "scene_robot_profile": config.scene_robot_profile,
             "scene_platform_object_ids": sorted(config.scene_platform_object_ids) if config.scene_platform_object_ids is not None else None,
             "allow_scene_reset": config.allow_scene_reset,

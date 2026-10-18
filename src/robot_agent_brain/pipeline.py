@@ -40,6 +40,7 @@ class BrainResult(BaseModel):
     scene_source_snapshot: str | None = None
     scene_id_remap: dict[int, int] | None = None
     robot_setup_changed: RobotSetup | None = None
+    robot_setup_was_changed: bool = False
     scene_query_result: SceneQueryResult | None = None
     session_action: SessionControlIntent | None = None
     focus_object_ids: list[SceneId] | None = None
@@ -211,15 +212,11 @@ class BrainPipeline:
         grounded = self.motion.resolve(grounded)
         if dual:
             from .planning.dual_arm_recipe_planner import DualArmRecipePlanner
+            from .planning.arm_assignment_resolver import resolve_arms
             if arm_states is None:
                 raise ValueError("robot_runtime_state_unknown")
-            operations = []
-            for op in grounded.operations:
-                arm = op.arm or robot_profile.default_task_arm
-                if arm not in {"left", "right"}:
-                    raise ValueError("dual_arm_assignment_required")
-                operations.append(op.model_copy(update={"arm": arm}))
-            grounded = grounded.model_copy(update={"operations": operations})
+            grounded = resolve_arms(grounded, robot_profile, arm_usage=intent.arm_usage)
+            operations = grounded.operations
             if any(op.parallel_required for op in operations) and not robot_profile.coordinated_execution:
                 raise ValueError("dual_coordinated_execution_not_registered")
             from .planning.skill_planner_router import PlanningTrace
@@ -232,9 +229,8 @@ class BrainPipeline:
             else:
                 commands = DualArmRecipePlanner().plan(request_id, grounded, scene, robot_profile.setup,
                                                       robot_setup_revision, arm_states)
-            if any(command.skill_name.value not in robot_profile.supported_skills for stage in commands.steps
-                   for command in (stage.arms.left, stage.arms.right) if command is not None):
-                raise ValueError("dual_profile_skill_unsupported")
+            from .planning.dual_capability import validate_dual_capability
+            validate_dual_capability(commands, robot_profile)
             by_entity = {e.entity_id: e.scene_object_id for e in grounded.entities}
             return BrainResult(task_intent=intent, grounded_task=grounded, commands=commands,
                 focus_object_ids=list(dict.fromkeys(by_entity[op.source or op.target] for op in operations)),

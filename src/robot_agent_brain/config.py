@@ -58,6 +58,7 @@ class BrainConfig(BaseModel):
     defaults: str | None = None
     robot: str = "ur5e"
     robot_profiles: RobotProfileRegistry = Field(default_factory=RobotProfileRegistry)
+    component_reference_rules: dict[str, dict] = Field(default_factory=dict)
     scene_robot_profile: str | None = None
     scene_platform_object_ids: set[SceneId] | None = None
     allow_scene_reset: bool = False
@@ -80,6 +81,8 @@ class BrainConfig(BaseModel):
     @model_validator(mode="after")
     def valid_library_configuration(self):
         self.scale_policy()
+        from .scene.component_reference_registry import ComponentReferenceRegistry
+        ComponentReferenceRegistry(self.component_reference_rules)
         if self.scene_robot_profile is not None and self.scene_robot_profile not in self.robot_profiles.profiles:
             raise ValueError("robot_setup_profile_not_registered")
         if (self.asset_library_root is None) != (self.asset_geometry_cache is None):
