@@ -1,9 +1,36 @@
 # 双臂与原始场景扩展：实现与验收
 
+## 2026-10-18 三项复审修复
+
+基于已推送的 `bfe03b91b512656e7c471a323c85ab77c1b0c884`，只修本轮三个边界，未重构 A–F，未新增技能。
+以下为本轮本地验收记录，与上一轮远程 CI 分开；本轮提交及远程 CI 状态以 Git 历史和对应 Actions run 为准。
+
+- `session/store.py::restore`：unknown 或存在 pending 请求时仅恢复内部 SceneManager、实例历史、
+  setup、逐臂状态和门禁，不调用 initialize_scene／外部 load_scene。synchronized 且无 pending 保留平台恢复契约。
+  pending 继续等待对应执行反馈；unknown 继续要求权威场景恢复，不把旧 checkpoint 当执行后真值。
+- `application.py::_load_scene/_capture_original`：平台 ACK、绑定平台清单后保存导入版本并立即 capture_once，
+  在理解或编辑前完成；已存在 original 不覆盖。无任务物体的空模板仍不冻结，自动创建仍在整轮成功后冻结。
+  任务物体认定仍依赖显式 platform manifest／profile，不猜测未知场景的平台对象。
+- `session/brain_session.py::_validate_execution_scene`：普通双臂反馈和异常恢复共用场景 ID／版本、
+  实例集合、Profile 资源、完整 RobotDriver 配置及注册组件引用检查。校验失败在平台 I/O 前拒绝，
+  保留原场景及 pending／unknown 门禁。恢复另保留其请求来源、最低版本、known 双臂与持物校验。
+- 新增 `brain_tests/test_review_recovery_boundaries.py`：14 项，RecordingPlatform 记录实际 load 调用；
+  覆盖 unknown／pending 重启零加载、正常恢复、权威恢复后加载、同请求上传＋首次移动、先导入再移动、
+  理解失败仍保留导入原件，以及两条确认路径下合法 JSON 中资源／关节／连接关节／自定义引用篡改拒绝。
+- 本地 Python 3.11／3.12：各 **631 passed，0 skipped**（含已安装 final_models）；没有运行物理执行。
+- 独立 wheel 仓库外安装 smoke **passed**（Replay，未调用真实 Qwen）：
+  `/tmp/brain-review-wheel-20261018/robot_agent_brain-0.1.0-py3-none-any.whl`，
+  SHA256 `375295033785c212de41acccac7267f151eca3f043d3c5c70c6c791a540f6168`；
+  产物 `/tmp/brain-wheel-smoke-d0p3ig_p`。`git diff --check` 通过。
+
+上一轮远程 CI 已核实：[run 39121186272](https://github.com/haotian2410/robot_agent_brain/actions/runs/39121186272)，
+`test (3.11)`、`test (3.12)` 均 success。附件复审提供的日志计数为各 **608 passed、1 skipped**，
+跳过缺少 final_models 的集成模块；API 核实的是任务状态，日志计数引用附件，不冒充本轮 CI。
+上一轮本地 **617 passed** 与其不矛盾，外部集成模块在本地展开为 9 个测试。
+
 ## 2026-10-16 审计整改交付（当前结果）
 
-本轮基线为 `f41b66a792ee79ee26f9fb0371033a6ee8b42bdb`。以下改动在工作区，
-尚未 commit、未 push，没有新的提交 SHA 或本轮远程 CI 结果。
+该轮基线为 `f41b66a792ee79ee26f9fb0371033a6ee8b42bdb`，后已提交并推送为 `bfe03b9`，远程 CI 成功，见上。
 按 A→B→C→D→E→F 先补失败用例再修复。保留单臂 v2、双臂 v3 单文件以及两个 nullable arm 槽。
 没有实现 pour；明确倒水请求即使被模型误转为 grasp 也拒绝。
 
@@ -44,7 +71,7 @@
 
 - Python 3.11／3.12 全量 pytest：各 **617 passed，0 skipped**。本机装有 final_models，含 9 项外部资产集成测试。
 - 附件审计记录的基线远程 CI 是各 **545 passed、1 skipped**（外部 final_models 未安装），不是 554；
-  本轮没有 push，不能声称新远程 CI 通过。现有 CI 仍跑 3.11／3.12 全量与 wheel，外部缺包 skip 保留。
+  后续 `bfe03b9` 远程结果单独记录在上方。现有 CI 仍跑 3.11／3.12 全量与 wheel，外部缺包 skip 保留。
 - 独立 wheel 在仓库外 `/tmp` 安装运行，`PYTHONPATH` 已移除，smoke passed（Replay，不是 Qwen）。
   安装模块：`/tmp/brain-audit-wheel-0xAcGU/env/lib/python3.12/site-packages/robot_agent_brain/__init__.py`。
   产物：`/tmp/brain-wheel-smoke-_1c1uzot`。
@@ -84,7 +111,7 @@ original SHA 始终为 `34cd7de0f12914d05a90de90975ddb2e8c5401b84877cad2ad28453b
 4. 唯一 command ID、逐臂反馈、版本化完整 scene＋known 状态、可信来源认证和平台 ACK／超时约定。
 5. 倒水、共同抓取／交接、自由行为树均未实现；等待新版 skill.md，不添加假参数。
 
-用户 `.idea/`、`robot_agent.md`、资产和私有配置未修改；不提交或推送。
+用户 `.idea/`、`robot_agent.md`、资产和私有配置未修改、未随 `bfe03b9` 提交。
 完整工作区清单与统计见同目录 `dual_arm_audit_worktree.txt`。
 
 ---

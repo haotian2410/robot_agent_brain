@@ -111,7 +111,22 @@ class BrainApplication:
             session.bind_imported_profile(profile)
         elif self.config.scene_platform_object_ids is not None:
             session.platform_object_ids = set(self.config.scene_platform_object_ids)
+        # The acknowledged import, not its first edited successor, is original.
+        # Persist first so a later understanding/publication failure cannot lose
+        # the platform-confirmed import; capture_once keeps earlier originals.
+        self._save_session(session_id)
+        self._capture_original(session_id, request_id="import-" + uuid.uuid4().hex, source="uploaded")
+        self._save_session(session_id)
         return session.scene
+
+    def _capture_original(self, session_id, *, request_id, source):
+        from .session.original_scene_store import OriginalSceneStore
+        session = self.sessions[session_id]
+        if session.scene is not None and session.original_scene_manifest is None:
+            session.original_scene_manifest = OriginalSceneStore(self.store.directory(session_id)).capture_once(
+                session.scene, platform_object_ids=session.platform_object_ids, request_id=request_id,
+                source=source, robot_setup=session.robot_setup, config_fingerprint=self.config_fingerprint,
+                profile_object_map=session.profile_object_map)
 
     def handle(self, instruction, *, session_id=None, scene_path=None):
         session_id = session_id or uuid.uuid4().hex
@@ -361,11 +376,7 @@ class BrainApplication:
             # A later crash must not cause the next turn to invent a new scene.
             self._save_session(session_id)
             if report.run_status == "success" and session.scene is not None and session.original_scene_manifest is None:
-                from .session.original_scene_store import OriginalSceneStore
-                session.original_scene_manifest = OriginalSceneStore(self.store.directory(session_id)).capture_once(
-                    session.scene, platform_object_ids=session.platform_object_ids, request_id=request_id,
-                    source=report.scene_source, robot_setup=session.robot_setup, config_fingerprint=self.config_fingerprint,
-                    profile_object_map=session.profile_object_map)
+                self._capture_original(session_id, request_id=request_id, source=report.scene_source)
             self._save_session(session_id)
             publication_record["snapshot_id"] = session.original_scene_manifest.snapshot_id if session.original_scene_manifest else None
             publication.write(publication_record)

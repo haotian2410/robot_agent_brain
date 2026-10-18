@@ -320,7 +320,7 @@ class BrainSession:
         The adapter must authenticate its measurements. This in-process API
         validates provenance/versions but is not an authentication boundary.
         """
-        from ..contracts.robot_setup import RobotRuntimeState, RobotSetupRequest
+        from ..contracts.robot_setup import RobotRuntimeState
         if confirmed_scene is None:
             raise ValueError("authoritative_scene_required")
         if source not in {"external", "simulated"}:
@@ -337,23 +337,16 @@ class BrainSession:
             raise ValueError("execution_robot_setup_mismatch")
         scene = self.require_scene()
         candidate = SceneConfig.model_validate(confirmed_scene.model_dump() if hasattr(confirmed_scene, "model_dump") else confirmed_scene)
-        if (candidate.scene_id != scene.scene_id or candidate.scene_id != context.scene_id
-                or candidate.scene_version <= scene.scene_version
-                or candidate.scene_version < context.minimum_scene_version):
+        if candidate.scene_id != context.scene_id or candidate.scene_version < context.minimum_scene_version:
             raise ValueError("execution_recovery_scene_mismatch")
+        self._validate_execution_scene(candidate, kind="recovery")
         known = {o.object_id_in_scene for o in candidate.objects}
-        if known != {o.object_id_in_scene for o in scene.objects}:
-            raise ValueError("execution_recovery_object_set_changed")
         state = RobotRuntimeState.model_validate(confirmed_arms.model_dump() if hasattr(confirmed_arms, "model_dump") else confirmed_arms)
         if set(state.arms) != set(self.robot_setup.arms) or any(not a.state_known for a in state.arms.values()):
             raise ValueError("robot_runtime_state_unknown")
         held = [a.holding_object for a in state.arms.values() if a.holding_object is not None]
         if not set(held) <= known or len(held) != len(set(held)):
             raise ValueError("robot_state_confirmation_holding_invalid")
-        if self.robot_profiles is None:
-            raise ValueError("robot_setup_profile_not_registered")
-        profile = self.robot_profiles.resolve(RobotSetupRequest(mode="dual", profile_id=self.robot_setup.profile_id))
-        profile.validate_scene(candidate, self.robot_setup)
         manager = self._candidate_manager(candidate)
         # Once platform I/O begins, a timeout may mean it accepted the load.
         # Keep provenance and unknown state for retry; never claim rollback.
@@ -541,6 +534,27 @@ class BrainSession:
         self.pending_commands = None
         return feedback.status
 
+    def _validate_execution_scene(self, candidate, *, kind):
+        """Validate authoritative snapshots identically before any platform I/O."""
+        from ..contracts.robot_setup import RobotSetupRequest
+        scene = self.require_scene()
+        if candidate.scene_id != scene.scene_id or candidate.scene_version <= scene.scene_version:
+            raise ValueError(f"execution_{kind}_scene_mismatch")
+        if {o.object_id_in_scene for o in candidate.objects} != {o.object_id_in_scene for o in scene.objects}:
+            raise ValueError(f"execution_{kind}_object_set_changed")
+        if self.robot_profiles is None or self.robot_setup is None:
+            raise ValueError("robot_setup_profile_not_registered")
+        profile = self.robot_profiles.resolve(RobotSetupRequest(mode=self.robot_setup.mode,
+            profile_id=self.robot_setup.profile_id))
+        profile.validate_scene(candidate, self.robot_setup)
+        from ..scene.component_access import SceneIndex
+        actual, template = SceneIndex(candidate), SceneIndex(profile.template)
+        for side, arm in self.robot_setup.arms.items():
+            expected_id = profile.setup.arms[side].robot_object_id
+            if actual.robot_driver(arm.robot_object_id) != template.robot_driver(expected_id):
+                raise ValueError("robot_profile_driver_configuration_mismatch")
+        self.reference_registry.validate_scene(candidate)
+
     def _apply_dual_feedback(self, feedback, *, confirmed_scene=None, feedback_source="external"):
         from ..contracts.commands import parse_commands
         from ..contracts.feedback_v3 import ExecutionFeedbackV3
@@ -556,10 +570,8 @@ class BrainSession:
             raise ValueError("execution_feedback_source_invalid")
         scene = self.require_scene()
         candidate = SceneConfig.model_validate(confirmed_scene.model_dump()) if confirmed_scene is not None else None
-        if candidate is not None and (candidate.scene_id != scene.scene_id or candidate.scene_version <= scene.scene_version):
-            raise ValueError("execution_feedback_scene_mismatch")
-        if candidate is not None and {o.object_id_in_scene for o in candidate.objects} != {o.object_id_in_scene for o in scene.objects}:
-            raise ValueError("execution_feedback_object_set_changed")
+        if candidate is not None:
+            self._validate_execution_scene(candidate, kind="feedback")
         known = {o.object_id_in_scene for o in (candidate or scene).objects}
         if any(a.holding_object is not None and a.holding_object not in known for a in feedback.arms.values()):
             raise ValueError("execution_feedback_holding_unknown")
