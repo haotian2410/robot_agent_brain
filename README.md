@@ -17,6 +17,8 @@ simulation, runtime playback, or execution verification.
 
 - [实现范围、配置字段与验证记录](docs/dual_arm_implementation_status.md)
 - [真实 Qwen 双臂 demo 与产物目录](demo/dual_arm/README.md)
+- [WebEditor 首期部署、AgentService 接口和前端协作契约](docs/webeditor_integration.md)
+- [WebEditor 测试与实际联调状态](demo/webeditor/README.md)（仅生成计划，不执行机器人）
 
 双臂需要显式注册真实机器人映射；演示中的 `DEMO_ONLY` 接口不能用于 Control。
 原始场景首次成功且含任务物体时保存为会话目录下的 `original_scene.json`，不随

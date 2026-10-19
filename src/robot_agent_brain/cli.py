@@ -35,12 +35,22 @@ def parser():
         cmd.add_argument("--json", action="store_true")
     schema = commands.add_parser("schemas")
     schema.add_argument("--output-dir", default="var/schemas")
+    serve = commands.add_parser("serve", help="Local WebEditor Agent; plans only, no Control")
+    serve.add_argument("--config", required=True)
+    serve.add_argument("--port", type=int, default=8500)
+    serve.add_argument("--gateway-url", default="http://127.0.0.1:8099")
+    serve.add_argument("--ols-url", default="http://127.0.0.1:8000")
+    serve.add_argument("--joint-inventory", required=True)
+    serve.add_argument("--camera-id", type=int, default=5)
     return root
 
 
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
+        if args.command == "serve":
+            from .web.service import serve
+            return serve(args)
         if args.command == "schemas":
             from .contracts.commands_v3 import CommandsFileV3
             from .contracts.feedback_v3 import ExecutionFeedbackV3

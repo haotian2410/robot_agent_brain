@@ -64,6 +64,8 @@ class BrainConfig(BaseModel):
     allow_scene_reset: bool = False
     output_dir: str = "var/manual-tests"
     vision: bool = False
+    scene_id_bits: Literal[32, 53] = 53
+    editor_scene_manifests: dict[str, list[SceneId]] = Field(default_factory=dict)
     seed: int = 0
     replay_file: str | None = None
     debug: bool = False

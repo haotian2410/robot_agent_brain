@@ -16,6 +16,9 @@ class SceneFileCodec:
                               parse_constant=lambda value: (_ for _ in ()).throw(ValueError("non-finite JSON")))
         except (OSError, UnicodeError, ValueError) as exc:
             raise BrainError("scene_file_invalid", "scene_import", str(exc)) from exc
+        return self.decode(data)
+
+    def decode(self, data):
         if not isinstance(data, dict) or type(data.get("scene_schema_version")) is not int or data["scene_schema_version"] != 1:
             raise BrainError("scene_schema_unsupported", "scene_import", "Expected shared component Scene version 1")
         try:

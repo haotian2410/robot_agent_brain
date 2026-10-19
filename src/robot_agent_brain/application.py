@@ -80,6 +80,7 @@ class BrainApplication:
             from .scene.component_reference_registry import ComponentReferenceRegistry
             session = BrainSession(None, self.pipeline, self.platform_factory(), robot_profiles=self.config.robot_profiles,
                 reference_registry=ComponentReferenceRegistry(self.config.component_reference_rules))
+            session.scene_id_bits = self.config.scene_id_bits
             self.sessions[session_id] = self.store.restore(state, session) if state else session
             from .session.original_scene_store import OriginalSceneStore
             self.sessions[session_id].original_store = OriginalSceneStore(self.store.directory(session_id))
@@ -119,14 +120,48 @@ class BrainApplication:
         self._save_session(session_id)
         return session.scene
 
-    def _capture_original(self, session_id, *, request_id, source):
+    def _capture_original(self, session_id, *, request_id, source, allow_empty=False):
         from .session.original_scene_store import OriginalSceneStore
         session = self.sessions[session_id]
         if session.scene is not None and session.original_scene_manifest is None:
             session.original_scene_manifest = OriginalSceneStore(self.store.directory(session_id)).capture_once(
                 session.scene, platform_object_ids=session.platform_object_ids, request_id=request_id,
                 source=source, robot_setup=session.robot_setup, config_fingerprint=self.config_fingerprint,
-                profile_object_map=session.profile_object_map)
+                profile_object_map=session.profile_object_map, allow_empty=allow_empty)
+
+    def accept_browser_scene(self, session_id, scene, *, platform_object_ids=None):
+        """External editor metadata sync, distinct from execution reconciliation."""
+        with self.store.lock(session_id):
+            session = self.get_session(session_id)
+            candidate = self.codec.decode(scene.model_dump(mode="json") if hasattr(scene, "model_dump") else scene)
+            manifest = platform_object_ids if platform_object_ids is not None else self.config.scene_platform_object_ids
+            if manifest is None:
+                raise ValueError("browser_platform_manifest_required")
+            changed = session.accept_browser_scene(candidate, platform_object_ids=manifest)
+            self._save_session(session_id)
+            self._capture_original(session_id, request_id="browser-import-" + uuid.uuid4().hex, source="uploaded", allow_empty=True)
+            self._save_session(session_id)
+            return changed
+
+    def _editor_defaults(self, session):
+        """Allow implicit additions only on the explicitly configured editor table.
+
+        This does not apply the default workspace to arbitrary imported scenes.
+        """
+        if not self.config.editor_scene_manifests or self.bootstrapper.template_scene is None or session.scene is None:
+            return None
+        from .scene.component_access import SceneIndex
+        from .scene.scene_graph import world_transform
+        identifier = self.defaults.table_object_id
+        try:
+            actual, template = SceneIndex(session.scene), SceneIndex(self.bootstrapper.template_scene)
+            if (identifier in (session.platform_object_ids or set())
+                    and actual.metadata_ref_properties(identifier) == template.metadata_ref_properties(identifier)
+                    and world_transform(session.scene, identifier) == world_transform(self.bootstrapper.template_scene, identifier)):
+                return self.defaults
+        except (LookupError, ValueError):
+            pass
+        return None
 
     def handle(self, instruction, *, session_id=None, scene_path=None):
         session_id = session_id or uuid.uuid4().hex
@@ -244,14 +279,14 @@ class BrainApplication:
                     if turn.turn_kind == "robot_config":
                         if initial_profile is None:
                             raise ValueError("robot_setup_profile_not_registered")
-                        template = active_bootstrapper.template_scene.model_copy(update={"scene_id": randbits(53), "scene_version": 1})
+                        template = active_bootstrapper.template_scene.model_copy(update={"scene_id": randbits(self.config.scene_id_bits), "scene_version": 1})
                         session.initialize_scene(template)
                         session.bind_imported_profile(initial_profile)
                         report.scene_created = True
                         report.scene_commit_status = "committed"
                         initial = None
                     else:
-                        initial = active_bootstrapper.prepare(turn, scene_id=randbits(53))
+                        initial = active_bootstrapper.prepare(turn, scene_id=randbits(self.config.scene_id_bits))
                     report.scene_source = "generated"
                     report.assumptions = initial.assumptions if initial is not None else []
                     if turn.turn_kind == "robot_task":
@@ -271,7 +306,7 @@ class BrainApplication:
                     report.scene_commit_status = "committed"
                 else:
                     result = session.process_turn(request_id, turn, bindings_override=bindings,
-                                                  edit_defaults=self.defaults if report.scene_created else None)
+                                                  edit_defaults=self.defaults if report.scene_created else self._editor_defaults(session))
                 report.run_status = "success"
                 if result.robot_setup_was_changed:
                     report.scene_commit_status = "committed"

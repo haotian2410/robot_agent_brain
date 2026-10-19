@@ -1,0 +1,30 @@
+{
+  "provider": "qwen",
+  "planner": "qwen",
+  "base_url": "http://127.0.0.1:8080/v1",
+  "model": "/home/cscvlab/models/qwen3.8-27b/Qwen3.8-27B-UD-Q4_K_M.gguf",
+  "asset_library_root": "../../webeditor_runtime/ObjectLibraryServer-1.0.4-rel/data",
+  "asset_geometry_cache": "../var/webeditor/geometry_cache.json",
+  "asset_category_index": "webeditor_categories.json",
+  "semantic_aliases": "webeditor_aliases.json",
+  "defaults": "final_models_defaults.json",
+  "library_ref_prefix": "$LIBRARY_SERVER/",
+  "default_scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.4-rel/data/scenes/1/ur5e_table_empty.json",
+  "default_table_metadata_ref": "$LIBRARY_SERVER/29",
+  "default_robot_metadata_ref": "$LIBRARY_SERVER/1",
+  "robot": "ur5e",
+  "scene_platform_object_ids": [0,1,2,3,4,5,6,7],
+  "editor_scene_manifests": {
+    "ur5e_table_empty": [0,1,2,3,4,5,6,7],
+    "ur5e_table_apple": [0,1,2,3,4,5,6,8],
+    "ur5e_table_sorting": [0,1,2,3,4,5,6,14],
+    "ur5e_table_cabinet": [0,1,2,3,4,5,6,10],
+    "ur5e_table_twist": [0,1,2,3,4,5,6,7],
+    "ur5e_table_push_pull": [0,1,2,3,4,5,6,7]
+  },
+  "scene_id_bits": 32,
+  "vision": true,
+  "debug": true,
+  "allow_scene_reset": true,
+  "output_dir": "var/webeditor/tasks"
+}

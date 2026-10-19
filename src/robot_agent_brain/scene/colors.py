@@ -42,7 +42,7 @@ class ColorEvidenceResolver:
     def matches(self, value, obj, index):
         requested = ColorResolver.resolve(value)
         renderer = index.component(obj.object_id_in_scene, "MeshRenderer")
-        if renderer is not None:
+        if renderer is not None and renderer.properties.get("forceOverrideColor") is not None:
             actual = ColorResolver.resolve(renderer.properties["forceOverrideColor"])
             return actual == requested if len(value.strip()) == 9 and value.strip().startswith("#") else actual[:7] == requested[:7]
         reference = index.metadata_ref(obj.object_id_in_scene)

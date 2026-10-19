@@ -8,6 +8,7 @@ class BrainSession:
     """Local semantic state commits only after platform acknowledgement."""
     def __init__(self, scene, pipeline, platform, *, robot_profiles=None, reference_registry=None):
         self.scene_manager = None
+        self.scene_id_bits = 53
         self.seen_scene_object_ids = set()
         self.next_scene_object_id = 0
         self.pipeline, self.platform = pipeline, platform
@@ -72,6 +73,7 @@ class BrainSession:
         self.recovery_context = None
 
     def _candidate_manager(self, scene):
+        self._validate_identity_range(scene)
         current = {obj.object_id_in_scene for obj in self.scene.objects} if self.scene else set()
         incoming = {obj.object_id_in_scene for obj in scene.objects}
         retired = self.seen_scene_object_ids - current
@@ -79,6 +81,66 @@ class BrainSession:
             raise ValueError("scene_object_id_reused")
         return SceneManager(scene, seen_scene_object_ids=self.seen_scene_object_ids,
                             next_scene_object_id=self.next_scene_object_id)
+
+    def _validate_identity_range(self, scene):
+        limit = 2 ** self.scene_id_bits
+        if scene.scene_id >= limit or scene.scene_version >= limit or any(o.object_id_in_scene >= limit for o in scene.objects):
+            raise ValueError("scene_identity_range_unsupported")
+
+    def accept_browser_scene(self, candidate, *, platform_object_ids):
+        """Accept an editor snapshot, never execute/reset or confirm robot state."""
+        from ..web.protocol import digest
+        from ..scene.component_access import SceneIndex
+        if self.pending_execution_request is not None or self.sync_state != "synchronized":
+            raise ValueError("browser_sync_execution_state_blocked")
+        if self.holding_object is not None or (self.arm_states and any(
+                not a.state_known or a.holding_object is not None for a in self.arm_states.arms.values())):
+            raise ValueError("browser_sync_robot_not_idle")
+        self.reference_registry.validate_scene(candidate)
+        manager = self._candidate_manager(candidate)
+        known = {o.object_id_in_scene for o in candidate.objects}
+        if not set(platform_object_ids) <= known:
+            raise ValueError("scene_platform_manifest_invalid")
+        current = self.scene
+        changed = current is None or digest(current) != digest(candidate)
+        if current is not None:
+            if candidate.scene_id != current.scene_id:
+                raise ValueError("browser_new_session_required")
+            if candidate.scene_version < current.scene_version or (changed and candidate.scene_version == current.scene_version):
+                raise ValueError("browser_scene_version_conflict")
+            old_index, new_index = SceneIndex(current), SceneIndex(candidate)
+            for obj in current.objects:
+                identifier = obj.object_id_in_scene
+                if identifier in known and old_index.metadata_ref_properties(identifier) != new_index.metadata_ref_properties(identifier):
+                    raise ValueError("browser_asset_replacement_requires_new_id")
+                if identifier in (self.platform_object_ids or set()):
+                    if identifier not in known:
+                        raise ValueError("browser_platform_rebind_required")
+                    def static(value):
+                        data = value.model_dump(mode="json")
+                        for c in data["components"]:
+                            if c["component_type"] == "RobotDriver":
+                                c["properties"].pop("now_joint_positions_rad", None)
+                        return data
+                    if static(obj) != static(new_index.object(identifier)):
+                        raise ValueError("browser_platform_rebind_required")
+            old_ids = {o.object_id_in_scene for o in current.objects}
+            if any(i < self.next_scene_object_id for i in known - old_ids):
+                raise ValueError("scene_object_id_reused")
+            if any(SceneIndex(candidate).robot_driver(i) is not None for i in known - old_ids):
+                raise ValueError("browser_platform_rebind_required")
+        self._check_snapshot(self.platform.adopt(candidate), candidate)
+        manager.next_scene_object_id = max(manager.next_scene_object_id, self.platform.next_object_id)
+        self._commit_manager(manager)
+        if current is None:
+            self.platform_object_ids = set(platform_object_ids)
+        if changed:
+            self.dialogue.last_entity_ids = [i for i in self.dialogue.last_entity_ids if i in known]
+            if self.dialogue.last_entity_id not in known:
+                self.dialogue.last_entity_id = None
+            self.exported_commands.clear()
+            self.last_exported_request = self.last_request_id = None
+        return changed
 
     def _commit_manager(self, manager):
         self.scene_manager = manager
@@ -101,6 +163,7 @@ class BrainSession:
             self.arm_states.require_idle(self.robot_setup)
         candidate = self._candidate_manager(self.require_scene())
         candidate_scene = candidate.apply_patch(patch)
+        self._validate_identity_range(candidate_scene)
         try:
             snapshot = self.platform.apply_patch(patch)
         except Exception:
@@ -388,9 +451,9 @@ class BrainSession:
             raise ValueError("original_scene_unavailable")
         original, manifest = original_store.load(self.original_scene_manifest)
         edited = SceneConfig.model_validate(transform(original.model_copy(deep=True)).model_dump())
-        identifier = randbits(53)
+        identifier = randbits(self.scene_id_bits)
         while identifier in {original.scene_id, self.require_scene().scene_id}:
-            identifier = randbits(53)
+            identifier = randbits(self.scene_id_bits)
         remapped = remap_scene(edited, new_scene_id=identifier, next_object_id=self.next_scene_object_id,
                               reference_registry=self.reference_registry,
                                robot_setup=manifest.robot_setup)
@@ -551,7 +614,7 @@ class BrainSession:
         actual, template = SceneIndex(candidate), SceneIndex(profile.template)
         for side, arm in self.robot_setup.arms.items():
             expected_id = profile.setup.arms[side].robot_object_id
-            if actual.robot_driver(arm.robot_object_id) != template.robot_driver(expected_id):
+            if actual.robot_driver(arm.robot_object_id).deployment_configuration() != template.robot_driver(expected_id).deployment_configuration():
                 raise ValueError("robot_profile_driver_configuration_mismatch")
         self.reference_registry.validate_scene(candidate)
 

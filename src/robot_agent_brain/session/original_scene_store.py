@@ -19,7 +19,7 @@ class OriginalSceneManifest(BaseModel):
     scene_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     source_request_id: str
     source: str
-    task_object_ids: list[SceneId] = Field(min_length=1)
+    task_object_ids: list[SceneId]
     platform_object_ids: list[SceneId]
     robot_setup: RobotSetup | None = None
     profile_object_map: dict[str, SceneId] | None = None
@@ -95,7 +95,7 @@ class OriginalSceneStore:
             if not path.exists():
                 self._write_once(path, payload)
 
-    def capture_once(self, scene, *, platform_object_ids, request_id, source, robot_setup=None, config_fingerprint=None, profile_object_map=None):
+    def capture_once(self, scene, *, platform_object_ids, request_id, source, robot_setup=None, config_fingerprint=None, profile_object_map=None, allow_empty=False):
         paths = [self.directory / name for name in ("original_scene.json", "original_scene_manifest.json")]
         recovery_paths = [*paths, self.directory / "original_scene_prepare.json", self.directory / "original_scene_commit.json"]
         if any(p.exists() or p.is_symlink() for p in recovery_paths):
@@ -108,7 +108,7 @@ class OriginalSceneStore:
         if not set(platform_object_ids) <= ids:
             raise ValueError("original_scene_platform_manifest_invalid")
         task_ids = ids - set(platform_object_ids)
-        if not task_ids:
+        if not task_ids and not allow_empty:
             return None
         payload = json.dumps(SceneFileCodec.payload(scene), ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False).encode()
         manifest = OriginalSceneManifest(snapshot_id=uuid.uuid4().hex, scene_sha256=hashlib.sha256(payload).hexdigest(),

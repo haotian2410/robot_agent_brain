@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import importlib.util
 from importlib.resources import files
 from pathlib import Path
 
@@ -43,6 +44,16 @@ def main():
         assert result.returncode == 0, (result.returncode, result.stdout, result.stderr)
         return result.stdout
     assert "run" in run("--help")
+    assert "camera-id" in run("serve", "--help")
+    web_tested = importlib.util.find_spec('aiohttp') is not None and importlib.util.find_spec('rfc8785') is not None
+    if web_tested:
+        from robot_agent_brain.web.service import AgentService, create_http_app
+        from robot_agent_brain.web.protocol import digest
+        from robot_agent_brain.web.task_store import TaskStore
+        assert digest({'x':1.0}) == digest({'x':1})
+        service = AgentService(BrainConfig(model='wheel-smoke-no-network',scene_id_bits=32,output_dir=str(directory/'web')))
+        assert any(route.resource.canonical=='/startTask' for route in create_http_app(service).router.routes())
+        service.tasks.close()
     run("schemas", "--output-dir", str(directory / "schemas"))
     schema = json.loads((directory / "schemas" / "commands.schema.json").read_text())
     assert schema == CommandsFile.model_json_schema()
@@ -104,7 +115,7 @@ def main():
     index = SceneIndex(SceneConfig.model_validate(edited))
     assert sum(index.semantic(o.object_id_in_scene).semantic_name == "banana" for o in index.semantic_objects()) == 1
     print(json.dumps({"wheel_smoke":"passed", "installed_module":str(installed), "artifacts":str(directory),
-                      "provider":"replay", "real_qwen_tested":False}, ensure_ascii=False))
+                      "provider":"replay", "real_qwen_tested":False,"web_import_and_routes_tested":web_tested}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

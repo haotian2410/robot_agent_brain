@@ -1,0 +1,9 @@
+{
+  "苹果":"apple", "香蕉":"banana", "棒球":"baseball", "篮子":"basket",
+  "抽屉":"drawer", "柜子":"cabinet", "桌子":"table", "桌面":"table", "work_table":"table",
+  "杯子":"mug", "马克杯":"mug", "螺丝刀":"screwdriver", "魔方":"rubiks_cube", "rubikscube":"rubiks_cube",
+  "糖盒":"sugar_box", "sugarbox":"sugar_box", "托盘":"tray", "马克笔":"marker", "笔":"pen",
+  "试管":"test_tube", "试管架":"test_tube_rack", "铃铛":"school_bell", "茶几":"coffee_table",
+  "微波炉":"microwave", "瓶子":"bottle", "按钮":"button", "罐子":"can", "玩偶":"doll",
+  "胶瓶":"gum_bottle", "护肤霜":"cream"
+}

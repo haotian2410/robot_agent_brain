@@ -46,7 +46,7 @@ class SemanticProperties(StrictModel):
 
 
 class MeshRendererProperties(StrictModel):
-    forceOverrideColor: str = Field(pattern=r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")
+    forceOverrideColor: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")
 
 
 class LightProperties(StrictModel):
@@ -73,6 +73,7 @@ class RobotDriverProperties(StrictModel):
     joint_sequence: list[str] = Field(min_length=1)
     joint_limits: dict[str, tuple[float, float]] | None = None
     initial_joint_positions_rad: dict[str, float] | None = None
+    now_joint_positions_rad: dict[str, float] | None = None
     available_connect_joints: list[str] | None = None
 
     @model_validator(mode="after")
@@ -87,9 +88,17 @@ class RobotDriverProperties(StrictModel):
             raise ValueError("robot_joint_limits_invalid")
         if self.initial_joint_positions_rad is not None and not set(self.initial_joint_positions_rad) <= set(self.joint_sequence):
             raise ValueError("robot_initial_joint_invalid")
-        if self.available_connect_joints is not None and not set(self.available_connect_joints) <= set(self.joint_sequence):
+        if self.now_joint_positions_rad is not None and not set(self.now_joint_positions_rad) <= set(self.joint_sequence):
+            raise ValueError("robot_current_joint_invalid")
+        # Fixed mounting joints need not be actuated. Asset-aware validation
+        # checks these names against the complete URDF inventory offline.
+        if self.available_connect_joints is not None and (len(set(self.available_connect_joints)) != len(self.available_connect_joints)
+                or any(not name for name in self.available_connect_joints)):
             raise ValueError("robot_connect_joint_invalid")
         return self
+
+    def deployment_configuration(self):
+        return self.model_dump(exclude={"now_joint_positions_rad"})
 
 
 class RobotAttachmentProperties(StrictModel):

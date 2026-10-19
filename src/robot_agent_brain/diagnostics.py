@@ -20,6 +20,8 @@ def configuration_summary(config, assets, defaults):
     return {"provider":config.provider, "model":config.model, "base_url":endpoint,
             "scene_scale_policy": config.scale_policy().model_dump(mode="json"),
             "color_policy_version": COLOR_POLICY_VERSION,
+            "scene_id_bits": config.scene_id_bits,
+            "editor_scene_manifests": config.editor_scene_manifests,
             "planner":config.planner, "planner_max_completion_tokens":config.planner_max_completion_tokens,
             "skill_planning_prompt_sha256":fingerprint(SKILL_PLANNING_PROMPT),
             "dual_skill_planning_prompt_sha256": fingerprint(DUAL_SKILL_PLANNING_PROMPT),

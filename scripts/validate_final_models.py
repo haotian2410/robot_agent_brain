@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from final_models_geometry import measured, contained
 
@@ -66,20 +67,34 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True)
     parser.add_argument("--cache", default="config/final_models_geometry_cache.json")
+    parser.add_argument("--manifest", help="Version-specific expected model/robot/scene ID lists")
+    parser.add_argument("--joint-cache", help="External output for complete URDF joint inventory")
     args = parser.parse_args()
     root = Path(args.root).resolve()
     output = Path(args.cache).resolve()
-    if output.is_relative_to(root):
+    joint_output = Path(args.joint_cache).resolve() if args.joint_cache else None
+    if output.is_relative_to(root) or (joint_output is not None and joint_output.is_relative_to(root)):
         raise ValueError("asset_derived_file_inside_library")
     before = tree_hash(root)
     models, robots = read_index(root, "model"), read_index(root, "robot")
     errors = []
     cache = {**metadata_cache(root, "model", models, errors), **metadata_cache(root, "robot", robots, errors)}
     scenes = json.loads((root / "scenes/scene_index.json").read_text())
-    if (set(models["by_id"]) != {str(i) for i in range(1, 30)}
-            or set(robots["by_id"]) != {str(i) for i in range(1, 15)}
-            or len(scenes) != 5 or {item["id"] for item in scenes} != set(range(1, 6))):
+    expected = json.loads(Path(args.manifest).read_text()) if args.manifest else {
+        "model_ids": list(range(1,30)), "robot_ids": list(range(1,15)), "scene_ids": list(range(1,6))}
+    if (set(models["by_id"]) != {str(i) for i in expected["model_ids"]}
+            or set(robots["by_id"]) != {str(i) for i in expected["robot_ids"]}
+            or len(scenes) != len(expected["scene_ids"]) or {item["id"] for item in scenes} != set(expected["scene_ids"])):
         raise ValueError("final_models_coverage_invalid")
+    joints = {}
+    for identifier, name in robots["by_id"].items():
+        directory = root / "robots" / identifier
+        files = json.loads((directory / f"{name}_files.json").read_text())
+        entrance = contained(root, directory, files["path"])
+        if entrance.suffix.lower() == ".urdf":
+            document = ET.parse(entrance).getroot()
+            joints[f"robot:{identifier}"] = {"joints": sorted(n.attrib["name"] for n in document.findall("joint")),
+                "links": sorted(n.attrib["name"] for n in document.findall("link"))}
     for item in scenes:
         path = contained(root, root / "scenes", f"{item['id']}/{item['name']}.json")
         scene = json.loads(path.read_text())
@@ -98,7 +113,10 @@ def main():
         raise RuntimeError("final_models_tree_changed")
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(cache, ensure_ascii=False, indent=2) + "\n")
-    print(json.dumps({"valid": not errors, "errors": sorted(set(errors)), "models": 29, "robots": 14, "scenes": 5,
+    if args.joint_cache:
+        joint_output.parent.mkdir(parents=True, exist_ok=True)
+        joint_output.write_text(json.dumps(joints, indent=2) + "\n")
+    print(json.dumps({"valid": not errors, "errors": sorted(set(errors)), "models": len(models["by_id"]), "robots": len(robots["by_id"]), "scenes": len(scenes),
                       "asset_tree_sha256": before, "cache": str(output)}))
     return 2 if errors else 0
 

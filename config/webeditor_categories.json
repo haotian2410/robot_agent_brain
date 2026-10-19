@@ -1,0 +1,11 @@
+{
+  "model:1":"fruit", "model:2":"fruit", "model:3":"ball",
+  "model:4":"container", "model:5":"tool", "model:6":"tool", "model:7":"tool",
+  "model:8":"container", "model:9":"container", "model:10":"tool", "model:11":"container",
+  "model:12":"container", "model:13":"tool", "model:14":"container", "model:15":"toy",
+  "model:16":"object", "model:17":"container", "model:18":"surface", "model:19":"container",
+  "model:20":"container", "model:21":"container", "model:22":"toy", "model:23":"container",
+  "model:24":"container", "model:25":"furniture", "model:26":"furniture", "model:27":"furniture",
+  "model:28":"container", "model:29":"surface", "model:30":"appliance", "model:31":"appliance",
+  "model:32":"container", "model:33":"button", "model:34":"container"
+}

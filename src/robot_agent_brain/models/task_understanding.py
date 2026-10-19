@@ -14,8 +14,10 @@ from ..contracts.task_intent import Direction, MotionScale, Operation, Placement
 def task_understanding_wire_schema():
     """Require explicit new semantic choices from live models, not old Replay."""
     schema = TaskParseOutput.model_json_schema()
-    schema["required"] = list(dict.fromkeys([*schema.get("required", []), "status", "turn_kind",
-                                            "robot_setup_request", "arm_usage", "hold_constraints"]))
+    # A live constrained decoder must explicitly choose each payload/null. If
+    # optional, it can finish a scene_query without ever emitting scene_query.
+    # Replay/Python defaults remain backward compatible; runtime validation stays strict.
+    schema["required"] = list(schema["properties"])
     return schema
 
 

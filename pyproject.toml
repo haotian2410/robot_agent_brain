@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3,<9"]
+web = ["aiohttp>=3.10,<4", "rfc8785>=0.1,<1"]
 
 [project.scripts]
 robot-brain = "robot_agent_brain.cli:main"

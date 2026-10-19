@@ -195,9 +195,11 @@ class SessionStore:
     @staticmethod
     def restore(state, session):
         if state.scene is not None:
+            session._validate_identity_range(state.scene)
             # A checkpoint is not authoritative evidence of post-execution
             # geometry. Restore gates/metadata without resetting the platform.
-            if state.sync_state == "synchronized" and state.pending_execution_request is None:
+            if (state.sync_state == "synchronized" and state.pending_execution_request is None
+                    and not getattr(session.platform, "restore_read_only", False)):
                 session.initialize_scene(state.scene)
             session._commit_manager(SceneManager(state.scene,
                 seen_scene_object_ids=state.seen_scene_object_ids, next_scene_object_id=state.next_scene_object_id))
