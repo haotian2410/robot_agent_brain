@@ -11,6 +11,19 @@ Brain 已增加协议兼容、持久化 AgentService、严格 Gateway 场景/相
 不修改 dist 压缩 JS，不降级到非原子的 `updateWorld`。
 真实 Qwen/OLS、测试替身、真实浏览器的验证分别记录在 `demo/webeditor/VALIDATION.md`。
 
+## 本地 WebEditor 联调记录（2026-10-25）
+
+上述旧版部署说明与当前工作区的联调配置不一致。此工作区使用 `F:\web-frontend` 的 Gateway 和前端、
+`F:\ObjectLibraryServer`、`F:\QwenMock` 与本仓库 Brain；Brain 使用 `config/webeditor_local.json`，
+监听 `127.0.0.1:8500`，通过 `http://127.0.0.1:8080/v1` 访问固定响应的 QwenMock。
+前端仓库中的 `tools/restart_stack.ps1` 负责每轮停止四服务、备份旧运行态、启动服务并等待 OLS、
+QwenMock、Gateway、Brain 健康检查。联调流程和已验证浏览器行为以
+`F:\web-frontend\docs\前端和AgentBrain联调流程.md` 为准。
+
+Brain 的首次 OLS 目录校验在 HTTP 服务开始接受请求前完成。后续目录刷新在后台运行，`/health` 读取缓存，
+不在 Gateway 的三秒上游时限内扫描 OLS。冷缓存的直接探针会报告 `assets=checking` 并发起后台刷新，
+不会同步等待目录读取。
+
 ## 本机部署
 
 | 服务 | 地址 | 说明 |
