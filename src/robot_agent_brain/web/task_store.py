@@ -1,11 +1,11 @@
 """Durable integer task IDs, idempotency and one active editor binding."""
 import json
-import fcntl
 import sqlite3
 import threading
 import time
 import uuid
 from pathlib import Path
+from ..filelock import lock_exclusive
 from .protocol import digest
 
 DEFAULT_STATES = ("已创建", "已进入队列", "进行中", "任务完成", "任务失败")
@@ -14,9 +14,9 @@ DEFAULT_STATES = ("已创建", "已进入队列", "进行中", "任务完成", "
 class TaskStore:
     def __init__(self, path):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.process_lock = open(str(path) + ".lock", "a+")
+        self.process_lock = open(str(path) + ".lock", "a+b")
         try:
-            fcntl.flock(self.process_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_exclusive(self.process_lock.fileno())
         except BlockingIOError:
             self.process_lock.close()
             raise ValueError("agent_service_already_running") from None

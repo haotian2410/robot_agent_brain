@@ -21,8 +21,8 @@ def test_failed_dependency_skips_but_independent_group_continues(tmp_path):
         {"case_id":"skip","session_group":"a","instruction":"pause"},
         {"case_id":"independent","session_group":"b","instruction":"pause",
          "expected":{"turn_kind":"session_control","run_status":"success","absent_artifacts":["commands"],
-                     "assertions":{"executed":False}}}]))
+                     "assertions":{"executed":False}}}]), encoding="utf-8")
     app = BrainApplication(BrainConfig(provider="replay",output_dir=str(tmp_path / "out")),provider=Provider())
     summary, path = run_batch(app, cases)
     assert summary["totals"] == {"passed":1,"failed":1,"skipped":1}
-    assert json.loads(path.read_text()) == summary
+    assert json.loads(path.read_text(encoding="utf-8")) == summary

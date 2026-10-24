@@ -83,9 +83,9 @@ def test_corrupt_state_never_silently_starts_fresh(tmp_path):
     app = application(tmp_path)
     app.handle("two apples", session_id="broken")
     path = tmp_path / "broken" / "session_state.json"
-    payload = json.loads(path.read_text())
+    payload = json.loads(path.read_text(encoding="utf-8"))
     payload["holding_object"] = 999
-    path.write_text(json.dumps(payload))
+    path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ValueError, match="session_state_unknown_object"):
         application(tmp_path).get_session("broken")
     report = application(tmp_path).handle("two apples", session_id="broken")

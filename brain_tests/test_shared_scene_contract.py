@@ -11,7 +11,7 @@ from robot_agent_brain.scene.scene_graph import WorldTransform, world_transform,
 
 
 def fixture():
-    return json.loads((Path(__file__).parent / "fixtures/shared_scene_v1.json").read_text())
+    return json.loads((Path(__file__).parent / "fixtures/shared_scene_v1.json").read_text(encoding="utf-8"))
 
 
 def test_exact_team_fixture_roundtrip_and_public_schema():

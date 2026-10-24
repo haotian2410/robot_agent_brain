@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..contracts.scene import SceneConfig, SceneId, parse_scene_document
 from ..contracts.robot_setup import RobotSetup
 from ..adapters.scene_file_codec import SceneFileCodec
+from ..filelock import sync_directory
 
 
 class OriginalSceneManifest(BaseModel):
@@ -131,11 +132,19 @@ class OriginalSceneStore:
                 stream.write(payload)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.link(temp, path)  # atomic no-replace, including existing symlinks
-            directory_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-            try:
-                os.fsync(directory_fd)
-            finally:
-                os.close(directory_fd)
+            OriginalSceneStore._publish(temp, path)
+            sync_directory(path.parent)
         finally:
             Path(temp).unlink(missing_ok=True)
+
+    @staticmethod
+    def _publish(temp, path):
+        # A hard link is the atomic no-replace publish, including over an existing symlink.
+        # exFAT has no hard links at all, so fall back to a rename; the caller holds the session
+        # lock, and the target check keeps a pre-existing snapshot from being overwritten.
+        try:
+            os.link(temp, path)
+        except OSError as exc:
+            if path.is_symlink() or path.exists():
+                raise ValueError("snapshot_write_once_target_exists") from exc
+            os.replace(temp, path)

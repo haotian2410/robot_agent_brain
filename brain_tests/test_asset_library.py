@@ -16,11 +16,11 @@ def library(tmp_path):
     root = tmp_path / "assets"
     root.mkdir()
     index = {"by_name": {"apple": 1}, "by_id": {"1": "apple"}}
-    (root / "object_index.json").write_text(json.dumps(index))
+    (root / "object_index.json").write_text(json.dumps(index), encoding="utf-8")
     folder = root / "apple"
     folder.mkdir()
-    (folder / "metadata.json").write_text(json.dumps({"semantic_properties": {"object_name": "apple", "object_id": 1}}))
-    (folder / "textured.obj").write_text("v -0.02 -0.03 0\nv 0.05 0.06 0.1\n")
+    (folder / "metadata.json").write_text(json.dumps({"semantic_properties": {"object_name": "apple", "object_id": 1}}), encoding="utf-8")
+    (folder / "textured.obj").write_text("v -0.02 -0.03 0\nv 0.05 0.06 0.1\n", encoding="utf-8")
     cache = tmp_path / "cache.json"
     return root, cache
 
@@ -42,7 +42,7 @@ def test_offline_builder_validator_read_only(tmp_path):
     checked = script("validate_asset_geometry_cache.py", "--asset-root", root, "--cache", cache, "--expected-count", 1)
     assert checked.returncode == 0, checked.stderr
     assert before == {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
-    assert json.loads(cache.read_text())["1"]["local_aabb_min_m"][2] == 0
+    assert json.loads(cache.read_text(encoding="utf-8"))["1"]["local_aabb_min_m"][2] == 0
 
 
 def test_runtime_only_reads_json_and_category_is_optional(tmp_path, monkeypatch):
@@ -73,7 +73,7 @@ def test_category_sidecar_and_scene_independent_asset_lookup(tmp_path):
     root, cache = library(tmp_path)
     script("build_asset_geometry_cache.py", "--asset-root", root, "--output", cache)
     categories = tmp_path / "categories.json"
-    categories.write_text('{"1":"fruit"}')
+    categories.write_text('{"1":"fruit"}', encoding="utf-8")
     adapter = LocalAssetLibraryAdapter(root, cache, categories)
     assert adapter.find_by_category("fruit")[0].metadata_ref == "$LIBRARY_SERVER/1"
     assert adapter.find_by_category("container") == []

@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 from ..adapters.artifact_writer import safe_identifier
+from ..filelock import sync_directory
 
 
 class PublicationStore:
@@ -30,11 +31,7 @@ class PublicationStore:
                 os.fsync(stream.fileno())
             os.replace(temporary, path)
             for directory in (self.directory, self.directory.parent):
-                descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
-                try:
-                    os.fsync(descriptor)
-                finally:
-                    os.close(descriptor)
+                sync_directory(directory)
         finally:
             Path(temporary).unlink(missing_ok=True)
 

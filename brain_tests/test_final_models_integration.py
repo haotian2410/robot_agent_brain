@@ -37,7 +37,7 @@ def test_all_final_models_scenes_load_and_roundtrip():
     codec = SceneFileCodec(config.load_assets())
     for path in sorted((ROOT / "model/final_models/scenes").glob("*/*.json")):
         scene = codec.load(path)
-        assert codec.payload(scene) == json.loads(path.read_text())
+        assert codec.payload(scene) == json.loads(path.read_text(encoding="utf-8"))
 
 
 def test_final_models_template_bootstrap_preserves_platform_and_filters_variant():
@@ -74,15 +74,15 @@ def test_final_models_template_bootstrap_preserves_platform_and_filters_variant(
 def test_scene_import_missing_or_wrong_type_fails(tmp_path):
     config = final_config()
     codec = SceneFileCodec(config.load_assets())
-    raw = json.loads(Path(config.default_scene).read_text())
+    raw = json.loads(Path(config.default_scene).read_text(encoding="utf-8"))
     metadata = next(c["properties"] for c in raw["objects"][2]["components"] if c["component_type"] == "MetadataRef")
     del metadata["type"]
     path = tmp_path / "invalid.json"
-    path.write_text(json.dumps(raw))
+    path.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ValueError, match="type_required"):
         codec.load(path)
     metadata["type"] = "invalid"
-    path.write_text(json.dumps(raw))
+    path.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ValueError, match="scene_file_invalid"):
         codec.load(path)
 

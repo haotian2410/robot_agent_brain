@@ -27,7 +27,7 @@ def test_final_file_passes_public_schema(tmp_path, skill, params):
     model = CommandsFile.model_validate(wire(skill, params))
     path = tmp_path / "commands.json"
     JsonCommandSink(path).write(model)
-    payload = json.loads(path.read_text())
+    payload = json.loads(path.read_text(encoding="utf-8"))
     Draft202012Validator(CommandsFile.model_json_schema()).validate(payload)
     assert payload == canonical_commands(model)
     assert payload["commands"][0]["parameters"] == params

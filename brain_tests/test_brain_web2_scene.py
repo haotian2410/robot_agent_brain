@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_protocol_version_and_real_scene_documents():
     assert PROTOCOL_VERSION == "brain-web/2"
     for name in ("ur5e_table_sorting.json", "piper_r_table_twist.json"):
-        raw = json.loads((ROOT / "docs/docs/执行包" / name).read_text())
+        raw = json.loads((ROOT / "docs/docs/执行包" / name).read_text(encoding="utf-8"))
         document = parse_scene_document(raw)
         assert document.view.scene_id == raw["scene_id"]
         assert document.view.scene_version == raw["scene_version"]

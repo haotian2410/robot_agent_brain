@@ -18,7 +18,7 @@ def tree_hash(root):
 def read_index(root, kind):
     base = Path(root) / ("models" if kind == "model" else "robots")
     filename = "model_index.json" if kind == "model" else "robot_index.json"
-    index = json.loads((base / filename).read_text())
+    index = json.loads((base / filename).read_text(encoding="utf-8"))
     if set(index) != {"by_name", "by_id", "category", "thumbnail"}:
         raise ValueError(f"{kind}_index_invalid")
     if {str(k): name for name, values in index["by_name"].items() for k in values} != index["by_id"]:
@@ -34,11 +34,11 @@ def metadata_cache(root, kind, index, errors):
         directory = base / raw_id
         metadata = directory / f"{name}.json"
         manifest = directory / f"{name}_files.json"
-        data = json.loads(metadata.read_text())
+        data = json.loads(metadata.read_text(encoding="utf-8"))
         semantic = data["semantic_properties"]
         if semantic.get("object_id") != identifier or semantic.get("object_name") != name:
             raise ValueError(f"metadata_identity_invalid:{kind}/{identifier}")
-        files = json.loads(manifest.read_text())
+        files = json.loads(manifest.read_text(encoding="utf-8"))
         for relative in [files["metadata"], files["path"], files["thumbnail"], *files.get("reference", [])]:
             target = contained(Path(root), directory, relative)
             if target.suffix.lower() in {".obj", ".urdf"}:
@@ -79,8 +79,8 @@ def main():
     models, robots = read_index(root, "model"), read_index(root, "robot")
     errors = []
     cache = {**metadata_cache(root, "model", models, errors), **metadata_cache(root, "robot", robots, errors)}
-    scenes = json.loads((root / "scenes/scene_index.json").read_text())
-    expected = json.loads(Path(args.manifest).read_text()) if args.manifest else {
+    scenes = json.loads((root / "scenes/scene_index.json").read_text(encoding="utf-8"))
+    expected = json.loads(Path(args.manifest).read_text(encoding="utf-8")) if args.manifest else {
         "model_ids": list(range(1,30)), "robot_ids": list(range(1,15)), "scene_ids": list(range(1,6))}
     if (set(models["by_id"]) != {str(i) for i in expected["model_ids"]}
             or set(robots["by_id"]) != {str(i) for i in expected["robot_ids"]}
@@ -95,7 +95,7 @@ def main():
         directory_name = "models" if kind == "model" else "robots"
         for identifier, name in index["by_id"].items():
             directory = root / directory_name / identifier
-            files = json.loads((directory / f"{name}_files.json").read_text())
+            files = json.loads((directory / f"{name}_files.json").read_text(encoding="utf-8"))
             entrance = contained(root, directory, files["path"])
             if entrance.suffix.lower() == ".urdf":
                 document = ET.parse(entrance).getroot()
@@ -105,7 +105,7 @@ def main():
                 }
     for item in scenes:
         path = contained(root, root / "scenes", f"{item['id']}/{item['name']}.json")
-        scene = json.loads(path.read_text())
+        scene = json.loads(path.read_text(encoding="utf-8"))
         for obj in scene["objects"]:
             for component in obj["components"]:
                 if component["component_type"] != "MetadataRef":
@@ -120,10 +120,10 @@ def main():
     if before != after:
         raise RuntimeError("final_models_tree_changed")
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(cache, ensure_ascii=False, indent=2) + "\n")
+    output.write_text(json.dumps(cache, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if args.joint_cache:
         joint_output.parent.mkdir(parents=True, exist_ok=True)
-        joint_output.write_text(json.dumps(joints, indent=2) + "\n")
+        joint_output.write_text(json.dumps(joints, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"valid": not errors, "errors": sorted(set(errors)), "models": len(models["by_id"]), "robots": len(robots["by_id"]), "scenes": len(scenes),
                       "asset_tree_sha256": before, "cache": str(output)}))
     return 2 if errors else 0

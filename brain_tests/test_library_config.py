@@ -15,11 +15,11 @@ def configuration(tmp_path):
     root, cache = library(tmp_path)
     assert script("build_asset_geometry_cache.py", "--asset-root", root, "--output", cache).returncode == 0
     aliases = tmp_path / "aliases.json"
-    aliases.write_text(json.dumps({"苹果": "apple"}))
+    aliases.write_text(json.dumps({"苹果": "apple"}), encoding="utf-8")
     config = tmp_path / "config.json"
     config.write_text(json.dumps({"provider": "replay", "asset_library_root": "assets",
         "asset_geometry_cache": "cache.json", "semantic_aliases": "aliases.json",
-        "output_dir": str(tmp_path / "output")}))
+        "output_dir": str(tmp_path / "output")}), encoding="utf-8")
     return BrainConfig.load(config, environ={})
 
 

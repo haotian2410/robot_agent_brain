@@ -23,7 +23,7 @@ class FinalModelsLibraryAdapter:
         self.categories_available = category_index is not None
         for kind in ("model", "robot"):
             index = json.loads((self.root / ("models" if kind == "model" else "robots") /
-                                ("model_index.json" if kind == "model" else "robot_index.json")).read_text())
+                                ("model_index.json" if kind == "model" else "robot_index.json")).read_text(encoding="utf-8"))
             index_categories = index.get("category", {})
             for identifier, name in index["by_id"].items():
                 identifier = int(identifier)

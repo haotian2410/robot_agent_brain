@@ -40,8 +40,8 @@ def test_profile_bootstrap_keeps_both_arms_and_commits_after_planning(tmp_path):
     app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path), robot_profiles=registry()), provider=provider)
     report = app.handle("用双臂的右臂抓苹果")
     assert report.run_status == "success", report
-    scene = json.loads(Path(report.artifacts["scene_config"]).read_text())
-    commands = json.loads(Path(report.artifacts["commands"]).read_text())
+    scene = json.loads(Path(report.artifacts["scene_config"]).read_text(encoding="utf-8"))
+    commands = json.loads(Path(report.artifacts["commands"]).read_text(encoding="utf-8"))
     assert commands["schema_version"] == "3.0"
     assert {arm["robot_object_id"] for arm in commands["robot_setup"]["arms"].values()} == {2, 3}
     assert {obj["object_id_in_scene"] for obj in scene["objects"]} == {0, 2, 3, 4}

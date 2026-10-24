@@ -99,7 +99,7 @@ class BrainConfig(BaseModel):
 
     @classmethod
     def load(cls, path=None, *, overrides=None, environ=None):
-        values = json.loads(files("robot_agent_brain.resources").joinpath("config.json").read_text())
+        values = json.loads(files("robot_agent_brain.resources").joinpath("config.json").read_text(encoding="utf-8"))
         if path is not None:
             user = json.loads(Path(path).read_text(encoding="utf-8"))
             if "api_key" in user:
@@ -129,13 +129,13 @@ class BrainConfig(BaseModel):
         from .adapters.demo_asset_library import DemoAssetLibrary
         if self.assets is not None:
             return DemoAssetLibrary(json.loads(Path(self.assets).read_text(encoding="utf-8")))
-        data = json.loads(files("robot_agent_brain.resources").joinpath("assets.json").read_text())
+        data = json.loads(files("robot_agent_brain.resources").joinpath("assets.json").read_text(encoding="utf-8"))
         return DemoAssetLibrary(data)
 
     def bootstrap_settings(self):
         settings = {}
         if self.asset_library_root is None and self.assets is None:
-            settings = json.loads(files("robot_agent_brain.resources").joinpath("demo_platform.json").read_text())
+            settings = json.loads(files("robot_agent_brain.resources").joinpath("demo_platform.json").read_text(encoding="utf-8"))
         for field in ("default_table_metadata_ref", "default_robot_metadata_ref", "default_robot_driver"):
             value = getattr(self, field)
             if value is not None:

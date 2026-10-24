@@ -15,6 +15,16 @@ from test_query_scene_continuity import supported_scene
 
 class Browser:
     """Explicit test double, NOT the supplied WebEditor release."""
+
+    def world(self):
+        # §1.2: the editor owns the bytes it serves and writes a zero scene_sub_version as an absent
+        # key.  A candidate that materialises "scene_sub_version": 0 therefore commits a digest the
+        # read-back world never reports, which quarantines the lease against the real browser.
+        document = self.scene.model_dump(mode="json")
+        if document.get("scene_sub_version") == 0:
+            document.pop("scene_sub_version", None)
+        return document
+
     def __init__(self, scene=None):
         self.scene = scene or supported_scene()
         self.calls, self.receipt = [], None
@@ -24,8 +34,9 @@ class Browser:
     def handle(self, request):
         route = request.url.path
         self.calls.append((request.method,route))
+        document = self.world()
         identity = {"browserID":"b","scene_id":self.scene.scene_id,"scene_version":self.scene.scene_version,
-                    "sceneDigest":digest(self.scene),"playback_state":"stopped"}
+                    "sceneDigest":digest(document),"playback_state":"stopped"}
         if route == "/brainCapabilities":
             return httpx.Response(200,json={"protocol":"brain-web/2","browserID":"b","capabilities":[
                 "atomic_commit","sub_versioned_scene_identity","setup_only_local_edits",
@@ -38,17 +49,19 @@ class Browser:
             return httpx.Response(200,json={"browserID":"b","state":"quarantined" if json.loads(request.content).get("keepLocked") else "released"})
         if route == "/getWorld":
             self.next_id = max(self.next_id, max(o.object_id_in_scene for o in self.scene.objects) + 1)
-            headers={"X-World-Source":"live","X-Browser-ID":"b","X-Playback-State":"stopped","X-Scene-Digest":digest(self.scene), "X-Next-Object-ID":str(self.next_id)}
+            headers={"X-World-Source":"live","X-Browser-ID":"b","X-Playback-State":"stopped","X-Scene-Digest":digest(document), "X-Next-Object-ID":str(self.next_id)}
             if self.fault == "cache":headers["X-World-Source"]="cache"
             if self.fault == "browser":headers["X-Browser-ID"]="other"
             if self.fault == "playing":headers["X-Playback-State"]="playing"
-            return httpx.Response(200,json=self.scene.model_dump(mode="json"),headers=headers)
+            return httpx.Response(200,json=document,headers=headers)
         if route == "/commitWorld":
             body=json.loads(request.content)
             if self.fault == "reject":return httpx.Response(409,json={"error":"invalid object"})
             self.scene=type(self.scene).model_validate(body["scene"])
+            # The gateway acknowledges the bytes it was handed (§3 of the digest spec), so the
+            # receipt alone cannot expose a non-canonical submission; only the served world can.
             self.receipt={"transactionID":body["transactionID"],"browserID":"b","status":"committed",
-                "scene_id":self.scene.scene_id,"scene_version":self.scene.scene_version,"sceneDigest":digest(self.scene),"rejected_objects":[]}
+                "scene_id":self.scene.scene_id,"scene_version":self.scene.scene_version,"sceneDigest":digest(body["scene"]),"rejected_objects":[]}
             if self.fault == "partial":self.receipt['rejected_objects']=[1]
             if self.fault == "wrong_receipt":self.receipt['browserID']='other'
             if self.fault in {"timeout","unknown"}:raise httpx.ReadTimeout("lost acknowledgement",request=request)

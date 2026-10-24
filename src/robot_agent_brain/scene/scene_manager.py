@@ -95,8 +95,11 @@ class SceneManager:
              else raw_objects.get(identifier, objects[identifier].model_dump(mode="json")))
             for identifier in objects
         ],
-                        "scene_version": self.scene.scene_version + 1,
-                        "scene_sub_version": 0})
+                        "scene_version": self.scene.scene_version + 1})
+        # §1.2: a scene_version bump resets the sub-version, and a document writes that zero as an
+        # absent key -- the browser drops it in toJSON().  Materialising "scene_sub_version": 0 here
+        # would make the committed digest disagree with the world read back after the commit.
+        payload.pop("scene_sub_version", None)
         candidate = parse_scene_document(payload, uint32=False).view
         self.scene = candidate
         self.seen_scene_object_ids = seen

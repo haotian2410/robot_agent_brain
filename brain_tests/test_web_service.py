@@ -53,7 +53,7 @@ def test_http_lifecycle_results_and_artifact_whitelist(tmp_path):
             assert browser.calls.count(("POST","/commitWorld"))==1
             response=await client.post('/startTask',json=payload|{"command":"different"})
             assert response.status==409
-            assert json.loads((tmp_path/session/'original_scene.json').read_text())["scene_version"]==0
+            assert json.loads((tmp_path/session/'original_scene.json').read_text(encoding="utf-8"))["scene_version"]==0
     asyncio.run(scenario())
 
 
@@ -170,11 +170,11 @@ def test_editor_freezes_even_empty_platform_before_first_edit(tmp_path):
     session=service._bind(sid)
     service.app.accept_browser_scene(sid,browser.scene)
     assert session.original_scene_manifest.task_object_ids==[]
-    frozen=json.loads((tmp_path/sid/'original_scene.json').read_text())
+    frozen=json.loads((tmp_path/sid/'original_scene.json').read_text(encoding="utf-8"))
     assert digest(frozen)==digest(browser.scene)
     from test_component_runtime import object_
     browser.scene.objects.append(object_(3,'apple',metadata_ref='$DEMO_LIBRARY/2'))
     browser.scene.scene_version+=1
     service.app.accept_browser_scene(sid,browser.scene)
-    assert json.loads((tmp_path/sid/'original_scene.json').read_text())==frozen
+    assert json.loads((tmp_path/sid/'original_scene.json').read_text(encoding="utf-8"))==frozen
     service.tasks.close()

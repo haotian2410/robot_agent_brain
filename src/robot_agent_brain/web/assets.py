@@ -10,7 +10,7 @@ def check_ols(client, base_url, root):
     counts = {}
     for kind, plural, filename in (("model","models","model_index.json"), ("robot","robots","robot_index.json"),
                                    ("scene","scenes","scene_index.json")):
-        index = json.loads((root / plural / filename).read_text())
+        index = json.loads((root / plural / filename).read_text(encoding="utf-8"))
         expected = ({int(i):name for i,name in index["by_id"].items()} if kind != "scene"
                     else {item["id"]:item["name"] for item in index})
         response = client.get(base_url + "/list", params={"type":kind,"uid":0})
@@ -21,7 +21,7 @@ def check_ols(client, base_url, root):
         for identifier,name in expected.items():
             remote = client.get(base_url + "/" + kind, params={"id":identifier,"uid":0})
             remote.raise_for_status()
-            local = json.loads((root / plural / str(identifier) / (name + ".json")).read_text())
+            local = json.loads((root / plural / str(identifier) / (name + ".json")).read_text(encoding="utf-8"))
             payload = remote.json()
             # OLS merges the files manifest into metadata for models/robots.
             comparison = {key:payload.get(key) for key in local}

@@ -26,7 +26,7 @@ def vertices(root, path):
         if fields and fields[0] == "mtllib":
             for material in fields[1:]:
                 mtl = contained(root, path.parent, material)
-                for row in mtl.read_text().splitlines():
+                for row in mtl.read_text(encoding="utf-8").splitlines():
                     terms = row.split()
                     if terms and (terms[0].startswith("map_") or terms[0] in {"bump", "disp"}):
                         contained(root, mtl.parent, terms[-1])

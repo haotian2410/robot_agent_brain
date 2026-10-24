@@ -1,6 +1,9 @@
 """Loopback-only persistent Agent service. One worker, no Control dispatch."""
 import asyncio
 import json
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import quote, urlsplit
 
@@ -18,6 +21,11 @@ from .task_store import TaskStore
 
 
 class AgentService:
+    # §5.3 keeps this reading inside the Gateway's three seconds, but an OLS catalog check walks every
+    # model, robot and scene (~55 reads plus a digest each).  The verdict changes when the library
+    # changes, not every five seconds, so a health reading reuses the last one for a while.
+    ASSET_CHECK_TTL_SECONDS = 30.0
+
     def __init__(self, config, *, gateway_url="http://127.0.0.1:8099", ols_url="http://127.0.0.1:8000",
                  joint_inventory=None, camera_id=5, provider=None, platform_factory=None):
         if config.scene_id_bits != 32:
@@ -26,7 +34,7 @@ class AgentService:
         self.gateway_url, self.ols_url = loopback_url(gateway_url), loopback_url(ols_url)
         self.config, self.camera_id = config, camera_id
         self.output = Path(config.output_dir).resolve()
-        self.joints = json.loads(Path(joint_inventory).read_text()) if joint_inventory else None
+        self.joints = json.loads(Path(joint_inventory).read_text(encoding="utf-8")) if joint_inventory else None
         if config.asset_library_root and self.joints is None:
             raise ValueError("robot_joint_inventory_required")
         self.references = ComponentReferenceRegistry(config.component_reference_rules)
@@ -39,6 +47,17 @@ class AgentService:
         self.mutex = asyncio.Lock()
         self.worker = None
         self.last_health = {}
+        self.assets_check = None
+        self.assets_refreshing = False
+        self.assets_lock = threading.Lock()
+        # A fresh httpx.Client costs about 0.3 s here (certificate loading), and the legs build them
+        # concurrently on every reading -- which is how a ready service overran the Gateway's three
+        # seconds and read as unreachable.  One shared client keeps /health in milliseconds.
+        self.probe_client = httpx.Client(timeout=httpx.Timeout(1.0, connect=0.5), trust_env=False)
+        # The catalog walk runs on its own thread, so it must not sit in the same connection pool as
+        # the three legs a health reading waits on -- ~55 queued reads there otherwise stretch a
+        # concurrent /health past the Gateway's three seconds, which is the very form §5.3 forbids.
+        self.catalog_client = httpx.Client(timeout=httpx.Timeout(1.0, connect=0.5), trust_env=False)
 
     def platform(self):
         if self.binding is None:
@@ -77,7 +96,7 @@ class AgentService:
                 manifest = self.config.editor_scene_manifests.get(scene.scene_name)
                 if manifest is None:
                     raise ValueError("web_platform_profile_unsupported")
-                index = json.loads((Path(self.config.asset_library_root) / "scenes/scene_index.json").read_text())
+                index = json.loads((Path(self.config.asset_library_root) / "scenes/scene_index.json").read_text(encoding="utf-8"))
                 item = next(i for i in index if i["name"] == scene.scene_name)
                 template_scene = self.app.codec.load(Path(self.config.asset_library_root) / "scenes" / str(item["id"]) / (item["name"] + ".json"))
             template = SceneIndex(template_scene)
@@ -140,7 +159,7 @@ class AgentService:
             session.session_phase = "agent_owned"
             report = self.app.handle(request.command, session_id=request.sessionID)
             record_path = self.output / request.sessionID / report.request_id / "request_record.json"
-            turn_record = json.loads(record_path.read_text())
+            turn_record = json.loads(record_path.read_text(encoding="utf-8"))
             if turn_record.get("id_remap"):
                 platform.remap_camera(turn_record["id_remap"])
             result = self.result(report, identifier)
@@ -216,7 +235,7 @@ class AgentService:
             if not result["reply"] or result["reply"] == "需要澄清任务。":
                 result["reply"] = "需要澄清：请说明要操作哪个物体、数量和目标位置，可以补充这些信息吗？"
         if "commands" in report.artifacts:
-            commands = json.loads(Path(report.artifacts["commands"]).read_text())
+            commands = json.loads(Path(report.artifacts["commands"]).read_text(encoding="utf-8"))
             result["plan"] = commands
             result["planSummary"] = {"operations":commands.get('operations',[]),
                 "skillSequence":[c['skill_name'] for c in commands.get('commands',[])]}
@@ -231,40 +250,88 @@ class AgentService:
                 "requires_open_browser":True,"gateway_protocol":PROTOCOL_VERSION,"commands":["2.0"]}}
         status["browser_id"] = None
         status["tasks"] = {"active_task_id": None, "queued": self.queue.qsize()}
-        # Keep the whole health probe bounded below the Gateway's three second
-        # upstream timeout.  Two independent one-second probes are preferable
-        # to a sequential pair of three-second waits when a dependency is down.
-        with httpx.Client(timeout=httpx.Timeout(1.0, connect=0.5), trust_env=False) as client:
-            try:
-                response = client.get(self.config.base_url.rstrip("/") + "/models")
-                response.raise_for_status()
-                status["qwen"] = "ready" if any(m["id"] == self.config.model for m in response.json()["data"]) else "model_not_found"
-            except Exception:
-                pass
-            if self.config.asset_library_root:
-                try:
-                    detail = check_ols(client, self.ols_url, self.config.asset_library_root)
-                    status["assets"] = "ok" if detail.get("matched") else detail
-                    status["asset_detail"] = detail
-                except Exception as exc:
-                    status["assets"] = {"matched":False,"error":str(exc)}
-                    status["asset_detail"] = status["assets"]
+        # §5.3: the Gateway waits three seconds for this reading, so the legs must not queue behind
+        # one another -- four sequential one-second caps would already overrun it, and the editor
+        # leg alone can stretch that far, which would make a ready service read as unreachable.
         active = next((s for s in self.tasks.sessions() if s["active"]), None)
         if active:
             status["browser_id"] = active["browser"]
-            try:
-                gateway = GatewayScenePlatformAdapter(self.gateway_url, active["browser"])
-                gateway.capabilities()
-                gateway.read_live()
-                status["browser"] = "bound"
-                gateway.client.close()
-            except Exception:
-                status["browser"] = "not_bound"
+        legs = [self._probe_model, self._probe_assets]
+        if active:
+            legs.append(lambda: self._probe_browser(active["browser"]))
+        with ThreadPoolExecutor(max_workers=len(legs)) as pool:
+            for future in [pool.submit(leg) for leg in legs]:
+                status.update(future.result())
         for record in self._active_records():
             if not record["terminal"]:
                 status["tasks"]["active_task_id"] = record["id"]
                 break
         return status
+
+    def _probe_model(self):
+        client = self.probe_client
+        try:
+            response = client.get(self.config.base_url.rstrip("/") + "/models")
+            response.raise_for_status()
+            return {"qwen": "ready" if any(m["id"] == self.config.model for m in response.json()["data"]) else "model_not_found"}
+        except Exception:
+            return {"qwen": "unavailable"}
+
+    def _probe_assets(self):
+        if not self.config.asset_library_root:
+            return {}
+        cached = self.assets_check
+        if cached is not None and time.monotonic() - cached[0] < self.ASSET_CHECK_TTL_SECONDS:
+            return cached[1]
+        # A catalog walk costs seconds, and the page-load reading is the one that meets it cold: the
+        # Gateway is waiting three seconds for this route while the browser is still attaching. So a
+        # verdict that has only aged past its TTL still answers, and the refresh runs on its own
+        # thread -- the worst this leg can now do is report the library as of TTL ago, never make the
+        # reading wait for it.
+        if cached is not None:
+            self.schedule_asset_refresh()
+            return cached[1]
+        value = self._asset_verdict()
+        self.assets_check = (time.monotonic(), value)
+        return value
+
+    def schedule_asset_refresh(self):
+        if not self.config.asset_library_root:
+            return
+        with self.assets_lock:
+            if self.assets_refreshing:
+                return
+            self.assets_refreshing = True
+
+        def refresh():
+            try:
+                self.assets_check = (time.monotonic(), self._asset_verdict())
+            finally:
+                with self.assets_lock:
+                    self.assets_refreshing = False
+
+        threading.Thread(target=refresh, daemon=True).start()
+
+    def _asset_verdict(self):
+        client = self.catalog_client
+        try:
+            detail = check_ols(client, self.ols_url, self.config.asset_library_root)
+            return {"assets": "ok" if detail.get("matched") else detail, "asset_detail": detail}
+        except Exception as exc:
+            return {"assets": {"matched": False, "error": str(exc)}, "asset_detail": {"matched": False, "error": str(exc)}}
+
+    def _probe_browser(self, browser_id):
+        # The Gateway answers these two reads through the browser, so this is the leg a busy editor
+        # can stretch. A health check must not be able to wait on a task: it shares the short-timeout
+        # client and never outlives the Gateway's three-second reading of this route.
+        client = self.probe_client
+        try:
+            gateway = GatewayScenePlatformAdapter(self.gateway_url, browser_id, client=client)
+            gateway.capabilities()
+            gateway.read_live()
+            return {"browser": "bound"}
+        except Exception:
+            return {"browser": "not_bound"}
 
     def _active_records(self):
         with self.tasks.lock:
@@ -512,6 +579,9 @@ def create_http_app(service):
     app.router.add_post("/resolveUncertain", resolve_uncertain)
 
     async def startup(app):
+        # The Gateway's three-second reading of /health is tightest while a page is still loading, and
+        # that is when the asset catalog verdict would be cold, so the walk starts here instead.
+        service.schedule_asset_refresh()
         service.worker = asyncio.create_task(service.work())
 
     async def cleanup(app):

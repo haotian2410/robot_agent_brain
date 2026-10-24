@@ -45,7 +45,7 @@ def test_http_two_stage_integration_and_commands_schema(tmp_path, mode, count, u
     assert report.metrics["skill_planning_calls"] == count - 1
     assert report.metrics["planner_used"] == used and report.metrics["planner_requested"] == mode
     assert len(provider.calls) == len(requests) == count
-    payload = json.loads(Path(report.artifacts["commands"]).read_text())
+    payload = json.loads(Path(report.artifacts["commands"]).read_text(encoding="utf-8"))
     CommandsFile.model_validate(payload)
     Draft202012Validator(CommandsFile.model_json_schema()).validate(payload)
     assert (payload["scene_id"], payload["scene_version"]) == (report.scene_id, report.scene_version)
@@ -56,8 +56,8 @@ def test_http_two_stage_integration_and_commands_schema(tmp_path, mode, count, u
         for file in ("planner_context.json", "planner_skill_catalog.txt", "raw_skill_plan.json",
                      "normalized_skill_plan.json", "skill_plan_validation.json"):
             assert (folder / file).is_file()
-        assert json.loads((folder / "raw_skill_plan.json").read_text())["operations"][0]["id"] == "op-1"
-        assert json.loads((folder / "raw_skill_plan.json").read_text()) == raw_plan()
+        assert json.loads((folder / "raw_skill_plan.json").read_text(encoding="utf-8"))["operations"][0]["id"] == "op-1"
+        assert json.loads((folder / "raw_skill_plan.json").read_text(encoding="utf-8")) == raw_plan()
         assert [c["stage"] for c in report.metrics["model_calls"]] == ["task_understanding", "skill_planning"]
 
 
@@ -106,8 +106,8 @@ def test_failed_second_stage_has_debug_no_stale_commands_no_scene_mutation(tmp_p
     assert not (folder.parent / "commands.json").exists()
     assert (folder / "raw_skill_plan.json").is_file()
     assert (folder / "traceback.txt").is_file()
-    assert len(json.loads((folder / "model_calls.json").read_text())) == 2
-    assert json.loads((folder / "skill_plan_validation.json").read_text())["valid"] is False
+    assert len(json.loads((folder / "model_calls.json").read_text(encoding="utf-8"))) == 2
+    assert json.loads((folder / "skill_plan_validation.json").read_text(encoding="utf-8"))["valid"] is False
     assert app.get_session("failure").scene.model_dump() == scene_before
     assert Path(first.artifacts["commands"]).read_bytes() == old_commands
     paused = app.handle("pause", session_id="failure")
@@ -122,7 +122,7 @@ def test_replay_understanding_only_contract(tmp_path, mode):
     path = tmp_path / "replay.json"
     from robot_agent_brain.models.task_understanding import TaskParseOutput
     turn = TaskParseOutput.model_validate(UNDERSTANDING).to_brain_turn("task")
-    path.write_text(json.dumps([{"instruction": "task", "turn": turn.model_dump(mode="json")}]))
+    path.write_text(json.dumps([{"instruction": "task", "turn": turn.model_dump(mode="json")}]), encoding="utf-8")
     # Use the real ReplayProvider's public file format, not a fake planning interface.
     provider = ReplayProvider(path)
     app = BrainApplication(BrainConfig(provider="replay", planner=mode, output_dir=str(tmp_path / "out")), provider=provider)
@@ -146,7 +146,7 @@ def test_planner_configuration_fingerprint_and_cli(tmp_path, monkeypatch):
     assert configs[0].config_summary["skill_planning_prompt_sha256"]
     assert configs[0].config_summary["skill_catalog_sha256"]
     path = tmp_path / "config.json"
-    path.write_text(json.dumps({"planner": "qwen"}))
+    path.write_text(json.dumps({"planner": "qwen"}), encoding="utf-8")
     assert BrainConfig.load(path).planner == "qwen"
     monkeypatch.setenv("ROBOT_BRAIN_PLANNER", "auto")
     assert BrainConfig.load(path).planner == "auto"
@@ -183,7 +183,7 @@ def test_collection_expands_before_second_call_and_keeps_dependencies(tmp_path):
     assert [op["role_bindings"]["source"] for op in content["operations"]] == ["a__01", "a__02"]
     assert content["operations"][1]["depends_on"] == ["op-1__01"]
     assert requests[1]["max_completion_tokens"] == 640
-    commands = json.loads(Path(report.artifacts["commands"]).read_text())
+    commands = json.loads(Path(report.artifacts["commands"]).read_text(encoding="utf-8"))
     assert len(commands["commands"]) == 12
     assert len({c["parameters"]["target"] for c in commands["commands"] if c["skill_name"] == "grasp"}) == 2
 
@@ -203,5 +203,5 @@ def test_second_call_timeout_keeps_failure_record_and_no_false_scene(tmp_path):
     assert report.metrics["skill_planning_calls"] == 1 and len(report.metrics["model_calls"]) == 2
     assert report.metrics["model_calls"][1]["status"] == "failed"
     assert "commands" not in report.artifacts and app.get_session(report.session_id).scene is None
-    raw = json.loads((Path(report.artifacts["debug"]) / "raw_skill_plan.json").read_text())
+    raw = json.loads((Path(report.artifacts["debug"]) / "raw_skill_plan.json").read_text(encoding="utf-8"))
     assert raw["available"] is False

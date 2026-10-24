@@ -39,18 +39,18 @@ def test_journal_recovers_first_scene_never_current_scene(tmp_path, monkeypatch,
 @pytest.mark.parametrize("orphan", ["original_scene.json", "original_scene_manifest.json"])
 def test_no_journal_orphan_requires_explicit_recovery(tmp_path, orphan):
     _, scene, _ = fixture()
-    (tmp_path / orphan).write_text("{}")
+    (tmp_path / orphan).write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="original_scene_recovery_required"):
         OriginalSceneStore(tmp_path).capture_once(scene, platform_object_ids={2, 3}, request_id="later", source="session")
-    assert (tmp_path / orphan).read_text() == "{}"
+    assert (tmp_path / orphan).read_text(encoding="utf-8") == "{}"
 
 
 def test_corrupted_prepare_record_cannot_complete_partial_snapshot(tmp_path, monkeypatch):
     interrupted(tmp_path, monkeypatch)
     path = tmp_path / "original_scene_prepare.json"
-    value = json.loads(path.read_text())
+    value = json.loads(path.read_text(encoding="utf-8"))
     value["scene_json"] += " "
-    path.write_text(json.dumps(value))
+    path.write_text(json.dumps(value), encoding="utf-8")
     raw = (tmp_path / "original_scene.json").read_bytes()
     with pytest.raises(ValueError, match="original_scene_unavailable"):
         OriginalSceneStore(tmp_path).load()

@@ -13,14 +13,14 @@ def test_debug_and_checkpoint_include_reproducible_nonsecret_config(tmp_path):
     report = app.handle("two apples", session_id="debug")
     assert report.run_status == "success"
     folder = Path(report.artifacts["commands"]).parent
-    record = json.loads((folder / "request_record.json").read_text())
-    state = json.loads((folder.parent / "session_state.json").read_text())
+    record = json.loads((folder / "request_record.json").read_text(encoding="utf-8"))
+    state = json.loads((folder.parent / "session_state.json").read_text(encoding="utf-8"))
     assert record["config_fingerprint"] == state["config_fingerprint"] == app.config_fingerprint
     assert record["config"]["demo_assets"] is True
     for name in ("brain_turn", "task_intent", "grounded_task", "skill_plan", "model_calls"):
         assert (folder / "debug" / (name + ".json")).is_file()
     for path in tmp_path.rglob("*.json"):
-        assert "sensitive-key" not in path.read_text()
+        assert "sensitive-key" not in path.read_text(encoding="utf-8")
 
 
 def test_raw_failed_response_only_saved_in_debug_and_redacted(tmp_path):
@@ -37,11 +37,11 @@ def test_raw_failed_response_only_saved_in_debug_and_redacted(tmp_path):
         raw_files = list(directory.rglob("raw_model_response.txt"))
         assert bool(raw_files) == debug
         if debug:
-            assert "[REDACTED]" in raw_files[0].read_text()
+            assert "[REDACTED]" in raw_files[0].read_text(encoding="utf-8")
         assert "sensitive-key" not in report.model_dump_json()
         for path in directory.rglob("*"):
             if path.is_file():
-                assert "sensitive-key" not in path.read_text()
+                assert "sensitive-key" not in path.read_text(encoding="utf-8")
 
 
 def test_prompt_json_examples_validate_with_the_actual_parser():

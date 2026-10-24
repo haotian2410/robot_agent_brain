@@ -25,12 +25,12 @@ def library(tmp_path):
             data = {"semantic_properties": {"object_id": int(identifier), "object_name": name,
                        "tag": "blue" if identifier == "2" else "red"},
                     "physical_properties": {"mass_kg": .1}, "grasp_properties": {"poses": []}}
-            (directory / f"{name}.json").write_text(json.dumps(data))
+            (directory / f"{name}.json").write_text(json.dumps(data), encoding="utf-8")
             cache[f"{kind}:{identifier}"] = {"dimensions_m": [1, 1, 1],
                  "local_aabb_min_m": [0, 0, 0], "local_aabb_max_m": [1, 1, 1]}
-        (folder / f"{kind}_index.json").write_text(json.dumps({"by_name": by_name, "by_id": names}))
+        (folder / f"{kind}_index.json").write_text(json.dumps({"by_name": by_name, "by_id": names}), encoding="utf-8")
     cache_path = tmp_path / "cache.json"
-    cache_path.write_text(json.dumps(cache))
+    cache_path.write_text(json.dumps(cache), encoding="utf-8")
     return FinalModelsLibraryAdapter(tmp_path, cache_path)
 
 
@@ -76,10 +76,10 @@ def test_metadata_changes_affect_fingerprint_without_geometry_rebuild(library):
     before_cache=cache.read_bytes()
     before=fingerprint(library.configuration_payload())
     metadata=root/"models/1/apple.json"
-    data=json.loads(metadata.read_text())
+    data=json.loads(metadata.read_text(encoding="utf-8"))
     data["semantic_properties"].update(scalable=True,tag="blue")
     data["physical_properties"]["scale"]=[.5,2]
-    metadata.write_text(json.dumps(data))
+    metadata.write_text(json.dumps(data), encoding="utf-8")
     updated=FinalModelsLibraryAdapter(root,cache)
     assert fingerprint(updated.configuration_payload())!=before
     assert updated.resolve("$LIBRARY_SERVER/1","model").color_tags==("blue",)

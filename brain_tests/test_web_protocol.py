@@ -98,9 +98,9 @@ def test_all_ols_scenes_roundtrip_and_joint_inventory():
     inventory = Path('var/webeditor/joint_inventory.json')
     if not root.exists() or not inventory.exists():
         pytest.skip("external OLS 1.0.5 package/joint cache not installed")
-    joints = json.loads(inventory.read_text())
-    for item in json.loads((root/'scenes/scene_index.json').read_text()):
-        original = json.loads((root/'scenes'/str(item['id'])/(item['name']+'.json')).read_text())
+    joints = json.loads(inventory.read_text(encoding="utf-8"))
+    for item in json.loads((root/'scenes/scene_index.json').read_text(encoding="utf-8")):
+        original = json.loads((root/'scenes'/str(item['id'])/(item['name']+'.json')).read_text(encoding="utf-8"))
         scene = validate_web_scene(original, joints)
         assert scene.model_dump(mode="json") == original
     bad = scene.model_copy(deep=True)
@@ -132,8 +132,8 @@ def test_synthetic_contract_fixtures_match_wire_schema(tmp_path):
     spec = importlib.util.spec_from_file_location('contract_export',Path(__file__).resolve().parents[1]/'scripts/export_webeditor_contract.py')
     module = importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
     module.export(tmp_path)
-    task = StartTask.model_validate_json((tmp_path/'start_task.json').read_text())
+    task = StartTask.model_validate_json((tmp_path/'start_task.json').read_text(encoding="utf-8"))
     assert digest(task.scene) == task.sceneDigest
-    commit=json.loads((tmp_path/'commit_world.json').read_text())
-    receipt=json.loads((tmp_path/'commit_receipt.json').read_text())
+    commit=json.loads((tmp_path/'commit_world.json').read_text(encoding="utf-8"))
+    receipt=json.loads((tmp_path/'commit_receipt.json').read_text(encoding="utf-8"))
     assert receipt['sceneDigest']==digest(commit['scene'])

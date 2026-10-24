@@ -38,8 +38,8 @@ def test_demo_bootstrap_edit_query_restart_and_wire_artifacts(tmp_path):
     assert first.run_status == "success", first.reply
     assert first.executed is False
     assert first.delivery_status == "commands_exported"
-    scene = SceneConfig.model_validate_json(Path(first.artifacts["scene_config"]).read_text())
-    commands = CommandsFile.model_validate_json(Path(first.artifacts["commands"]).read_text())
+    scene = SceneConfig.model_validate_json(Path(first.artifacts["scene_config"]).read_text(encoding="utf-8"))
+    commands = CommandsFile.model_validate_json(Path(first.artifacts["commands"]).read_text(encoding="utf-8"))
     assert isinstance(scene.scene_id, int)
     assert commands.scene_id == scene.scene_id
     assert all(type(command.parameters.target) is int for command in commands.commands)
@@ -50,12 +50,12 @@ def test_demo_bootstrap_edit_query_restart_and_wire_artifacts(tmp_path):
     assert second.run_status == "success", second.reply
     assert "commands" not in second.artifacts
     assert second.scene_version == scene.scene_version + 1
-    patch = json.loads(Path(second.artifacts["scene_patch"]).read_text())
+    patch = json.loads(Path(second.artifacts["scene_patch"]).read_text(encoding="utf-8"))
     assert patch["operations"][0]["action"] == "add_object"
     app = BrainApplication(config, provider=DemoUnderstanding())
     third = app.handle("几个香蕉", session_id="demo")
     assert third.run_status == "success", third.reply
-    assert json.loads(Path(third.artifacts["query_result"]).read_text())["count"] == 1
+    assert json.loads(Path(third.artifacts["query_result"]).read_text(encoding="utf-8"))["count"] == 1
     assert third.executed is False
 
 

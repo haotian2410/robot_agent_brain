@@ -52,7 +52,7 @@ def test_import_freezes_before_first_edit_or_understanding(tmp_path, separate, f
     from test_scene_replace import plan
     scene = supported_scene()
     path = tmp_path / "input.json"
-    path.write_text(scene.model_dump_json())
+    path.write_text(scene.model_dump_json(), encoding="utf-8")
     turn = BrainTurn(status="accepted", turn_kind="scene_edit", instruction="把苹果向右移动10厘米",
         scene_edit=plan([{"operation": "translate", "target": "old", "direction": "right", "distance_m": .1}]))
     provider = Provider(turn)

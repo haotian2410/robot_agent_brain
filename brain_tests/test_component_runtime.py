@@ -129,11 +129,11 @@ def test_query_world_position_state_and_json_roundtrip():
 
 def test_codec_team_fixture_and_legacy_rejection(tmp_path):
     source = Path(__file__).parent / "fixtures/shared_scene_v1.json"
-    raw = json.loads(source.read_text())
+    raw = json.loads(source.read_text(encoding="utf-8"))
     codec = SceneFileCodec()
     assert codec.payload(codec.load(source)) == raw
     old = tmp_path / "old.json"
-    old.write_text(json.dumps({"scene_id": "old", "objects": []}))
+    old.write_text(json.dumps({"scene_id": "old", "objects": []}), encoding="utf-8")
     with pytest.raises(BrainError, match="Expected shared"):
         codec.load(old)
 

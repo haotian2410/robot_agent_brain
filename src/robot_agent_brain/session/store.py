@@ -8,6 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
 from ..adapters.artifact_writer import safe_identifier
+from ..filelock import lock_exclusive
 from ..contracts.commands import CommandsFile, canonical_commands, parse_commands
 from ..contracts.robot_setup import RobotSetup, RobotRuntimeState
 from ..contracts.feedback_v3 import ExecutionRecoveryContext
@@ -142,12 +143,11 @@ class SessionStore:
     def lock(self, session_id):
         # POSIX advisory lock; never steal a live writer's lock. Process exit
         # releases it, unlike a stale directory sentinel. No network FS claim.
-        import fcntl
         path = self.directory(session_id) / ".session.lock"
-        fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        fd = os.open(path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600)
         try:
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                lock_exclusive(fd)
             except BlockingIOError as exc:
                 raise ValueError("session_busy") from exc
             yield

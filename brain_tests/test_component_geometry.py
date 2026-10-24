@@ -16,7 +16,7 @@ from robot_agent_brain.scene.spatial_facts import SpatialFactResolver
 from test_component_runtime import object_
 
 
-CACHE = json.loads((Path(__file__).parents[1] / "config/brain_asset_geometry_cache.json").read_text())
+CACHE = json.loads((Path(__file__).parents[1] / "config/brain_asset_geometry_cache.json").read_text(encoding="utf-8"))
 IDENTITY = ((1., 0., 0.), (0., 1., 0.), (0., 0., 1.))
 
 

@@ -31,8 +31,8 @@ def test_no_scene_robot_publishes_matching_snapshot_and_commands(tmp_path):
     assert report.run_status == "success", report
     assert provider.count == 1
     assert report.scene_source == "generated" and report.executed is False
-    scene = json.loads(Path(report.artifacts["scene_config"]).read_text())
-    commands = json.loads(Path(report.artifacts["commands"]).read_text())
+    scene = json.loads(Path(report.artifacts["scene_config"]).read_text(encoding="utf-8"))
+    commands = json.loads(Path(report.artifacts["commands"]).read_text(encoding="utf-8"))
     assert (commands["scene_id"],commands["scene_version"]) == (scene["scene_id"],scene["scene_version"])
     assert len([o for o in scene["objects"] if any(c["component_type"] == "Semantic" and c["properties"]["semantic_name"] == "apple" for c in o["components"])]) == 2
     second = app.handle("重复任务", session_id=report.session_id)
@@ -48,7 +48,7 @@ def test_no_scene_query_blocked_but_uploaded_empty_returns_zero(tmp_path):
     assert report.run_status == "blocked" and report.error.code == "scene_required"
     assert report.scene_created is False and "scene_config" not in report.artifacts
     path = tmp_path / "empty.json"
-    path.write_text(SceneConfig(scene_schema_version=1, scene_version=1, scene_id=0, scene_name="empty", objects=[]).model_dump_json())
+    path.write_text(SceneConfig(scene_schema_version=1, scene_version=1, scene_id=0, scene_name="empty", objects=[]).model_dump_json(), encoding="utf-8")
     before = path.read_bytes()
     report = app.handle("有几个苹果", scene_path=path)
     assert report.run_status == "success" and "0" in report.reply
@@ -57,7 +57,7 @@ def test_no_scene_query_blocked_but_uploaded_empty_returns_zero(tmp_path):
 
 def test_loaded_empty_robot_never_generates_objects(tmp_path):
     path = tmp_path / "empty.json"
-    path.write_text(SceneConfig(scene_schema_version=1, scene_version=1, scene_id=0, scene_name="empty", objects=[]).model_dump_json())
+    path.write_text(SceneConfig(scene_schema_version=1, scene_version=1, scene_id=0, scene_name="empty", objects=[]).model_dump_json(), encoding="utf-8")
     app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path / "out")), provider=Provider(robot()))
     report = app.handle("抓苹果", scene_path=path)
     assert report.run_status == "blocked" and report.scene_created is False

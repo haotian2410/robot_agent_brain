@@ -55,10 +55,10 @@ def main():
         assert any(route.resource.canonical=='/startTask' for route in create_http_app(service).router.routes())
         service.tasks.close()
     run("schemas", "--output-dir", str(directory / "schemas"))
-    schema = json.loads((directory / "schemas" / "commands.schema.json").read_text())
+    schema = json.loads((directory / "schemas" / "commands.schema.json").read_text(encoding="utf-8"))
     assert schema == CommandsFile.model_json_schema()
-    assert json.loads((directory / "schemas" / "commands_v3.schema.json").read_text()) == CommandsFileV3.model_json_schema()
-    scene_schema = json.loads((directory / "schemas" / "scene_config.schema.json").read_text())
+    assert json.loads((directory / "schemas" / "commands_v3.schema.json").read_text(encoding="utf-8")) == CommandsFileV3.model_json_schema()
+    scene_schema = json.loads((directory / "schemas" / "scene_config.schema.json").read_text(encoding="utf-8"))
     assert scene_schema == SceneConfig.model_json_schema()
     instruction = "把两个苹果放进篮子"
     fixture = [{"instruction":instruction, "turn":{"status":"accepted", "turn_kind":"robot_task", "instruction":instruction,
@@ -85,8 +85,8 @@ def main():
     assert first["metrics"]["understanding_calls"] == 1
     assert first["metrics"]["skill_planning_calls"] == 0
     assert first["metrics"]["planner_used"] == "recipe"
-    commands = json.loads(Path(first["artifacts"]["commands"]).read_text())
-    scene = json.loads(Path(first["artifacts"]["scene_config"]).read_text())
+    commands = json.loads(Path(first["artifacts"]["commands"]).read_text(encoding="utf-8"))
+    scene = json.loads(Path(first["artifacts"]["scene_config"]).read_text(encoding="utf-8"))
     Draft202012Validator(schema).validate(commands)
     assert (commands["scene_id"], commands["scene_version"]) == (scene["scene_id"],scene["scene_version"])
     parsed_scene = SceneConfig.model_validate(scene)
@@ -102,7 +102,7 @@ def main():
     assert second["run_status"] == "success" and second["request_id"] != first["request_id"]
     third = json.loads(run("run", plural, *common))
     assert third["run_status"] == "success" and "commands" not in third["artifacts"]
-    query = json.loads(Path(third["artifacts"]["query_result"]).read_text())
+    query = json.loads(Path(third["artifacts"]["query_result"]).read_text(encoding="utf-8"))
     assert query["count"] == 2 and len(query["object_ids"]) == 2
     # No-reference additions use defaults only on initial scene creation;
     # existing sessions must supply a placement reference.
@@ -111,7 +111,7 @@ def main():
     fourth = json.loads(run("run", add, *add_options))
     assert fourth["run_status"] == "success" and "commands" not in fourth["artifacts"]
     assert fourth["scene_source"] == "generated" and fourth["scene_version"] == 2
-    edited = json.loads(Path(fourth["artifacts"]["scene_config"]).read_text())
+    edited = json.loads(Path(fourth["artifacts"]["scene_config"]).read_text(encoding="utf-8"))
     index = SceneIndex(SceneConfig.model_validate(edited))
     assert sum(index.semantic(o.object_id_in_scene).semantic_name == "banana" for o in index.semantic_objects()) == 1
     print(json.dumps({"wheel_smoke":"passed", "installed_module":str(installed), "artifacts":str(directory),

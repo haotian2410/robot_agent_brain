@@ -12,6 +12,7 @@ from pathlib import Path
 import httpx
 from ..contracts.camera import CameraFrame, CameraInstanceBox
 from ..contracts.scene import SceneSnapshot
+from ..filelock import sync_directory
 from ..scene.component_access import SceneIndex
 from ..scene.scene_manager import SceneManager
 from .protocol import PROTOCOL_VERSION, digest, loopback_url, validate_web_scene
@@ -22,16 +23,12 @@ def durable_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".write-")
     try:
-        with os.fdopen(fd, "w") as stream:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
             json.dump(value, stream, ensure_ascii=False, allow_nan=False, indent=2)
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        sync_directory(path.parent)
     finally:
         Path(temporary).unlink(missing_ok=True)
 
@@ -54,7 +51,7 @@ class GatewayScenePlatformAdapter:
         self.lease_uncertain = False
         self.next_object_id = 0
         if self.journal_dir and (self.journal_dir / "camera_binding.json").exists():
-            self.camera_id = json.loads((self.journal_dir / "camera_binding.json").read_text())["camera_id"]
+            self.camera_id = json.loads((self.journal_dir / "camera_binding.json").read_text(encoding="utf-8"))["camera_id"]
 
     def _call(self, method, route, **kwargs):
         if self.lease:

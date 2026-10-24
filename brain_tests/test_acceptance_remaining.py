@@ -51,12 +51,12 @@ def test_b08_initial_translation_is_applied_exactly_once(tmp_path):
 @pytest.mark.parametrize("payload", ["{broken", '{"schema_version":"99","scene_id":"s"}', '{"components":[]}'])
 def test_b12_bad_upload_never_generates_or_calls_model(tmp_path, payload):
     file = tmp_path / "input.json"
-    file.write_text(payload)
+    file.write_text(payload, encoding="utf-8")
     app = app_at(tmp_path / "out", robot())
     report = app.handle("two apples", scene_path=file)
     assert report.run_status == "failed" and not report.scene_created
     assert app.provider.count == 0 and "commands" not in report.artifacts
-    assert file.read_text() == payload
+    assert file.read_text(encoding="utf-8") == payload
 
 
 def test_b14_missing_asset_has_no_commands_or_partial_scene(tmp_path):
@@ -100,7 +100,7 @@ def test_q03_query_reads_confirmed_snapshot_without_increment(tmp_path, kind):
     report = app.handle("query", session_id="query")
     assert report.run_status == "success" and report.scene_version == first.scene_version
     assert app.get_session("query").scene.model_dump() == snapshot
-    result = json.loads(Path(report.artifacts["query_result"]).read_text())
+    result = json.loads(Path(report.artifacts["query_result"]).read_text(encoding="utf-8"))
     assert len(result["positions" if kind == "position" else "states"]) == 2
 
 

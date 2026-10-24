@@ -58,9 +58,14 @@ class SceneBootstrapper:
     def prepare(self, turn, *, scene_id):
         if turn.status != "accepted" or turn.turn_kind not in {"robot_task", "scene_edit"}:
             raise ValueError("scene_required")
-        if self.table_ref is None or self.robot_ref is None or self.driver is None:
-            raise ValueError("bootstrap_config_missing: configure table/robot MetadataRef and RobotDriver")
-        driver = RobotDriverProperties.model_validate(self.driver.model_dump() if hasattr(self.driver, "model_dump") else self.driver)
+        if self.table_ref is None or self.robot_ref is None:
+            raise ValueError("bootstrap_config_missing: configure table/robot MetadataRef")
+        if self.driver is None and self.template_scene is None:
+            # A template scene carries the robot's own RobotDriver component, so the configured
+            # default driver is only needed when the table and robot are built from nothing here.
+            raise ValueError("bootstrap_config_missing: configure RobotDriver for a bootstrap without a template scene")
+        driver = (RobotDriverProperties.model_validate(self.driver.model_dump() if hasattr(self.driver, "model_dump") else self.driver)
+                  if self.driver is not None else None)
         if turn.turn_kind == "robot_task":
             entities, relations = turn.task_intent.entities, turn.task_intent.spatial_relations
         else:

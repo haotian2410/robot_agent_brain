@@ -26,7 +26,7 @@ def test_demo_resources_alias_and_missing_color_evidence():
 
 def test_config_precedence_and_secrets(tmp_path):
     file = tmp_path / "settings.json"
-    file.write_text(json.dumps({"model": "file", "timeout": 9, "assets": "assets.json"}))
+    file.write_text(json.dumps({"model": "file", "timeout": 9, "assets": "assets.json"}), encoding="utf-8")
     config = BrainConfig.load(file, environ={"ROBOT_BRAIN_MODEL": "env", "ROBOT_BRAIN_API_KEY": "private"},
                               overrides={"model": "cli"})
     assert config.model == "cli" and config.timeout == 9
@@ -34,7 +34,7 @@ def test_config_precedence_and_secrets(tmp_path):
     assert "private" not in config.model_dump_json()
     assert "private" not in repr(config)
     assert BrainConfig.load(file, environ={"ROBOT_BRAIN_MODEL": "env"}).model == "env"
-    file.write_text('{"api_key":"forbidden"}')
+    file.write_text('{"api_key":"forbidden"}', encoding="utf-8")
     with pytest.raises(ValueError, match="config_secret_forbidden"):
         BrainConfig.load(file, environ={})
 
