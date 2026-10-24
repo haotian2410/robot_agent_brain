@@ -1,9 +1,11 @@
 """Canonical team component Scene v1; no legacy flat runtime representation."""
+import copy
 import math
+from dataclasses import dataclass
 from typing import Annotated, Literal
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, PrivateAttr, field_validator, model_validator
 
 
 SceneId = Annotated[int, Field(strict=True, ge=0, le=2**53 - 1)]
@@ -14,13 +16,17 @@ class StrictModel(BaseModel):
 
 
 class TransformProperties(StrictModel):
-    position: tuple[float, float, float] | None = None
-    quaternion_xyzw: tuple[float, float, float, float] | None = None
-    scale: tuple[float, float, float]
-    parent: SceneId | None
+    position: tuple[float, float, float] | None = (0.0, 0.0, 0.0)
+    quaternion_xyzw: tuple[float, float, float, float] | None = (0.0, 0.0, 0.0, 1.0)
+    scale: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    parent: SceneId | None = None
 
     @model_validator(mode="after")
     def valid_transform(self):
+        if self.position is None:
+            self.position = (0.0, 0.0, 0.0)
+        if self.quaternion_xyzw is None:
+            self.quaternion_xyzw = (0.0, 0.0, 0.0, 1.0)
         if (self.position is None) != (self.quaternion_xyzw is None):
             raise ValueError("transform_pose_fields_must_be_present_together")
         if self.quaternion_xyzw is not None:
@@ -35,14 +41,14 @@ class TransformProperties(StrictModel):
 class MetadataRefProperties(StrictModel):
     # The team fixture uses <id> for illustration. Structural load must keep it
     # unchanged; only the asset adapter decides whether it can be resolved.
-    path: str = Field(min_length=1)
-    type: Literal["model", "robot"] | None = None
+    path: str | None = None
+    type: str | None = None
 
 
 class SemanticProperties(StrictModel):
-    semantic_name: str = Field(min_length=1)
-    category: str = Field(min_length=1)
-    support: SceneId | None
+    semantic_name: str = ""
+    category: str = ""
+    support: SceneId | None = None
 
 
 class MeshRendererProperties(StrictModel):
@@ -50,51 +56,60 @@ class MeshRendererProperties(StrictModel):
 
 
 class LightProperties(StrictModel):
-    type: str = Field(min_length=1)
-    intensity: float = Field(ge=0)
-    color: str = Field(pattern=r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")
+    type: str = "Ambient"
+    intensity: float = 1.0
+    color: str = "#FFFFFF"
 
 
 class CameraProperties(StrictModel):
-    type: str = Field(min_length=1)
-    fov: float = Field(gt=0, lt=180)
-    near: float = Field(gt=0)
-    far: float = Field(gt=0)
-    resolution: tuple[Annotated[int, Field(strict=True, gt=0)], Annotated[int, Field(strict=True, gt=0)]]
+    type: str = "rgb"
+    fov: float = 60.0
+    near: float = 0.1
+    far: float = 1000.0
+    resolution: tuple[Annotated[int, Field(strict=True, gt=0)], Annotated[int, Field(strict=True, gt=0)]] = (640, 480)
 
     @model_validator(mode="after")
     def valid_clipping(self):
-        if self.far <= self.near:
-            raise ValueError("camera_far_must_exceed_near")
+        if self.far < self.near * 10:
+            self.far = self.near * 10
         return self
 
 
 class RobotDriverProperties(StrictModel):
-    joint_sequence: list[str] = Field(min_length=1)
+    joint_sequence: list[str] = Field(default_factory=list)
     joint_limits: dict[str, tuple[float, float]] | None = None
     initial_joint_positions_rad: dict[str, float] | None = None
     now_joint_positions_rad: dict[str, float] | None = None
     available_connect_joints: list[str] | None = None
+    role: str = "arm"
 
     @model_validator(mode="after")
     def valid_joints(self):
         if len(set(self.joint_sequence)) != len(self.joint_sequence) or any(not s for s in self.joint_sequence):
             raise ValueError("robot_joint_sequence_invalid")
-        if self.joint_limits and set(self.joint_sequence) != set(self.joint_limits):
-            raise ValueError("robot_joint_limits_coverage_invalid")
-        if self.joint_limits is None and self.available_connect_joints is None:
+        # A driven arm must declare limits.  End-effectors in the OLS scenes are the one
+        # deliberate exception: they expose a fixed mounting joint and are validated against
+        # the URDF inventory instead of carrying actuator limits in the scene document.
+        if self.role != "passive" and self.joint_sequence and self.joint_limits is None and self.available_connect_joints is None:
             raise ValueError("robot_joint_limits_missing")
         if any(low > high for low, high in (self.joint_limits or {}).values()):
             raise ValueError("robot_joint_limits_invalid")
-        if self.initial_joint_positions_rad is not None and not set(self.initial_joint_positions_rad) <= set(self.joint_sequence):
-            raise ValueError("robot_initial_joint_invalid")
-        if self.now_joint_positions_rad is not None and not set(self.now_joint_positions_rad) <= set(self.joint_sequence):
-            raise ValueError("robot_current_joint_invalid")
+        if self.role != "passive":
+            self.role = "arm"
+        if self.role != "passive" and not self.joint_sequence:
+            raise ValueError("robot_joint_sequence_invalid")
         # Fixed mounting joints need not be actuated. Asset-aware validation
         # checks these names against the complete URDF inventory offline.
         if self.available_connect_joints is not None and (len(set(self.available_connect_joints)) != len(self.available_connect_joints)
                 or any(not name for name in self.available_connect_joints)):
             raise ValueError("robot_connect_joint_invalid")
+        if self.now_joint_positions_rad is not None:
+            if any(not isinstance(value, (int, float)) or not math.isfinite(float(value))
+                   for value in self.now_joint_positions_rad.values()):
+                raise ValueError("robot_now_joint_position_invalid")
+            unknown = set(self.now_joint_positions_rad) - set(self.joint_sequence)
+            if unknown:
+                raise ValueError("robot_now_joint_unknown:" + ",".join(sorted(unknown)))
         return self
 
     def deployment_configuration(self):
@@ -103,28 +118,25 @@ class RobotDriverProperties(StrictModel):
 
 class RobotAttachmentProperties(StrictModel):
     parent_object_id: SceneId
-    parent_joint: str = Field(min_length=1)
-    parent_link: str = Field(min_length=1)
-    child_link: str = Field(min_length=1)
-    connection_type: Literal["fixed"]
-    transform: dict[str, list[float] | str]
+    parent_joint: str = ""
+    parent_link: str = ""
+    child_link: str = ""
+    connection_type: str = "fixed"
+    transform: dict[str, list[float] | str] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def valid_attachment_transform(self):
-        required = {"position", "quaternion_xyzw", "reference_frame"}
-        if set(self.transform) != required:
-            raise ValueError("robot_attachment_transform_invalid")
-        position = self.transform["position"]
-        quaternion = self.transform["quaternion_xyzw"]
+        position = self.transform.get("position")
+        quaternion = self.transform.get("quaternion_xyzw")
+        if position is None or quaternion is None:
+            return self
         if not isinstance(position, list) or len(position) != 3 or not isinstance(quaternion, list) or len(quaternion) != 4:
-            raise ValueError("robot_attachment_transform_invalid")
+            return self
         if not all(math.isfinite(v) for v in [*position, *quaternion]):
             raise ValueError("robot_attachment_transform_invalid")
         norm = sum(float(value) ** 2 for value in quaternion)
         if not math.isfinite(norm) or not math.isclose(norm, 1, rel_tol=0, abs_tol=.04):
             raise ValueError("robot_attachment_quaternion_not_normalized")
-        if not isinstance(self.transform["reference_frame"], str) or not self.transform["reference_frame"]:
-            raise ValueError("robot_attachment_reference_frame_invalid")
         return self
 
 
@@ -179,24 +191,23 @@ class SceneObject(StrictModel):
         if len(names) != len(set(names)):
             raise ValueError("scene_component_duplicate")
         transform = next(c for c in self.components if c.component_type == "Transform")
-        attachment = next((c for c in self.components if c.component_type == "RobotAttachment"), None)
-        if attachment is not None:
-            parent = attachment.properties["parent_object_id"]
-            if transform.properties["parent"] != parent:
-                raise ValueError("robot_attachment_parent_mismatch")
-            if transform.properties.get("position") is not None or transform.properties.get("quaternion_xyzw") is not None:
-                raise ValueError("robot_attachment_transform_must_omit_pose")
-        elif transform.properties.get("position") is None:
-            raise ValueError("transform_pose_required_without_attachment")
         return self
 
 
 class SceneConfig(StrictModel):
     scene_schema_version: Literal[1]
-    scene_version: Annotated[int, Field(strict=True, ge=0)]
-    scene_id: SceneId
-    scene_name: str
-    objects: list[SceneObject]
+    scene_version: Annotated[int, Field(strict=True, ge=0)] = 0
+    scene_id: SceneId = 0
+    scene_name: str = ""
+    scene_sub_version: Annotated[int, Field(strict=True, ge=0)] = 0
+    objects: list[SceneObject] = Field(default_factory=list)
+
+    _raw_document: dict | None = PrivateAttr(default=None)
+    _raw_has_sub_version: bool = PrivateAttr(default=False)
+    _rejected_objects: list[dict] = PrivateAttr(default_factory=list)
+
+    def raw_document(self):
+        return copy.deepcopy(self._raw_document) if self._raw_document is not None else self.model_dump(mode="json")
 
     @field_validator("scene_schema_version", mode="before")
     @classmethod
@@ -204,6 +215,31 @@ class SceneConfig(StrictModel):
         if type(value) is not int or value != 1:
             raise ValueError("scene_schema_unsupported")
         return value
+
+    @model_validator(mode="after")
+    def track_document_fields(self):
+        self._raw_has_sub_version = "scene_sub_version" in self.model_fields_set
+        return self
+
+    def model_dump(self, *args, **kwargs):
+        value = super().model_dump(*args, **kwargs)
+        if not self._raw_has_sub_version and value.get("scene_sub_version") == 0:
+            value.pop("scene_sub_version", None)
+        return value
+
+    def __eq__(self, other):
+        if isinstance(other, SceneConfig):
+            left = self.model_dump(mode="json")
+            right = other.model_dump(mode="json")
+            # Typed-view equality treats an omitted optional sub-version and
+            # an explicit zero as the same view.  Document digests still
+            # distinguish the two raw JSON documents.
+            if left.get("scene_sub_version") == 0:
+                left.pop("scene_sub_version", None)
+            if right.get("scene_sub_version") == 0:
+                right.pop("scene_sub_version", None)
+            return left == right
+        return NotImplemented
 
     @model_validator(mode="after")
     def validate_graph(self):
@@ -233,6 +269,127 @@ class SceneConfig(StrictModel):
             completed.update(visited)
         return self
 
+
+@dataclass(frozen=True)
+class SceneDocument:
+    """Lossless wire document plus a permissive typed view.
+
+    The raw mapping is the only source for protocol digests and round-trips.
+    ``view`` is deliberately a separate, normalized representation used by
+    Brain's existing scene algorithms.
+    """
+
+    raw: dict
+    view: SceneConfig
+    rejected_objects: list[dict]
+    warnings: list[str]
+
+
+def parse_scene_document(value, *, uint32=True):
+    """Parse a WebEditor Scene v1 document without rewriting its raw JSON."""
+    if not isinstance(value, dict):
+        raise ValueError("scene_file_invalid")
+    if type(value.get("scene_schema_version")) is not int or value.get("scene_schema_version") != 1:
+        raise ValueError("scene_schema_unsupported")
+    raw = copy.deepcopy(value)
+    objects_raw = raw.get("objects", [])
+    if not isinstance(objects_raw, list):
+        objects_raw = []
+    limit = 2**32 if uint32 else 2**53
+    rejected, warnings, accepted = [], [], []
+    id_to_index, id_to_obj = {}, {}
+    for index, item in enumerate(objects_raw):
+        if not isinstance(item, dict):
+            rejected.append({"index": index, "reason": "object_invalid"})
+            continue
+        identifier = item.get("object_id_in_scene")
+        if type(identifier) is not int or not 0 <= identifier < limit or identifier in id_to_obj:
+            rejected.append({"index": index, "reason": "object_id_invalid"})
+            continue
+        id_to_index[identifier] = index
+        id_to_obj[identifier] = item
+    def components_for(item):
+        values = item.get("components", [])
+        if not isinstance(values, list):
+            warnings.append("components_not_array")
+            values = []
+        seen, components = set(), []
+        for component in values:
+            if not isinstance(component, dict) or not isinstance(component.get("component_type"), str):
+                warnings.append("component_invalid")
+                continue
+            name = component["component_type"]
+            if name in seen:
+                warnings.append(f"component_duplicate:{name}")
+                continue
+            seen.add(name)
+            properties = component.get("properties", {})
+            components.append({"component_type": name, "properties": copy.deepcopy(properties) if isinstance(properties, dict) else {}})
+        if "Transform" not in seen:
+            warnings.append("transform_missing")
+            components.append({"component_type": "Transform", "properties": {
+                "position": [0.0, 0.0, 0.0], "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
+                "scale": [1.0, 1.0, 1.0], "parent": None}})
+        return components
+    normalized = {}
+    for identifier, item in id_to_obj.items():
+        components = components_for(item)
+        transform = next(c["properties"] for c in components if c["component_type"] == "Transform")
+        parent = transform.get("parent")
+        if parent == 0xFFFFFFFF:
+            parent = None
+        if type(parent) is not int or not 0 <= parent < limit:
+            parent = None if parent is None else "__invalid__"
+        normalized[identifier] = {
+            "object_id_in_scene": identifier,
+            "object_name_in_scene": item.get("object_name_in_scene") if isinstance(item.get("object_name_in_scene"), str)
+                else f"object_{identifier}",
+            "components": components,
+            "_parent": parent,
+        }
+    invalid_ids = set()
+    for identifier, item in normalized.items():
+        parent = item["_parent"]
+        if parent == "__invalid__" or (parent is not None and parent not in normalized):
+            invalid_ids.add(identifier)
+    for identifier in list(normalized):
+        visited, current = set(), identifier
+        while current is not None and current in normalized and current not in invalid_ids:
+            if current in visited:
+                invalid_ids.update(visited)
+                break
+            visited.add(current)
+            current = normalized[current]["_parent"]
+    def descendants(identifier):
+        result = {identifier}
+        changed = True
+        while changed:
+            changed = False
+            for child, item in normalized.items():
+                if child not in result and item["_parent"] in result:
+                    result.add(child); changed = True
+        return result
+    for identifier in list(invalid_ids):
+        invalid_ids.update(descendants(identifier))
+    for identifier in sorted(invalid_ids):
+        rejected.append({"index": id_to_index[identifier], "object_id_in_scene": identifier, "reason": "parent_invalid"})
+    for identifier, item in normalized.items():
+        if identifier in invalid_ids:
+            continue
+        components = [SceneComponent.model_construct(component_type=c["component_type"], properties=c["properties"])
+                      for c in item["components"]]
+        accepted.append(SceneObject.model_construct(object_id_in_scene=identifier,
+            object_name_in_scene=item["object_name_in_scene"], components=components))
+    scene = SceneConfig.model_construct(
+        scene_schema_version=1,
+        scene_version=value.get("scene_version") if type(value.get("scene_version")) is int and value.get("scene_version") >= 0 else 0,
+        scene_id=value.get("scene_id") if type(value.get("scene_id")) is int and 0 <= value.get("scene_id") < limit else 0,
+        scene_name=value.get("scene_name") if isinstance(value.get("scene_name"), str) else "",
+        scene_sub_version=value.get("scene_sub_version") if type(value.get("scene_sub_version")) is int and 0 <= value.get("scene_sub_version") < limit else 0,
+        objects=accepted)
+    scene._raw_document = raw
+    scene._raw_has_sub_version = "scene_sub_version" in raw
+    return SceneDocument(raw=raw, view=scene, rejected_objects=rejected, warnings=warnings)
 
 class PatchAction(StrEnum):
     ADD = "add_object"
@@ -271,6 +428,7 @@ class ScenePatch(StrictModel):
 class SceneSnapshot(StrictModel):
     scene_id: SceneId
     scene_version: Annotated[int, Field(strict=True, ge=0)]
+    scene_sub_version: Annotated[int, Field(strict=True, ge=0)] = 0
     accepted: bool = True
     error: str | None = None
 

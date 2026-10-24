@@ -2,7 +2,7 @@ from .camera import CameraFrame, CameraRequest
 from .commands import Command, CommandsFile, ExecutionFeedback
 from .grounded_task import GroundedEntity, GroundedTask
 from .model_property import ModelProperty
-from .scene import SceneConfig, SceneObject, ScenePatch, ScenePatchOperation, SceneSnapshot, Transform
+from .scene import SceneConfig, SceneDocument, SceneObject, ScenePatch, ScenePatchOperation, SceneSnapshot, Transform, parse_scene_document
 from .skill_plan import SkillPlan, SkillStep
 from .spatial import RelationScope, SpatialRelation, SpatialRelationType
 from .turn import BrainTurn, SceneEditIntent, SceneEditPlan, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
@@ -10,10 +10,10 @@ from .task_intent import Direction, MotionScale, Operation, PlacementTarget, Qua
 
 __all__ = [
     "CameraFrame", "CameraRequest", "Command", "CommandsFile", "ExecutionFeedback",
-    "GroundedEntity", "GroundedTask", "ModelProperty", "SceneConfig", "SceneObject",
+    "GroundedEntity", "GroundedTask", "ModelProperty", "SceneConfig", "SceneDocument", "SceneObject",
     "ScenePatch", "ScenePatchOperation", "SceneSnapshot", "Transform", "SkillPlan",
     "SkillStep", "Direction", "MotionScale", "Operation", "PlacementTarget",
     "QuantityMode", "TaskEntity", "TaskIntent", "TaskType",
     "RelationScope", "SpatialRelation", "SpatialRelationType", "BrainTurn", "SceneEditIntent", "SceneEditPlan",
-    "SceneQueryIntent", "SessionControlIntent", "TurnKind", "TurnStatus",
+    "SceneQueryIntent", "SessionControlIntent", "TurnKind", "TurnStatus", "parse_scene_document",
 ]

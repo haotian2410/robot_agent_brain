@@ -87,14 +87,22 @@ def main():
             or len(scenes) != len(expected["scene_ids"]) or {item["id"] for item in scenes} != set(expected["scene_ids"])):
         raise ValueError("final_models_coverage_invalid")
     joints = {}
-    for identifier, name in robots["by_id"].items():
-        directory = root / "robots" / identifier
-        files = json.loads((directory / f"{name}_files.json").read_text())
-        entrance = contained(root, directory, files["path"])
-        if entrance.suffix.lower() == ".urdf":
-            document = ET.parse(entrance).getroot()
-            joints[f"robot:{identifier}"] = {"joints": sorted(n.attrib["name"] for n in document.findall("joint")),
-                "links": sorted(n.attrib["name"] for n in document.findall("link"))}
+    # Keep a typed inventory for every URDF-backed namespace.  New OLS scenes
+    # use RobotDriver on passive model assets (cabinet, drawer, microwave,
+    # button, bottle), so limiting this cache to robots makes valid scenes
+    # fail during web validation.
+    for kind, index in (("model", models), ("robot", robots)):
+        directory_name = "models" if kind == "model" else "robots"
+        for identifier, name in index["by_id"].items():
+            directory = root / directory_name / identifier
+            files = json.loads((directory / f"{name}_files.json").read_text())
+            entrance = contained(root, directory, files["path"])
+            if entrance.suffix.lower() == ".urdf":
+                document = ET.parse(entrance).getroot()
+                joints[f"{kind}:{identifier}"] = {
+                    "joints": sorted(n.attrib["name"] for n in document.findall("joint")),
+                    "links": sorted(n.attrib["name"] for n in document.findall("link")),
+                }
     for item in scenes:
         path = contained(root, root / "scenes", f"{item['id']}/{item['name']}.json")
         scene = json.loads(path.read_text())

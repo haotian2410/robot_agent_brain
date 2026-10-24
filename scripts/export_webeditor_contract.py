@@ -12,8 +12,9 @@ def export(directory):
         durable_json(directory/(name+'.schema.json'),model.model_json_schema())
     scene = SceneConfig(scene_schema_version=1,scene_id=1,scene_version=1,scene_name="synthetic-wire-fixture",objects=[])
     # Wire-valid empty Scene, NOT a production UR5e scene or a successful robot demo.
-    start = StartTask(command="查询苹果数量",scene=scene,sessionID="fixture-session",clientRequestID="fixture-request",
-        browserID="fixture-browser",sceneDigest=digest(scene))
+    scene_payload = scene.model_dump(mode="json")
+    start = StartTask(command="查询苹果数量",scene=scene_payload,sessionID="fixture-session",clientRequestID="fixture-request",
+        browserID="fixture-browser",sceneDigest=digest(scene_payload))
     durable_json(directory/'start_task.json',start.model_dump(mode='json'))
     durable_json(directory/'task_queued.json',{"taskID":1,"state":"已进入队列","code":0})
     durable_json(directory/'clarification.json',{"taskID":1,"outcome":"clarification_required","executed":False,

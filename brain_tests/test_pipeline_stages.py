@@ -73,6 +73,15 @@ def test_context_markers_do_not_replace_original_instruction():
     assert turn.instruction == turn.task_intent.instruction == "抓起它"
 
 
+def test_explicit_original_scene_phrase_overrides_model_current_default():
+    pipeline, provider, scene = fixture_pipeline("scene_edit")
+    provider.turn = provider.turn.model_copy(update={
+        "scene_edit": provider.turn.scene_edit.model_copy(update={"scene_basis": "current"})
+    })
+    turn = pipeline.understand_turn("在原始场景把苹果右移十厘米", scene=scene)
+    assert turn.scene_edit.scene_basis == "original"
+
+
 def test_compatibility_run_calls_understanding_once():
     pipeline, provider, scene = fixture_pipeline("robot_task")
     assert pipeline.run("r", "抓起苹果", scene).commands is not None

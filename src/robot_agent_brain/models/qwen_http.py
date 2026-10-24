@@ -16,7 +16,7 @@ from ..contracts.camera import CameraFrame
 from ..contracts.task_intent import TaskIntent
 from .prompts import TASK_UNDERSTANDING_PROMPT, VISION_GROUNDING_PROMPT, SKILL_PLANNING_PROMPT, prompt_payload
 from .skill_planning import SkillPlanningRequest, SkillPlanLLMOutput
-from .task_understanding import TaskParseOutput, TaskUnderstandingRequest
+from .task_understanding import TaskParseOutput, TaskUnderstandingRequest, parse_qwen_turn
 from .vision_grounding import VisionEntity, VisionGroundingOutput
 
 
@@ -138,16 +138,28 @@ class QwenHTTPProvider:
     def understand_turn(self, request: TaskUnderstandingRequest):
         from .task_understanding import task_understanding_wire_schema
         def parse(value):
-            return TaskParseOutput.model_validate(value).to_brain_turn(request.instruction)
+            return parse_qwen_turn(value, request.instruction)
         return self._call("task_understanding", TASK_UNDERSTANDING_PROMPT,
                           prompt_payload({"instruction": request.instruction}), task_understanding_wire_schema(), parse)
 
     def plan(self, request: SkillPlanningRequest) -> SkillPlanLLMOutput:
         content = {**request.context.model_dump(mode="json"), "skills": request.skill_catalog}
         budget = min(self.planner_max_completion_tokens, 384 + 128 * max(len(request.context.operations), 1))
-        return self._call("skill_planning", SKILL_PLANNING_PROMPT, prompt_payload(content),
-                          SkillPlanLLMOutput.model_json_schema(), SkillPlanLLMOutput.model_validate,
-                          max_completion_tokens=budget)
+        try:
+            return self._call("skill_planning", SKILL_PLANNING_PROMPT, prompt_payload(content),
+                              SkillPlanLLMOutput.model_json_schema(), SkillPlanLLMOutput.model_validate,
+                              max_completion_tokens=budget)
+        except QwenProviderError as exc:
+            # Qwen/llama-server may finish a valid structured plan exactly at the small
+            # operation-derived budget (512 for one pick-and-place).  A bounded retry prevents
+            # an otherwise valid task from becoming a provider failure while preserving strict
+            # JSON/schema validation and the original failed call in diagnostics.
+            if "model_output_truncated" not in str(exc) or budget >= self.planner_max_completion_tokens:
+                raise
+            retry_budget = min(self.planner_max_completion_tokens, max(budget * 2, 1024))
+            return self._call("skill_planning", SKILL_PLANNING_PROMPT, prompt_payload(content),
+                              SkillPlanLLMOutput.model_json_schema(), SkillPlanLLMOutput.model_validate,
+                              max_completion_tokens=retry_budget)
 
     def plan_dual(self, request):
         from .dual_skill_planning import DualSkillPlanOutput

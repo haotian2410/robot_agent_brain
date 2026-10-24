@@ -3,7 +3,7 @@ from pathlib import Path
 
 from robot_agent_brain.application import BrainApplication
 from robot_agent_brain.config import BrainConfig
-from robot_agent_brain.contracts.turn import BrainTurn
+from robot_agent_brain.contracts.turn import BrainTurn, SceneEditIntent, SceneEditPlan, SceneQueryIntent
 from robot_agent_brain.models.task_understanding import TaskParseOutput
 from test_application_artifacts import Provider
 from test_query_scene_continuity import supported_scene
@@ -43,3 +43,42 @@ def test_original_replace_finds_deleted_object_and_publishes_provenance(tmp_path
     assert again.run_status == "success", again
     assert again.scene_id != replaced.scene_id
     assert provider.count == 4
+
+
+def test_empty_import_is_frozen_before_first_edit_and_reused_for_original_adds(tmp_path):
+    source_scene = supported_scene().model_copy(update={"objects": [supported_scene().objects[0]]})
+    path = tmp_path / "empty_platform.json"
+    path.write_text(source_scene.model_dump_json())
+    provider = Provider(BrainTurn(
+        status="accepted", turn_kind="scene_query", instruction="有几个香蕉",
+        scene_query=SceneQueryIntent(query_type="count", target="banana",
+                                     entities=[{"entity_id": "banana", "semantic_name": "banana", "category": "fruit"}]),
+    ))
+    app = BrainApplication(
+        BrainConfig(provider="replay", output_dir=str(tmp_path / "out"), scene_platform_object_ids={0}),
+        provider=provider,
+    )
+    first = app.handle("有几个香蕉", scene_path=path)
+    assert first.run_status == "success", first
+    root = tmp_path / "out" / first.session_id
+    manifest = json.loads((root / "original_scene_manifest.json").read_text())
+    original = json.loads((root / "original_scene.json").read_text())
+    assert manifest["source"] == "uploaded"
+    assert manifest["task_object_ids"] == []
+    assert len(original["objects"]) == 1
+
+    original_add = BrainTurn(
+        status="accepted", turn_kind="scene_edit", instruction="在原始场景把桌子改成蓝色",
+        scene_edit=SceneEditPlan(
+            scene_basis="original",
+            entities=[{"entity_id": "table", "semantic_name": "table", "category": "surface"}],
+            operations=[SceneEditIntent(operation="update_properties", target="table", properties={"color": "blue"})],
+        ),
+    )
+    provider.turn = original_add
+    derived = app.handle("在原始场景把桌子改成蓝色", session_id=first.session_id)
+    repeated = app.handle("再次在原始场景把桌子改成蓝色", session_id=first.session_id)
+    assert derived.run_status == repeated.run_status == "success"
+    assert derived.scene_id != repeated.scene_id
+    assert derived.scene_version == repeated.scene_version == 1
+    assert (root / "original_scene.json").read_bytes() == json.dumps(original, ensure_ascii=False, sort_keys=True, indent=2).encode()

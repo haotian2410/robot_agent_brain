@@ -25,6 +25,7 @@ class CameraFrame(BaseModel):
     camera_id: str
     scene_id: SceneId
     scene_version: int = Field(ge=0)
+    scene_sub_version: int = Field(default=0, ge=0)
     width: int = Field(gt=0)
     height: int = Field(gt=0)
     rgb: bytes | None = None

@@ -20,7 +20,22 @@ class SceneIndex:
         component = self.component(identifier, component_type)
         if component is None:
             return None
-        return COMPONENT_PROPERTIES[component_type].model_validate(component.properties)
+        model = COMPONENT_PROPERTIES[component_type]
+        try:
+            return model.model_validate(component.properties)
+        except Exception:
+            # Web Scene v1 is intentionally lossless and permissive.  Keep
+            # malformed/unknown fields in the raw component while exposing a
+            # safe typed view with component defaults to Brain algorithms.
+            values = {}
+            for name, field in model.model_fields.items():
+                if name in component.properties:
+                    values[name] = component.properties[name]
+                elif not field.is_required():
+                    values[name] = field.default_factory() if field.default_factory is not None else field.default
+                else:
+                    values[name] = None
+            return model.model_construct(**values)
 
     def transform(self, identifier):
         return self.properties(identifier, "Transform")

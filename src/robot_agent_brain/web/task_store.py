@@ -8,7 +8,7 @@ import uuid
 from pathlib import Path
 from .protocol import digest
 
-STATES = ("已创建", "已进入队列", "进行中", "任务完成", "任务失败")
+DEFAULT_STATES = ("已创建", "已进入队列", "进行中", "任务完成", "任务失败")
 
 
 class TaskStore:
@@ -31,19 +31,23 @@ class TaskStore:
         CREATE UNIQUE INDEX IF NOT EXISTS single_active ON sessions(active) WHERE active=1;
         CREATE TABLE IF NOT EXISTS tasks(id INTEGER PRIMARY KEY AUTOINCREMENT, session TEXT NOT NULL,
           request_key TEXT NOT NULL, fingerprint TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL,
-          result TEXT, created REAL NOT NULL, updated REAL NOT NULL, UNIQUE(session,request_key));
+          result TEXT, terminal INTEGER NOT NULL DEFAULT 0, created REAL NOT NULL, updated REAL NOT NULL,
+          UNIQUE(session,request_key));
         """)
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(tasks)")}
+        if "terminal" not in columns:
+            self.db.execute("ALTER TABLE tasks ADD COLUMN terminal INTEGER NOT NULL DEFAULT 0")
         with self.lock, self.db:
-            self.db.execute("UPDATE sessions SET uncertain=1 WHERE id IN (SELECT session FROM tasks WHERE state='进行中')")
-            self.db.execute("UPDATE tasks SET state='任务失败', result=?, updated=? WHERE state IN ('已创建','已进入队列','进行中')",
+            self.db.execute("UPDATE sessions SET uncertain=1 WHERE id IN (SELECT session FROM tasks WHERE terminal=0)")
+            self.db.execute("UPDATE tasks SET state='service_restarted', terminal=1, result=?, updated=? WHERE terminal=0",
                 (json.dumps({"outcome": "failed", "executed": False, "error": {"code": "service_restarted", "message": "Interrupted; do not replay automatically"}}), time.time()))
 
     def busy(self):
-        return self.db.execute("SELECT 1 FROM tasks WHERE state IN ('已创建','已进入队列','进行中') LIMIT 1").fetchone() is not None
+        return self.db.execute("SELECT 1 FROM tasks WHERE terminal=0 LIMIT 1").fetchone() is not None
 
-    def activate(self, browser, session=None):
+    def activate(self, browser, session=None, *, allow_active_task=False):
         with self.lock, self.db:
-            if self.busy():
+            if self.busy() and not allow_active_task:
                 raise ValueError("task_busy")
             if session is not None:
                 row = self.db.execute("SELECT * FROM sessions WHERE id=?", (session,)).fetchone()
@@ -71,6 +75,12 @@ class TaskStore:
 
     def submit(self, task):
         value = task.model_dump(mode="json")
+        # Keep the submitted Scene document lossless. Pydantic materializes the optional
+        # scene_sub_version=0 when serializing a nested SceneConfig, which changes the JCS digest
+        # before the worker re-reads the durable task and makes a valid browser snapshot look
+        # like a gateway scene conflict.
+        if hasattr(task.scene, "raw_document") and "scene_sub_version" not in task.scene.raw_document():
+            value["scene"].pop("scene_sub_version", None)
         fingerprint = digest(value)
         with self.lock, self.db:
             existing = self.db.execute("SELECT * FROM tasks WHERE session=? AND request_key=?", (task.sessionID,task.clientRequestID)).fetchone()
@@ -83,7 +93,13 @@ class TaskStore:
                 raise ValueError("session_browser_not_active")
             if binding["uncertain"]:
                 raise ValueError("session_reconciliation_required")
-            if self.busy():
+            # The browser may switch to another session while an older session's task is still
+            # running.  Keep the one-running-task rule per session, but allow a different session
+            # to queue behind the single worker; its scene/lease is isolated by the Gateway.
+            same_session_busy = self.db.execute(
+                "SELECT 1 FROM tasks WHERE terminal=0 AND session=? LIMIT 1", (task.sessionID,)
+            ).fetchone() is not None
+            if same_session_busy:
                 raise ValueError("task_busy")
             now = time.time()
             cursor = self.db.execute("INSERT INTO tasks(session,request_key,fingerprint,payload,state,created,updated) VALUES (?,?,?,?,?,?,?)",
@@ -96,16 +112,20 @@ class TaskStore:
             if row is None:
                 raise ValueError("task_not_found")
             data = dict(row)
+            data["terminal"] = bool(data["terminal"])
             data["payload"] = json.loads(data["payload"])
             data["result"] = json.loads(data["result"]) if data["result"] else None
             return data
 
-    def update(self, identifier, state, result=None, *, uncertain=False):
-        if state not in STATES:
+    def update(self, identifier, state, result=None, *, uncertain=False, terminal=None):
+        if not isinstance(state, str) or not state.strip():
             raise ValueError("invalid_task_state")
+        if terminal is None:
+            terminal = result is not None and isinstance(result, dict) and result.get("outcome") is not None
         with self.lock, self.db:
-            self.db.execute("UPDATE tasks SET state=?,result=?,updated=? WHERE id=?", (state,
-                json.dumps(result,ensure_ascii=False,allow_nan=False) if result is not None else None,time.time(),identifier))
+            self.db.execute("UPDATE tasks SET state=?,result=?,terminal=?,updated=? WHERE id=?", (state,
+                json.dumps(result,ensure_ascii=False,allow_nan=False) if result is not None else None,
+                int(bool(terminal)), time.time(), identifier))
             if uncertain:
                 self.db.execute("UPDATE sessions SET uncertain=1 WHERE id=(SELECT session FROM tasks WHERE id=?)", (identifier,))
 

@@ -49,6 +49,26 @@ def test_uint32_rejects_not_truncates():
         validate_web_scene(scene)
 
 
+def test_typed_inventory_accepts_passive_model_driver_and_reports_model_joint():
+    raw = {
+        "scene_schema_version": 1, "scene_id": 1, "scene_version": 0,
+        "scene_name": "passive-model", "objects": [{
+            "object_id_in_scene": 1, "object_name_in_scene": "cabinet",
+            "components": [
+                {"component_type": "MetadataRef", "properties": {"path": "$LIBRARY_SERVER/28", "type": "model"}},
+                {"component_type": "RobotDriver", "properties": {
+                    "role": "passive", "joint_sequence": ["cabinet0132_door01"]}},
+            ],
+        }],
+    }
+    assert validate_web_scene(raw, {"model:28": {"joints": ["cabinet0132_door01"]}}).objects
+    with pytest.raises(ValueError, match="model_28_joint_unknown:missing_joint"):
+        validate_web_scene({**raw, "objects": [{**raw["objects"][0], "components": [
+            raw["objects"][0]["components"][0],
+            {"component_type": "RobotDriver", "properties": {"role": "passive", "joint_sequence": ["missing_joint"]}},
+        ]}]}, {"model:28": {"joints": ["cabinet0132_door01"]}})
+
+
 def test_durable_tasks_idempotency_busy_restart(tmp_path):
     store = TaskStore(tmp_path / "tasks.db")
     session = store.activate("b")
@@ -63,7 +83,7 @@ def test_durable_tasks_idempotency_busy_restart(tmp_path):
     store.update(row["id"], "进行中")
     store.close()
     store = TaskStore(tmp_path / "tasks.db")
-    assert store.get(row["id"])["state"] == "任务失败"
+    assert store.get(row["id"])["state"] == "service_restarted"
     assert store.binding(session)["uncertain"] == 1
     with pytest.raises(ValueError, match="reconciliation"):
         store.activate("b", session)
@@ -74,10 +94,10 @@ def test_durable_tasks_idempotency_busy_restart(tmp_path):
 
 
 def test_all_ols_scenes_roundtrip_and_joint_inventory():
-    root = Path(__file__).resolve().parents[2] / 'webeditor_runtime/ObjectLibraryServer-1.0.4-rel/data'
+    root = Path(__file__).resolve().parents[2] / 'webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data'
     inventory = Path('var/webeditor/joint_inventory.json')
     if not root.exists() or not inventory.exists():
-        pytest.skip("external OLS 1.0.4 package/joint cache not installed")
+        pytest.skip("external OLS 1.0.5 package/joint cache not installed")
     joints = json.loads(inventory.read_text())
     for item in json.loads((root/'scenes/scene_index.json').read_text()):
         original = json.loads((root/'scenes'/str(item['id'])/(item['name']+'.json')).read_text())

@@ -27,6 +27,8 @@ class SessionState(BaseModel):
     dialogue: DialogueState = Field(default_factory=DialogueState)
     session_action: Literal["pause", "resume", "close"] | None = None
     sync_state: Literal["synchronized", "unknown"] = "synchronized"
+    session_phase: Literal["setup", "agent_owned"] = "setup"
+    camera_id: int | None = None
     holding_object: SceneId | None = None
     robot_setup: RobotSetup | None = None
     robot_setup_revision: int = Field(default=0, strict=True, ge=0)
@@ -170,6 +172,7 @@ class SessionStore:
         state = SessionState(session_id=session_id, revision=revision, config_fingerprint=config_fingerprint, scene=session.scene,
             seen_scene_object_ids=session.seen_scene_object_ids, next_scene_object_id=session.next_scene_object_id,
             dialogue=session.dialogue, session_action=session.session_action, sync_state=session.sync_state,
+            session_phase=getattr(session, "session_phase", "setup"), camera_id=getattr(session, "camera_id", None),
             holding_object=session.holding_object, last_exported_request=session.last_exported_request,
             robot_setup=session.robot_setup, robot_setup_revision=session.robot_setup_revision, arm_states=session.arm_states,
             original_scene_manifest=session.original_scene_manifest, platform_object_ids=session.platform_object_ids,
@@ -180,12 +183,19 @@ class SessionStore:
         parent = self.directory(session_id)
         fd, temporary = tempfile.mkstemp(prefix=".state-", dir=parent)
         try:
+            encoded = state.model_dump(mode="json")
+            # Preserve the lossless Scene document's omission of the optional zero sub-version.
+            # Pydantic's nested serializer materializes defaults, which otherwise turns an
+            # unchanged scene into a different raw document after restart and trips the browser
+            # scene-digest/version gate.
+            if session.scene is not None and "scene_sub_version" not in session.scene.raw_document():
+                encoded["scene"].pop("scene_sub_version", None)
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
-                stream.write(json.dumps(state.model_dump(mode="json"), ensure_ascii=False, allow_nan=False))
+                stream.write(json.dumps(encoded, ensure_ascii=False, allow_nan=False))
                 stream.flush()
                 os.fsync(stream.fileno())
             check = SessionState.model_validate_json(Path(temporary).read_text(encoding="utf-8"))
-            if check != state:
+            if check.model_dump(mode="json") != state.model_dump(mode="json"):
                 raise ValueError("session_state_readback_mismatch")
             os.replace(temporary, parent / "session_state.json")
         finally:
@@ -206,7 +216,7 @@ class SessionStore:
         else:
             session.seen_scene_object_ids = set(state.seen_scene_object_ids)
             session.next_scene_object_id = state.next_scene_object_id
-        for name in ("dialogue", "session_action", "sync_state", "holding_object", "last_exported_request",
+        for name in ("dialogue", "session_action", "sync_state", "session_phase", "camera_id", "holding_object", "last_exported_request",
                      "exported_commands", "dispatched_requests", "pending_commands", "pending_execution_request",
                      "last_feedback_source", "recovery_context"):
             setattr(session, name, getattr(state.model_copy(deep=True), name))

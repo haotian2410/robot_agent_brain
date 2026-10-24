@@ -94,6 +94,13 @@ def world_transform(scene, object_id):
         if identifier in visited:
             raise ValueError("scene_parent_cycle")
         visited.add(identifier)
+        # RobotAttachment poses are owned by the external platform/URDF
+        # runtime.  A Transform component may intentionally contain only
+        # scale/parent, and even a serialized attachment transform is not a
+        # Brain-computable world pose.  Never silently use the parent pose as
+        # the gripper or wrist-camera pose.
+        if index.component(identifier, "RobotAttachment") is not None:
+            raise ValueError("scene_attachment_pose_requires_platform")
         transform = index.transform(identifier)
         if transform.position is None or transform.quaternion_xyzw is None:
             raise ValueError("scene_attachment_pose_requires_platform")

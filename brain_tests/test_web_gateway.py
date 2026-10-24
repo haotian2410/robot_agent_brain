@@ -27,8 +27,10 @@ class Browser:
         identity = {"browserID":"b","scene_id":self.scene.scene_id,"scene_version":self.scene.scene_version,
                     "sceneDigest":digest(self.scene),"playback_state":"stopped"}
         if route == "/brainCapabilities":
-            return httpx.Response(200,json={"protocol":"brain-web/1","browserID":"b","capabilities":[
-                "atomic_commit","versioned_manual_edits","bound_browser","task_edit_lock"]})
+            return httpx.Response(200,json={"protocol":"brain-web/2","browserID":"b","capabilities":[
+                "atomic_commit","sub_versioned_scene_identity","setup_only_local_edits",
+                "bound_browser","task_edit_lock","canonical_scene","agent_owned_phase",
+                "uncertain_recovery"]})
         if route == "/acquireSceneLease":
             if self.fault == "lease_timeout":raise httpx.ReadTimeout("lost lease",request=request)
             return httpx.Response(200,json={"browserID":"b","leaseToken":"lease"})
@@ -87,7 +89,8 @@ def test_commit_receipt_and_timeout_never_resend(tmp_path,fault):
     candidate=browser.scene.model_copy(update={"scene_version":1})
     browser.fault=fault
     if fault in {"unknown","reject"}:
-        with pytest.raises(ValueError,match="commit_unknown"):platform.load_scene(candidate)
+        expected = "gateway_commit_rejected" if fault == "reject" else "gateway_commit_unknown"
+        with pytest.raises(ValueError,match=expected):platform.load_scene(candidate)
         assert platform.scene.scene_version==0
     else:
         assert platform.load_scene(candidate).scene_version==1

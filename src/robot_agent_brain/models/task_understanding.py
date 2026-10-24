@@ -4,7 +4,7 @@ from ..semantics.motion_evidence import _extract_motion_spans, resolve_motion_ev
 from typing import Protocol, Literal
 from ..contracts.robot_setup import RobotSetupRequest
 from ..contracts.task_intent import TaskHoldConstraint
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from ..contracts.turn import BrainTurn, SceneEditPlan, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
 
 from ..contracts.spatial import RelationScope, SpatialRelation, SpatialRelationType
@@ -78,6 +78,7 @@ class TaskParseOutput(BaseModel):
     hold_constraints: list[TaskHoldConstraint] = Field(default_factory=list)
     status: TurnStatus = TurnStatus.ACCEPTED
     turn_kind: TurnKind = TurnKind.ROBOT_TASK
+    clarification_question: str | None = None
     scene_edit: SceneEditPlan | None = None
     scene_query: SceneQueryIntent | None = None
     session_control: SessionControlIntent | None = None
@@ -88,6 +89,8 @@ class TaskParseOutput(BaseModel):
 
     @model_validator(mode="after")
     def validate_turn(self):
+        if self.status == TurnStatus.ACCEPTED and self.clarification_question is not None:
+            raise ValueError("task_semantic_invalid: accepted turn cannot contain clarification_question")
         if self.hold_constraints and (self.status != TurnStatus.ACCEPTED or self.turn_kind != TurnKind.ROBOT_TASK):
             raise ValueError("task_semantic_invalid: hold constraints require accepted robot task")
         if self.arm_usage != "unspecified" and (self.status != TurnStatus.ACCEPTED or self.turn_kind != TurnKind.ROBOT_TASK):
@@ -172,7 +175,56 @@ class TaskParseOutput(BaseModel):
     def to_brain_turn(self, instruction: str) -> BrainTurn:
         task = self.to_task_intent(instruction) if self.status == TurnStatus.ACCEPTED and self.turn_kind == TurnKind.ROBOT_TASK else None
         status = self.status
-        return BrainTurn(status=status, turn_kind=self.turn_kind, instruction=instruction, task_intent=task, scene_edit=self.scene_edit, scene_query=self.scene_query, session_control=self.session_control, robot_setup_request=self.robot_setup_request)
+        return BrainTurn(status=status, turn_kind=self.turn_kind, instruction=instruction,
+                         clarification_question=self.clarification_question,
+                         task_intent=task, scene_edit=self.scene_edit, scene_query=self.scene_query,
+                         session_control=self.session_control, robot_setup_request=self.robot_setup_request)
+
+
+def _open_close_reference_missing(value, error):
+    """Only classify this narrow Qwen omission as clarification.
+
+    Internal/replay callers still get the original validation error.  This
+    helper is used exclusively by the live Qwen adapter before returning a
+    BrainTurn, and never invents a door/handle/reference.
+    """
+    if not isinstance(value, dict) or value.get("status") != TurnStatus.ACCEPTED.value:
+        return False
+    operations = value.get("operations")
+    if not isinstance(operations, list):
+        return False
+    missing = [item for item in operations if isinstance(item, dict)
+               and item.get("type") in {TaskType.OPEN.value, TaskType.CLOSE.value}
+               and not item.get("reference")]
+    return bool(missing) and "reference" in str(error)
+
+
+def parse_qwen_turn(value, instruction: str) -> BrainTurn:
+    """Parse live model output with narrow, fail-closed clarification recovery."""
+    if isinstance(value, dict) and value.get("status") in {
+        TurnStatus.CLARIFICATION_REQUIRED.value, TurnStatus.UNSUPPORTED_TASK.value,
+    }:
+        status = TurnStatus(value["status"])
+        turn_kind = TurnKind.UNSUPPORTED_TASK if status == TurnStatus.UNSUPPORTED_TASK else TurnKind.ROBOT_TASK
+        question = value.get("clarification_question")
+        if not isinstance(question, str) or not question.strip():
+            question = ("当前 Piper 双臂任务需要明确两只机械臂的对象分配和执行能力。"
+                        if value.get("arm_usage") == "both_required"
+                        else "请补充任务所需的对象、数量、参照物或执行条件。")
+        return BrainTurn(status=status, turn_kind=turn_kind, instruction=instruction,
+                         clarification_question=question.strip())
+    try:
+        parsed = TaskParseOutput.model_validate(value)
+        return parsed.to_brain_turn(instruction)
+    except (ValidationError, ValueError) as exc:
+        if _open_close_reference_missing(value, exc):
+            return BrainTurn(
+                status=TurnStatus.CLARIFICATION_REQUIRED,
+                turn_kind=TurnKind.ROBOT_TASK,
+                instruction=instruction,
+                clarification_question="请说明对应的门/抽屉把手或明确参照物，不能仅指定要打开的门。",
+            )
+        raise
 
 
 

@@ -1,7 +1,8 @@
-# WebEditor / Gateway 首期联调（brain-web/1）
+# WebEditor / Gateway 首期联调（brain-web/2）
 
 本期 Brain 只规划，不连接 Control、不发送轨迹、不执行机器人。
-`任务完成` 不等于机械臂执行成功；所有结果固定 `executed=false`。
+`terminal=true` 才表示任务处理终止；`任务完成` 不等于机械臂执行成功，所有结果固定
+`executed=false`。
 
 ## 当前交付边界
 
@@ -29,7 +30,7 @@ python -m pip install -e '.[web]'
 
 ```bash
 mkdir -p /home/cscvlab/lht/webeditor_runtime
-unzip -n /home/cscvlab/lht/yzk/ObjectLibraryServer-1.0.4-rel-res-1.0.4-rel.zip -d /home/cscvlab/lht/webeditor_runtime
+unzip -n /home/cscvlab/lht/yzk/ObjectLibraryServer-1.0.5-rel-res-1.0.5-rel.zip -d /home/cscvlab/lht/webeditor_runtime
 unzip -n /home/cscvlab/lht/yzk/WebEditor-1.0.1-rel.zip -d /home/cscvlab/lht/webeditor_runtime
 ```
 
@@ -42,8 +43,8 @@ OLS 读取同一份 data；Brain 不复制模型到 wheel，不覆盖旧 final_m
 
 ```bash
 python scripts/validate_final_models.py \
-  --root ../webeditor_runtime/ObjectLibraryServer-1.0.4-rel/data \
-  --manifest config/ols_1_0_4_manifest.json \
+  --root ../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data \
+  --manifest config/ols_1_0_5_manifest.json \
   --cache var/webeditor/geometry_cache.json \
   --joint-cache var/webeditor/joint_inventory.json
 ```
@@ -52,7 +53,7 @@ python scripts/validate_final_models.py \
 
 ```bash
 ss -ltnp '( sport = :8000 or sport = :8080 or sport = :8099 or sport = :8500 )'
-cd /home/cscvlab/lht/webeditor_runtime/ObjectLibraryServer-1.0.4-rel
+cd /home/cscvlab/lht/webeditor_runtime/ObjectLibraryServer-1.0.5-rel
 python server.py --port 8000
 ```
 
@@ -107,15 +108,15 @@ id_remap 持久更新绑定，不能继续使用旧 ID。双臂场景可在网�
 上面是字段说明，不是可执行 Scene。运行 `scripts/export_webeditor_contract.py` 导出真实 Schema
 和不含模型文件/个人路径的有效协议 fixtures。
 
-快速返回 `{"taskID":1,"state":"已进入队列","code":0}`；不等待 Qwen。
+快速返回 `{"taskID":1,"state":"已进入队列","terminal":false,"code":0}`；不等待 Qwen。
 同会话同 clientRequestID/相同完整请求返回原任务；不同内容 HTTP409。
-首期场景串行：另一个未完成请求返回 `task_busy`，客户端等本轮终态后再获取新场景提交。
+同一会话仍保持一条未终态任务的互斥（同会话重复提交返回 `task_busy`）；不同会话可以排队到同一个 Brain worker。Gateway 会为每个会话隔离场景快照和租约，因此用户切换到 B 后，A 的晚到提交不会覆盖 B；切回 A 时会读到 A 的最新场景。需要当前浏览器画面的截图时，非活动会话会明确返回 `session_browser_not_active`，不会误读 B 的画面。
 缺上下文明确 `session_context_required`；不兼容旧 Gateway 隐式续接方式。
 
 | 接口 | 返回 |
 |---|---|
-| GET /queryTaskState?taskID=1 | taskID/state；已创建、已进入队列、进行中、任务完成、任务失败 |
-| GET /queryTaskFailureReason?taskID=1 | taskID/state/failureReason，未失败为 null |
+| GET /queryTaskState?taskID=1 | taskID/state/terminal；`state` 是 Brain 自定义非空字符串，不能按名称判断终态 |
+| GET /queryTaskFailureReason?taskID=1 | taskID/terminal/failureReason；仅 `terminal=true` 且 outcome=failed 时返回原因 |
 | GET /queryTaskResult?taskID=1 | 未完成 HTTP202；完成 HTTP200，详见下面 |
 | GET /tasks/1/artifacts/commands | 只读白名单产物；不允许任意路径 |
 | GET /health | service/qwen/browser/assets 分项能力，不用单个 HTTP200 代表全部可用 |
@@ -126,7 +127,7 @@ artifacts URL、commitReceipts。机器人任务显示“计划已生成，尚�
 不是错误地显示成功执行。模型校验/几何拒绝等处理错误用任务失败，附原始结构化错误。
 
 服务进程重启不会自动重放任务。中断任务变为 `service_restarted`；执行中的会话标记 uncertain，
-必须人工核对浏览器事务/锁后显式建立新绑定；**未提供一键强制清除 unknown 的接口**。
+必须通过 `POST /resolveUncertain` 提交现场、事务回执和迟到写入排除证据后才能恢复；没有证据时保持锁定。
 恢复普通空闲会话仅读取 checkpoint，下一轮读 live 现场，不写旧 checkpoint。
 同一任务数据库仅允许一个服务进程持有文件锁。
 
@@ -137,7 +138,7 @@ artifacts URL、commitReceipts。机器人任务显示“计划已生成，尚�
 `GET /brainCapabilities?browser_id=browser-1`：
 
 ```json
-{"protocol":"brain-web/1","browserID":"browser-1","capabilities":["atomic_commit","versioned_manual_edits","bound_browser","task_edit_lock"]}
+{"protocol":"brain-web/2","browserID":"browser-1","capabilities":["atomic_commit","sub_versioned_scene_identity","setup_only_local_edits","bound_browser","task_edit_lock","canonical_scene","agent_owned_phase","uncertain_recovery"]}
 ```
 
 `GET /getWorld?browser_id=browser-1` 返回完整 Scene，必须实时询问指定浏览器，响应头：
@@ -154,14 +155,15 @@ X-Next-Object-ID: <不可回退的实例分配高水位>
 数组顺序/未知组件/当前关节等内容不忽略。`1` 与 `1.0` 一致。
 高水位必须大于所有现存 ID，最大 2^32（表示已耗尽）；所有编辑入口共用并持久化。
 
-同一 scene_id 手动编辑必须递增 scene_version。同版本不同内容冲突；删物体不重用 ID；
+同一 scene_id 在 `setup` 期的资产面板增删只递增 `scene_sub_version`；Agent 写入才递增
+`scene_version` 并将子版本归零。同版本不同内容冲突；删物体不重用 ID；
 替换 MetadataRef 用新实例 ID。关节 now 值只是展示，不产生 holding/known 执行证据。
 静态机器人、相机/桌子/光源等部署变化要求新会话，不能作为普通编辑悄悄吸收。
 
 ### 任务编辑锁
 
-`POST /acquireSceneLease` 输入 `{taskID,browserID,scene_id,scene_version,sceneDigest}`。
-Gateway 检查当前绑定和现场三元组，停止/拒绝轨迹播放并锁定所有手工编辑入口，返回
+`POST /acquireSceneLease` 输入 `{taskID,browserID,scene_id,scene_version,scene_sub_version,sceneDigest}`。
+Gateway 检查当前绑定和现场四元组，停止/拒绝轨迹播放并锁定所有手工编辑入口，返回
 `{browserID,leaseToken}`。锁直到显式释放；不要仅因超时自动解锁。
 后续 Brain 请求携带 `X-Brain-Lease`，Gateway 验证归属。
 `POST /releaseSceneLease {browserID,leaseToken,keepLocked:false}` 返回
@@ -176,7 +178,7 @@ Gateway 检查当前绑定和现场三元组，停止/拒绝轨迹播放并锁�
 {
   "transactionID":"唯一事务ID",
   "browserID":"browser-1",
-  "expected":{"scene_id":1,"scene_version":3,"sceneDigest":"旧摘要"},
+  "expected":{"scene_id":1,"scene_version":3,"scene_sub_version":0,"sceneDigest":"旧摘要"},
   "scene":{"这里替换为完整目标Scene":true}
 }
 ```
@@ -185,7 +187,7 @@ Gateway 检查当前绑定和现场三元组，停止/拒绝轨迹播放并锁�
 同 scene_id 目标版本必须旧版+1；original 派生/显式新场景 ID 允许版本1。
 **不额外自增**。保留旧 updateWorld 语义，但 Brain 永不调用它。
 
-成功回执：`{transactionID,browserID,status:"committed",scene_id,scene_version,sceneDigest,rejected_objects:[]}`。
+成功回执：`{transactionID,browserID,status:"committed",scene_id,scene_version,scene_sub_version,sceneDigest,rejected_objects:[]}`。
 `GET /queryWorldCommit?transactionID=...&browser_id=...` 返回持久回执。
 同事务同内容只能提交一次；异内容冲突。浏览器刷新后也要能核对事务。
 明确拒绝返回 `{transactionID,browserID,status:"rejected",reason:...}`（不修改现场）。
@@ -195,7 +197,7 @@ POST 超时只查询事务并读 live 比对；不自动重发、不假装回滚
 ### 相机
 
 `GET /captureScene?id=5&type=rgbd&browser_id=...`：
-`{browserID,scene_id,scene_version,sceneDigest,playback_state:"stopped",width,height,
+`{browserID,scene_id,scene_version,scene_sub_version,sceneDigest,playback_state:"stopped",width,height,
 image_encoding:"png",image_base64,depth_encoding:"float32le",depth_base64}`。
 RGB 请求可不返回深度；rgbd 深度是 width*height 个小端 float32。
 PNG 必须真实完整图像；相机配置尺寸需匹配，不能替换为占位图片。

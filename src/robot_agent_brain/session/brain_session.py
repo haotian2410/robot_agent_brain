@@ -18,6 +18,7 @@ class BrainSession:
         self.dialogue = DialogueState()
         self.session_action = None
         self.sync_state = "synchronized"
+        self.session_phase = "setup"
         self.holding_object = None
         self.robot_setup = None
         self.robot_setup_revision = 0
@@ -26,6 +27,8 @@ class BrainSession:
         self.platform_object_ids = None
         self.original_store = None
         self.scene_reset_allowed = False
+        self.session_phase = "setup"
+        self.camera_id = None
         self.profile_object_map = None
         self.last_request_id = None
         self.last_exported_request = None
@@ -57,6 +60,7 @@ class BrainSession:
             raise
         self._commit_manager(candidate)
         self.sync_state = "synchronized"
+        self.session_phase = "setup"
         self.dialogue = DialogueState()
         self.holding_object = None
         # A generic import is not proof that the old deployed bindings still
@@ -106,7 +110,11 @@ class BrainSession:
         if current is not None:
             if candidate.scene_id != current.scene_id:
                 raise ValueError("browser_new_session_required")
-            if candidate.scene_version < current.scene_version or (changed and candidate.scene_version == current.scene_version):
+            candidate_pair = (candidate.scene_version, candidate.scene_sub_version)
+            current_pair = (current.scene_version, current.scene_sub_version)
+            if self.session_phase == "agent_owned" and candidate_pair[0] == current_pair[0] and candidate_pair[1] > current_pair[1]:
+                raise ValueError("manual_edit_forbidden")
+            if candidate_pair < current_pair or (candidate_pair == current_pair and changed):
                 raise ValueError("browser_scene_version_conflict")
             old_index, new_index = SceneIndex(current), SceneIndex(candidate)
             for obj in current.objects:
@@ -151,7 +159,8 @@ class BrainSession:
     def _check_snapshot(snapshot, expected):
         if not snapshot.accepted:
             raise ValueError(snapshot.error or "scene_platform_rejected_patch")
-        if (snapshot.scene_id, snapshot.scene_version) != (expected.scene_id, expected.scene_version):
+        if (snapshot.scene_id, snapshot.scene_version, snapshot.scene_sub_version) != (
+                expected.scene_id, expected.scene_version, expected.scene_sub_version):
             raise ValueError("scene_platform_snapshot_mismatch")
 
     def apply_scene_patch(self, patch):
@@ -181,7 +190,8 @@ class BrainSession:
     def capture(self, request=None):
         self.require_scene()
         frame = self.platform.capture(request or CameraRequest())
-        if (frame.scene_id, frame.scene_version) != (self.scene.scene_id, self.scene.scene_version):
+        if (frame.scene_id, frame.scene_version, frame.scene_sub_version) != (
+                self.scene.scene_id, self.scene.scene_version, self.scene.scene_sub_version):
             raise ValueError("camera_frame_scene_mismatch")
         return frame
 
@@ -228,6 +238,7 @@ class BrainSession:
                 nonlocal result
                 result = self.pipeline.scene_editor.edit_result(
                     turn.scene_edit.model_copy(update={"scene_basis": "current"}), original,
+                    defaults=edit_defaults,
                     next_scene_object_id=max(self.next_scene_object_id, max((o.object_id_in_scene for o in original.objects), default=-1)+1))
                 return SceneManager(original, next_scene_object_id=max(self.next_scene_object_id,
                     max((o.object_id_in_scene for o in original.objects), default=-1)+1)).apply_patch(result.patch)

@@ -123,6 +123,14 @@ class BrainPipeline:
             intent = self.understanding.understand(request)
             turn = BrainTurn(status="accepted", turn_kind="robot_task", instruction=instruction, task_intent=intent)
         turn = turn.model_copy(update={"instruction": instruction})
+        # The scene basis is a safety-sensitive routing decision, not a
+        # semantic detail that Qwen may omit.  An explicit user request for
+        # the original/initial scene must win over a model response that
+        # leaves the default as ``current``; otherwise an apparently valid
+        # edit silently mutates the latest scene instead of deriving from the
+        # immutable import snapshot.
+        if original_requested and turn.scene_edit is not None and turn.scene_edit.scene_basis != "original":
+            turn = turn.model_copy(update={"scene_edit": turn.scene_edit.model_copy(update={"scene_basis": "original"})})
         if deferred_reference_error is not None and turn.status == TurnStatus.ACCEPTED:
             from .contracts.turn import SceneEditPlan
             edits = turn.scene_edit

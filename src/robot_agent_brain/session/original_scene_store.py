@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-from ..contracts.scene import SceneConfig, SceneId
+from ..contracts.scene import SceneConfig, SceneId, parse_scene_document
 from ..contracts.robot_setup import RobotSetup
 from ..adapters.scene_file_codec import SceneFileCodec
 
@@ -50,7 +50,7 @@ class OriginalSceneStore:
                 raise ValueError("snapshot_hash_mismatch")
             if expected is not None and manifest != expected:
                 raise ValueError("snapshot_manifest_mismatch")
-            scene = SceneConfig.model_validate_json(scene_bytes)
+            scene = parse_scene_document(json.loads(scene_bytes), uint32=False).view
             ids = {o.object_id_in_scene for o in scene.objects}
             tasks, platform = set(manifest.task_object_ids), set(manifest.platform_object_ids)
             if tasks & platform or tasks | platform != ids:
@@ -79,7 +79,7 @@ class OriginalSceneStore:
             raise ValueError("snapshot_prepare_hash_mismatch")
         if expected is not None and manifest != expected:
             raise ValueError("snapshot_manifest_mismatch")
-        scene = SceneConfig.model_validate_json(scene_bytes)
+        scene = parse_scene_document(json.loads(scene_bytes), uint32=False).view
         ids = {o.object_id_in_scene for o in scene.objects}
         tasks, platform = set(manifest.task_object_ids), set(manifest.platform_object_ids)
         if tasks & platform or tasks | platform != ids:

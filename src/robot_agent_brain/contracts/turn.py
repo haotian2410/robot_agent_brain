@@ -136,6 +136,7 @@ class BrainTurn(BaseModel):
     status: TurnStatus
     turn_kind: TurnKind
     instruction: str
+    clarification_question: str | None = None
     task_intent: TaskIntent | None = None
     scene_edit: SceneEditPlan | None = None
     scene_query: SceneQueryIntent | None = None
@@ -155,6 +156,8 @@ class BrainTurn(BaseModel):
 
     @model_validator(mode="after")
     def one_payload(self):
+        if self.status == TurnStatus.ACCEPTED and self.clarification_question is not None:
+            raise ValueError("accepted turn cannot contain clarification_question")
         payloads = {
             TurnKind.ROBOT_CONFIG: self.robot_setup_request,
             TurnKind.ROBOT_TASK: self.task_intent,

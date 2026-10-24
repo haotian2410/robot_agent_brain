@@ -39,10 +39,11 @@ def durable_json(path, value):
 class GatewayScenePlatformAdapter:
     restore_read_only = True
 
-    def __init__(self, base_url, browser_id, *, camera_id=5, joint_inventory=None,
+    def __init__(self, base_url, browser_id, *, camera_id=5, session_id=None, joint_inventory=None,
                  reference_registry=None, journal_dir=None, client=None):
         self.base_url = loopback_url(base_url)
         self.browser_id, self.camera_id = browser_id, camera_id
+        self.session_id = session_id
         self.original_camera_id = camera_id
         self.joints, self.references = joint_inventory, reference_registry
         self.journal_dir = Path(journal_dir) if journal_dir else None
@@ -58,6 +59,8 @@ class GatewayScenePlatformAdapter:
     def _call(self, method, route, **kwargs):
         if self.lease:
             kwargs["headers"] = {**kwargs.get("headers", {}), "X-Brain-Lease": self.lease}
+        if self.session_id:
+            kwargs["headers"] = {**kwargs.get("headers", {}), "X-Brain-Session": self.session_id}
         response = self.client.request(method, self.base_url + route, **kwargs)
         response.raise_for_status()
         return response
@@ -67,7 +70,8 @@ class GatewayScenePlatformAdapter:
         self.lease_uncertain = True
         value = self._call("POST", "/acquireSceneLease", json={"taskID": task_id,
             "browserID": self.browser_id, "sceneDigest": digest(scene),
-            "scene_id": scene.scene_id, "scene_version": scene.scene_version}).json()
+            "scene_id": scene.scene_id, "scene_version": scene.scene_version,
+            "scene_sub_version": scene.scene_sub_version}).json()
         if value.get("browserID") != self.browser_id or not isinstance(value.get("leaseToken"), str) or not value["leaseToken"]:
             raise ValueError("gateway_lease_invalid")
         self.lease = value["leaseToken"]
@@ -87,15 +91,20 @@ class GatewayScenePlatformAdapter:
         except (ValueError, httpx.HTTPError):
             raise ValueError("gateway_protocol_upgrade_required") from None
         if (payload.get("protocol") != PROTOCOL_VERSION or payload.get("browserID") != self.browser_id
-                or not {"atomic_commit", "versioned_manual_edits", "bound_browser", "task_edit_lock"} <= set(payload.get("capabilities", []))):
+                or not {"atomic_commit", "sub_versioned_scene_identity", "setup_only_local_edits",
+                         "bound_browser", "task_edit_lock", "canonical_scene",
+                         "agent_owned_phase", "uncertain_recovery"} <= set(payload.get("capabilities", []))):
             raise ValueError("gateway_protocol_upgrade_required")
         return payload
 
     def validate(self, scene):
         return validate_web_scene(scene, self.joints, self.references)
 
-    def read_live(self):
-        response = self._call("GET", "/getWorld", params={"browser_id": self.browser_id})
+    def read_live(self, *, lease_snapshot=True):
+        params = {"browser_id": self.browser_id}
+        if lease_snapshot:
+            params["lease_snapshot"] = "1"
+        response = self._call("GET", "/getWorld", params=params)
         if response.headers.get("X-World-Source") != "live":
             raise ValueError("gateway_live_world_required")
         if response.headers.get("X-Browser-ID") != self.browser_id:
@@ -103,10 +112,13 @@ class GatewayScenePlatformAdapter:
         if response.headers.get("X-Playback-State") != "stopped":
             raise ValueError("gateway_playback_must_stop")
         scene = self.validate(response.json())
+        header_sub = response.headers.get("X-Scene-Sub-Version")
+        if header_sub is not None and (not header_sub.isdigit() or int(header_sub) != scene.scene_sub_version):
+            raise ValueError("browser_scene_version_conflict")
         if response.headers.get("X-Scene-Digest") != digest(scene):
             raise ValueError("gateway_scene_digest_mismatch")
         allocator = response.headers.get("X-Next-Object-ID", "")
-        if not allocator.isascii() or not allocator.isdigit() or not max((o.object_id_in_scene for o in scene.objects), default=-1) < int(allocator) <= 2**32:
+        if not allocator.isascii() or not allocator.isdigit() or not max((o.object_id_in_scene for o in scene.objects), default=-1) < int(allocator) <= 2**32 - 1:
             raise ValueError("gateway_object_allocator_invalid")
         self.next_object_id = int(allocator)
         return scene
@@ -123,7 +135,8 @@ class GatewayScenePlatformAdapter:
         if digest(self.read_live()) != digest(candidate):
             raise ValueError("gateway_scene_conflict")
         self.scene = candidate.model_copy(deep=True)
-        return SceneSnapshot(scene_id=candidate.scene_id, scene_version=candidate.scene_version)
+        return SceneSnapshot(scene_id=candidate.scene_id, scene_version=candidate.scene_version,
+                             scene_sub_version=candidate.scene_sub_version)
 
     def restore_scene(self, scene):
         return self.adopt(scene)
@@ -132,10 +145,23 @@ class GatewayScenePlatformAdapter:
         if self.journal_dir is not None:
             durable_json(self.journal_dir / (transaction + ".json"), value)
 
+    def journal_record(self, transaction):
+        if self.journal_dir is None:
+            return None
+        path = self.journal_dir / (transaction + ".json")
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            return None
+
     def _check_receipt(self, receipt, transaction, candidate):
         if (receipt.get("transactionID") != transaction or receipt.get("browserID") != self.browser_id
                 or receipt.get("status") != "committed" or receipt.get("scene_id") != candidate.scene_id
-                or receipt.get("scene_version") != candidate.scene_version or receipt.get("sceneDigest") != digest(candidate)
+                or receipt.get("scene_version") != candidate.scene_version
+                or receipt.get("scene_sub_version", 0) != candidate.scene_sub_version
+                or receipt.get("sceneDigest") != digest(candidate)
                 or receipt.get("rejected_objects", []) != []):
             raise ValueError("gateway_commit_receipt_invalid")
 
@@ -148,36 +174,71 @@ class GatewayScenePlatformAdapter:
         if candidate.scene_id == previous.scene_id:
             if candidate.scene_version != previous.scene_version + 1:
                 raise ValueError("gateway_target_version_invalid")
+            if candidate.scene_sub_version != 0:
+                raise ValueError("gateway_scene_revision_invalid")
         elif candidate.scene_version != 1:
             raise ValueError("gateway_new_scene_version_invalid")
+        elif candidate.scene_sub_version != 0:
+            raise ValueError("gateway_scene_revision_invalid")
         transaction = uuid.uuid4().hex
         request = {"transactionID": transaction, "browserID": self.browser_id,
-            "expected": {"scene_id": previous.scene_id, "scene_version": previous.scene_version, "sceneDigest": digest(previous)},
-            "scene": candidate.model_dump(mode="json")}
+            "expected": {"scene_id": previous.scene_id, "scene_version": previous.scene_version,
+                         "scene_sub_version": previous.scene_sub_version, "sceneDigest": digest(previous)},
+            "scene": candidate.raw_document() if hasattr(candidate, "raw_document")
+            else candidate.model_dump(mode="json")}
         record = {"request": request, "status": "prepared"}
         self._journal(transaction, record)
         try:
-            receipt = self._call("POST", "/commitWorld", json=request).json()
-        except (httpx.TransportError, httpx.HTTPStatusError):
+            headers = {"X-Brain-Lease": self.lease} if self.lease else {}
+            if self.session_id:
+                headers["X-Brain-Session"] = self.session_id
+            response = self.client.post(self.base_url + "/commitWorld", json=request, headers=headers)
+            if response.status_code == 409:
+                receipt = response.json()
+                if receipt.get("status") == "rejected":
+                    self._journal(transaction, {**record, "status": "rejected", "receipt": receipt})
+                    raise ValueError("gateway_commit_rejected")
+            response.raise_for_status()
+            receipt = response.json()
+        except httpx.HTTPStatusError as exc:
+            # A browser-level 4xx is a durable, explicit rejection.  A 5xx
+            # means the gateway may have accepted the write but failed to
+            # report its receipt, so keep the transaction unknown and locked.
+            status = exc.response.status_code
+            try:
+                body = exc.response.json()
+            except Exception:
+                body = {"status_code": status, "text": exc.response.text[:500]}
+            if 400 <= status < 500:
+                self._journal(transaction, {**record, "status": "rejected", "receipt": body})
+            else:
+                self._journal(transaction, {**record, "status": "unknown", "receipt": body})
+            raise ValueError("gateway_commit_rejected" if 400 <= status < 500 else "gateway_commit_unknown") from None
+        except httpx.TransportError:
             # Never resend a mutating request. Query the transaction plus world.
             try:
                 receipt = self._call("GET", "/queryWorldCommit", params={"transactionID": transaction,
                     "browser_id": self.browser_id}).json()
                 self._check_receipt(receipt, transaction, candidate)
             except Exception:
-                self._journal(transaction, {**record, "status": "unknown"})
+                journal = self.journal_record(transaction)
+                self._journal(transaction, {**(journal or record), "status": "unknown"})
                 raise ValueError("gateway_commit_unknown") from None
         try:
             self._check_receipt(receipt, transaction, candidate)
-            if digest(self.read_live()) != digest(candidate):
+            if digest(self.read_live(lease_snapshot=False)) != digest(candidate):
                 raise ValueError("gateway_commit_readback_mismatch")
+        except ValueError:
+            self._journal(transaction, {**record, "status": "rejected", "receipt": receipt})
+            raise
         except Exception:
             self._journal(transaction, {**record, "status": "unknown", "receipt": receipt})
             raise
         self._journal(transaction, {**record, "status": "committed", "receipt": receipt})
         self.receipts.append(receipt)
         self.scene = candidate.model_copy(deep=True)
-        return SceneSnapshot(scene_id=candidate.scene_id, scene_version=candidate.scene_version)
+        return SceneSnapshot(scene_id=candidate.scene_id, scene_version=candidate.scene_version,
+                             scene_sub_version=candidate.scene_sub_version)
 
     def apply_patch(self, patch):
         if self.scene is None:
@@ -187,7 +248,9 @@ class GatewayScenePlatformAdapter:
 
     def _frame_identity(self, value, scene):
         if (value.get("browserID") != self.browser_id or value.get("scene_id") != scene.scene_id
-                or value.get("scene_version") != scene.scene_version or value.get("sceneDigest") != digest(scene)
+                or value.get("scene_version") != scene.scene_version
+                or value.get("scene_sub_version", 0) != scene.scene_sub_version
+                or value.get("sceneDigest") != digest(scene)
                 or value.get("playback_state") != "stopped"):
             raise ValueError("camera_frame_scene_mismatch")
 
@@ -196,7 +259,10 @@ class GatewayScenePlatformAdapter:
             raise ValueError("camera_not_configured")
         if "segmentation" in request.outputs:
             raise ValueError("camera_segmentation_unsupported")
-        scene = self.read_live()
+        # After a task commits a new scene, capture must use that current world.  The lease
+        # snapshot is only the pre-task concurrency guard and would make a valid post-commit
+        # frame look stale.
+        scene = self.read_live(lease_snapshot=False)
         if self.scene is None or digest(scene) != digest(self.scene):
             raise ValueError("camera_frame_scene_mismatch")
         camera = SceneIndex(scene).properties(self.camera_id, "Camera")
@@ -250,9 +316,10 @@ class GatewayScenePlatformAdapter:
             normalized = [max(0, min(1000, round(n / size * 1000))) for n, size in
                           ((y1,height),(x1,width),(y2,height),(x2,width))]
             boxes.append(CameraInstanceBox(scene_object_id=obj.object_id_in_scene, bbox=normalized))
-        if digest(self.read_live()) != digest(scene):
+        if digest(self.read_live(lease_snapshot=False)) != digest(scene):
             raise ValueError("camera_frame_scene_mismatch")
         frame = CameraFrame(camera_id=str(self.camera_id), scene_id=scene.scene_id, scene_version=scene.scene_version,
+            scene_sub_version=scene.scene_sub_version,
             width=width, height=height, rgb=rgb, depth=depth, instance_boxes=boxes)
         if self.journal_dir:
             durable_json(self.journal_dir / ("capture-" + uuid.uuid4().hex + ".json"), value | {"instance_boxes": [b.model_dump() for b in boxes]})

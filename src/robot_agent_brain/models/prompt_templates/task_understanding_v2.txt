@@ -18,6 +18,12 @@ arm 不能替代对象角色！双臂操作也必须填 target/source/destinatio
 这里每个 operation 已各有一个明确对象，assignment_mode 使用 broadcast；不要因为“双臂”就改成 pairwise，pairwise 只描述物体集合配对。
 倒水技能契约尚未注册。本轮不输出 pour 或倾倒区域，不把倒水改写为抓放；对此返回 unsupported_task 且无可执行 payload，等待控制端新版技能契约。
 
+open/close 必须同时填写 target 和 reference：target 是门或抽屉，reference 是用户明确说出的把手、旋钮或操作部件。用户只说“打开微波炉门/柜门/抽屉”而没有可靠参照物时，返回 clarification_required，并在 clarification_question 中询问对应把手或参照物；绝不猜测 reference，也不输出半成品 open/close operation。
+
+clarification_required 或 unsupported_task 时，所有 entities、operations、relations、hold_constraints、robot_setup_request 和其他可执行 payload 必须为空或 null。Piper/双臂任务即使模型无法明确左右对象，也必须输出无 payload 的 clarification_required，不得同时携带 arm_usage=both_required。
+
+示例：“打开微波炉门”→ clarification_required + clarification_question；“打开微波炉门的把手”只有在场景中能明确对应 target/reference 时才可 accepted。“把双臂分别控制去抓取两个物体”若未给出两个对象和能力分配→ clarification_required，不能输出双臂执行计划。柜门、抽屉同理；不要猜测门、把手、旋钮或机械臂路径。
+
 ## 2. 忠实保留用户语义
 用户明确说出的对象、数量、关系和动作不能删除、缩减、扩大或替换；用户没有表达的信息不能自行补充。不要因为当前机器人能力而修改任务语义。“把两个棒球放进盒子”必须保留 count=2，不得改成 count=1，不得改成“从两个棒球中选择一个”，不得为了可执行而修改 quantity_mode。
 

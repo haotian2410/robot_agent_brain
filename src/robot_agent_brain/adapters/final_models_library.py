@@ -24,6 +24,7 @@ class FinalModelsLibraryAdapter:
         for kind in ("model", "robot"):
             index = json.loads((self.root / ("models" if kind == "model" else "robots") /
                                 ("model_index.json" if kind == "model" else "robot_index.json")).read_text())
+            index_categories = index.get("category", {})
             for identifier, name in index["by_id"].items():
                 identifier = int(identifier)
                 directory = self.root / ("models" if kind == "model" else "robots") / str(identifier)
@@ -43,7 +44,8 @@ class FinalModelsLibraryAdapter:
                     metadata_path=str(metadata), asset_type=kind,
                     tags=tags, color_tags=color_tags(tags), scalable=semantic.get("scalable"),
                     scale_range=data.get("physical_properties", {}).get("scale"),
-                    category=categories.get(key) or categories.get(str(identifier)),
+                    category=(categories.get(key) or categories.get(str(identifier))
+                              or index_categories.get(str(identifier))),
                     physical_properties=data.get("physical_properties", {}),
                     grasp_properties=data.get("grasp_properties", {}),
                 )

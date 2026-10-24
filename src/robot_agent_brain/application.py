@@ -116,7 +116,12 @@ class BrainApplication:
         # Persist first so a later understanding/publication failure cannot lose
         # the platform-confirmed import; capture_once keeps earlier originals.
         self._save_session(session_id)
-        self._capture_original(session_id, request_id="import-" + uuid.uuid4().hex, source="uploaded")
+        # An explicitly imported empty template is still a valid original
+        # snapshot.  Do not wait for the first added object: otherwise the
+        # first edit becomes part of ``original_scene.json`` and later
+        # "原始场景" edits cannot reproduce the imported scene.
+        self._capture_original(session_id, request_id="import-" + uuid.uuid4().hex,
+                               source="uploaded", allow_empty=True)
         self._save_session(session_id)
         return session.scene
 
@@ -133,7 +138,8 @@ class BrainApplication:
         """External editor metadata sync, distinct from execution reconciliation."""
         with self.store.lock(session_id):
             session = self.get_session(session_id)
-            candidate = self.codec.decode(scene.model_dump(mode="json") if hasattr(scene, "model_dump") else scene)
+            candidate = self.codec.decode(scene.raw_document() if hasattr(scene, "raw_document")
+                                          else (scene.model_dump(mode="json") if hasattr(scene, "model_dump") else scene))
             manifest = platform_object_ids if platform_object_ids is not None else self.config.scene_platform_object_ids
             if manifest is None:
                 raise ValueError("browser_platform_manifest_required")
@@ -148,7 +154,29 @@ class BrainApplication:
 
         This does not apply the default workspace to arbitrary imported scenes.
         """
-        if not self.config.editor_scene_manifests or self.bootstrapper.template_scene is None or session.scene is None:
+        if self.bootstrapper.template_scene is None or session.scene is None:
+            return None
+        # Automatically bootstrapped sessions already carry a Brain-owned
+        # template and platform manifest.  Keep the same table/workspace
+        # defaults available after an original-scene derivation, whose new
+        # scene id and task objects no longer compare equal to the template.
+        # Uploaded scenes remain excluded unless their configured manifest
+        # explicitly opts them in.
+        manifest = session.original_scene_manifest
+        if manifest is not None and manifest.source == "generated":
+            return self.defaults
+        # An explicitly imported editor scene is also eligible when its
+        # configured platform manifest identifies the scene.  After deriving
+        # an original-scene edit the scene id changes, so comparing the whole
+        # scene to the template would incorrectly drop the editor defaults on
+        # the second original-scene operation.
+        if manifest is not None and manifest.source == "uploaded":
+            scene_name = getattr(session.scene, "scene_name", None)
+            configured = self.config.editor_scene_manifests.get(scene_name, [])
+            imported_platform = set(manifest.platform_object_ids)
+            if configured and set(configured) == imported_platform:
+                return self.defaults
+        if not self.config.editor_scene_manifests:
             return None
         from .scene.component_access import SceneIndex
         from .scene.scene_graph import world_transform
@@ -259,7 +287,9 @@ class BrainApplication:
             report.turn_kind, report.turn_status = turn.turn_kind, turn.status
             if turn.status != "accepted":
                 report.run_status = "blocked"
-                report.reply = "需要澄清任务。" if turn.status == "clarification_required" else "不支持该任务。"
+                report.clarification_question = turn.clarification_question
+                report.reply = (turn.clarification_question or "需要澄清任务。") \
+                    if turn.status == "clarification_required" else (turn.clarification_question or "不支持该任务。")
             else:
                 session.check_turn(turn)
                 bindings = None

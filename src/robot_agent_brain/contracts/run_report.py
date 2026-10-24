@@ -21,6 +21,7 @@ class BrainRunReport(BaseModel):
     scene_commit_status: Literal["unchanged", "committed", "unknown"] = "unchanged"
     executed: Literal[False] = False
     reply: str = ""
+    clarification_question: str | None = None
     provider: str
     artifacts: dict[str, str] = Field(default_factory=dict)
     assumptions: list[str] = Field(default_factory=list)

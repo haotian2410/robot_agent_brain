@@ -14,13 +14,15 @@ class MockScenePlatform:
 
     def load_scene(self, scene: SceneConfig) -> SceneSnapshot:
         self.manager = SceneManager(scene)
-        return SceneSnapshot(scene_id=scene.scene_id, scene_version=scene.scene_version)
+        return SceneSnapshot(scene_id=scene.scene_id, scene_version=scene.scene_version,
+                             scene_sub_version=scene.scene_sub_version)
 
     def apply_patch(self, patch: ScenePatch) -> SceneSnapshot:
         if self.manager is None:
             raise RuntimeError("scene_platform_not_loaded")
         scene = self.manager.apply_patch(patch)
-        return SceneSnapshot(scene_id=scene.scene_id, scene_version=scene.scene_version)
+        return SceneSnapshot(scene_id=scene.scene_id, scene_version=scene.scene_version,
+                             scene_sub_version=scene.scene_sub_version)
 
     def capture(self, request: CameraRequest) -> CameraFrame:
         if self.manager is None:
@@ -34,4 +36,3 @@ class MockScenePlatform:
             height=request.height,
             rgb=self.rgb,
         )
-
