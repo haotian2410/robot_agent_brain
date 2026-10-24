@@ -291,9 +291,12 @@ class AgentService:
         if cached is not None:
             self.schedule_asset_refresh()
             return cached[1]
-        value = self._asset_verdict()
-        self.assets_check = (time.monotonic(), value)
-        return value
+        # The first catalog walk is started by aiohttp's startup hook.  Do not run it inline here:
+        # check_ols visits every model, robot and scene and can outlive the Gateway's three-second
+        # health deadline.  A cold probe is explicitly transitional until that background refresh
+        # publishes its verdict; callers retry the same health endpoint and never wait on the walk.
+        self.schedule_asset_refresh()
+        return {"assets": "checking", "asset_detail": {"matched": False, "status": "checking"}}
 
     def schedule_asset_refresh(self):
         if not self.config.asset_library_root:
@@ -579,9 +582,12 @@ def create_http_app(service):
     app.router.add_post("/resolveUncertain", resolve_uncertain)
 
     async def startup(app):
-        # The Gateway's three-second reading of /health is tightest while a page is still loading, and
-        # that is when the asset catalog verdict would be cold, so the walk starts here instead.
-        service.schedule_asset_refresh()
+        # Finish the first catalog walk before aiohttp accepts requests.  The Gateway's /health
+        # relay has a three-second deadline, while check_ols may read dozens of OLS assets.  Later
+        # TTL refreshes stay in the background, so a health probe never waits on the catalog.
+        if service.config.asset_library_root:
+            verdict = await asyncio.to_thread(service._asset_verdict)
+            service.assets_check = (time.monotonic(), verdict)
         service.worker = asyncio.create_task(service.work())
 
     async def cleanup(app):

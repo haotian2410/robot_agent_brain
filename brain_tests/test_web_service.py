@@ -1,5 +1,7 @@
 import asyncio
 import json
+import threading
+import time
 import pytest
 
 pytest.importorskip("aiohttp", reason="optional web integration dependencies not installed")
@@ -160,6 +162,44 @@ def test_http_rejects_cross_origin_and_missing_context(tmp_path):
             assert response.status==400
             response=await client.post('/startTask',json={'command':'x','scene':{}})
             assert (await response.json())['error']['code']=='session_context_required'
+    asyncio.run(scenario())
+
+
+def test_cold_asset_health_probe_returns_while_refresh_runs(tmp_path):
+    service, _ = configured(tmp_path)
+    service.config.asset_library_root = str(tmp_path)
+    started, release = threading.Event(), threading.Event()
+
+    def slow_verdict():
+        started.set()
+        release.wait(timeout=2)
+        return {"assets": "ok", "asset_detail": {"matched": True}}
+
+    service._asset_verdict = slow_verdict
+    try:
+        result = service._probe_assets()
+        assert result["assets"] == "checking"
+        assert started.wait(timeout=1)
+        release.set()
+        deadline = time.monotonic() + 1
+        while service.assets_check is None and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert service._probe_assets()["assets"] == "ok"
+    finally:
+        release.set()
+        service.tasks.close()
+
+
+def test_startup_primes_assets_before_health_requests(tmp_path):
+    async def scenario():
+        service, _ = configured(tmp_path)
+        service.config.asset_library_root = str(tmp_path)
+        service._asset_verdict = lambda: {"assets": "ok", "asset_detail": {"matched": True}}
+        async with TestClient(TestServer(create_http_app(service))):
+            deadline = time.monotonic() + 1
+            while service.assets_check is None and time.monotonic() < deadline:
+                await asyncio.sleep(.01)
+            assert service._probe_assets()["assets"] == "ok"
     asyncio.run(scenario())
 
 
