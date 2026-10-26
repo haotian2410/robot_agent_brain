@@ -45,9 +45,18 @@ class ExplicitMotionSpan:
     start: int
     end: int
 
-def _extract_motion_spans(instruction: str) -> list[ExplicitMotionSpan]:
+def _extract_motion_spans(instruction: str, *, allow_axes=False) -> list[ExplicitMotionSpan]:
     matches = []
-    for pattern, direction in _DIRECTION_PATTERNS:
+    patterns = list(_DIRECTION_PATTERNS)
+    if allow_axes:
+        # Scene editing already supports object_local/world axes. Only accept
+        # explicit signed axis movement; do not reinterpret robot MOVE commands.
+        for axis, positive, negative in [('x',Direction.RIGHT,Direction.LEFT),
+                                         ('y',Direction.FRONT,Direction.BACK),
+                                         ('z',Direction.UP,Direction.DOWN)]:
+            patterns.extend([(rf'{axis}\s*轴\s*正(?:方向|向)?\s*(?:移(?:动)?|挪)', positive),
+                             (rf'{axis}\s*轴\s*负(?:方向|向)?\s*(?:移(?:动)?|挪)', negative)])
+    for pattern, direction in patterns:
         for match in re.finditer(pattern, instruction, re.IGNORECASE):
             if not any(match.start() < end and match.end() > start for start, end, _ in matches):
                 matches.append((match.start(), match.end(), direction))
@@ -79,9 +88,9 @@ def _extract_motion_spans(instruction: str) -> list[ExplicitMotionSpan]:
 
 
 
-def resolve_motion_evidence(instruction, operation_count):
+def resolve_motion_evidence(instruction, operation_count, *, allow_axes=False):
     """Bind motion evidence in clause order; never broadcast a distance."""
-    spans = _extract_motion_spans(instruction)
+    spans = _extract_motion_spans(instruction, allow_axes=allow_axes)
     if len(spans) != operation_count:
         raise ValueError("motion_clause_binding_ambiguous")
     if any(span.distance_m is None and span.motion_scale is None for span in spans):
@@ -95,7 +104,7 @@ def normalize_scene_motion(instruction, edit):
     count = sum(op.operation == "translate" for op in operations)
     if not count:
         return edit
-    evidence = iter(resolve_motion_evidence(instruction, count))
+    evidence = iter(resolve_motion_evidence(instruction, count, allow_axes=True))
     result = []
     for operation in operations:
         if operation.operation != "translate":

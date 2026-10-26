@@ -35,7 +35,12 @@ class AssetResolver:
                 raise ValueError("asset_feature_missing: " + entity.semantic_name)
         # Categories are optional resource selection hints, not a requirement
         # for named resource resolution or existing Scene Semantic facts.
-        if not infer_category:
+        # Typed Scene v1 uses lexical categories that need not match the model's
+        # wording (baseball: ball vs sports_equipment). As in existing-scene
+        # grounding, an explicit exact resource name is stronger evidence.
+        # Category-only requests and legacy catalog constraints remain strict.
+        named_typed = getattr(self.catalog, "typed_namespaces", False) and not entity.category_only
+        if not infer_category and not named_typed:
             candidates = [model for model in candidates if model.category is None or model.category.casefold() == category]
             if not candidates:
                 raise ValueError("asset_category_mismatch: " + entity.category)

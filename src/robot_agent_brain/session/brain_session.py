@@ -500,6 +500,28 @@ class BrainSession:
         self.sync_state = "synchronized"
         return remapped
 
+    def process_initial_edit_turn(self, request_id, turn, scene, *, bindings_override, edit_defaults, profile=None):
+        """Validate bootstrap + all edits in memory, then publish exactly once."""
+        self.check_turn(turn)
+        if self.scene is not None or turn.turn_kind != "scene_edit" or turn.status != "accepted":
+            raise ValueError("initial_edit_turn_required")
+        next_id = max(self.next_scene_object_id, max((o.object_id_in_scene for o in scene.objects), default=-1)+1)
+        result = self.pipeline.process_turn(request_id, turn, scene,
+            bindings_override=bindings_override, edit_defaults=edit_defaults,
+            seen_scene_object_ids=self.seen_scene_object_ids, next_scene_object_id=next_id)
+        candidate = SceneManager(scene, next_scene_object_id=next_id).apply_patch(result.scene_patch)
+        document = candidate.raw_document()
+        document.update(scene_version=1, scene_sub_version=0)
+        candidate = SceneConfig.model_validate(document)
+        if profile is not None:
+            profile.validate_scene(candidate)
+        self.initialize_scene(candidate)
+        if profile is not None:
+            self.bind_imported_profile(profile)
+        result = result.model_copy(update={"scene_patch": None, "scene_replacement": candidate})
+        self.dialogue.observe(result)
+        return result
+
     def process_initial_robot_turn(self, request_id, turn, scene, *, bindings_override, profile=None):
         """Plan against a prospective bootstrap; load it only after validation.
 

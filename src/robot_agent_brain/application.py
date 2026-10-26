@@ -296,6 +296,7 @@ class BrainApplication:
                 session.check_turn(turn)
                 bindings = None
                 initial_robot = None
+                initial_edit = None
                 initial_profile = None
                 active_bootstrapper = self.bootstrapper
                 if session.scene is None and turn.turn_kind not in {"scene_query", "session_control"}:
@@ -323,6 +324,8 @@ class BrainApplication:
                     report.assumptions = initial.assumptions if initial is not None else []
                     if turn.turn_kind == "robot_task":
                         initial_robot = initial
+                    elif turn.turn_kind == "scene_edit" and initial is not None:
+                        initial_edit = initial
                     elif initial is not None:
                         session.initialize_scene(initial.scene)
                         report.scene_created = True
@@ -331,7 +334,13 @@ class BrainApplication:
                         if initial_profile is not None:
                             session.bind_imported_profile(initial_profile)
                 stage = "processing"
-                if initial_robot is not None:
+                if initial_edit is not None:
+                    result = session.process_initial_edit_turn(request_id, turn, initial_edit.scene,
+                        bindings_override=initial_edit.bindings_for(initial_edit.scene),
+                        edit_defaults=active_bootstrapper.defaults, profile=initial_profile)
+                    report.scene_created = True
+                    report.scene_commit_status = "committed"
+                elif initial_robot is not None:
                     result = session.process_initial_robot_turn(request_id, turn, initial_robot.scene,
                         bindings_override=initial_robot.bindings_for(initial_robot.scene), profile=initial_profile)
                     report.scene_created = True
@@ -408,7 +417,7 @@ class BrainApplication:
                   "restored_config_fingerprint":previous_config,
                   "scene_source":report.scene_source, "before_version":before.scene_version if before else None,
                   "after_version":report.scene_version}
-        if result is not None and result.scene_replacement is not None:
+        if result is not None and result.scene_replacement is not None and result.scene_source_snapshot is not None:
             record.update(scene_basis="original", source_snapshot=result.scene_source_snapshot,
                           id_remap={str(k): v for k, v in result.scene_id_remap.items()})
         record.update(robot_setup=session.robot_setup.model_dump(mode="json") if session.robot_setup else None,

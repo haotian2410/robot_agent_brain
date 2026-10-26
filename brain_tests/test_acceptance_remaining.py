@@ -45,7 +45,9 @@ def test_b08_initial_translation_is_applied_exactly_once(tmp_path):
     final = app.get_session(report.session_id).scene
     apple = named_objects(final, "apple")[0]
     assert world_transform(final, apple.object_id_in_scene).position[0] == pytest.approx(world_transform(initial, initial_apple.object_id_in_scene).position[0]+.1)
-    assert final.scene_version == initial.scene_version + 1 and app.provider.count == 1
+    # Bootstrap and the first edit are validated prospectively and published
+    # together as the first version, not two externally visible commits.
+    assert final.scene_version == 1 and app.provider.count == 1
 
 
 @pytest.mark.parametrize("payload", ["{broken", '{"schema_version":"99","scene_id":"s"}', '{"components":[]}'])

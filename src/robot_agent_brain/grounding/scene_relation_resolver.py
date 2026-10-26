@@ -32,7 +32,13 @@ class SceneRelationResolver:
             kind = relation.relation.value
             if kind in halves:
                 axis, sign = halves[kind]
-                selected = [obj for obj in selected if position(obj)[axis] * sign > 0]
+                # An explicit reference (e.g. a table quadrant) must not be
+                # silently discarded in favour of the world origin.
+                reference = index.object(relation.reference_object_id) if relation.reference_object_id is not None else None
+                origin = position(reference)[axis] if reference is not None else 0
+                selected = [obj for obj in selected
+                            if (reference is None or obj.object_id_in_scene != reference.object_id_in_scene)
+                            and (position(obj)[axis] - origin) * sign > 0]
             elif kind in extrema:
                 axis, choose = extrema[kind]
                 value = choose(position(obj)[axis] for obj in selected)

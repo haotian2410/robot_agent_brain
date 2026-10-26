@@ -92,6 +92,8 @@ class SceneEditor:
             for identifier in affected:
                 index = SceneIndex(candidate)
                 obj = index.object(identifier)
+                if edit.operation in {"translate", "rotate", "move_relative", "update"}:
+                    self._validate_transform_bounds(identifier, current, candidate, defaults)
                 if self._overlaps(obj, candidate):
                     raise ValueError("scene_edit_transform_collision")
                 semantic = index.semantic(identifier)
@@ -131,6 +133,37 @@ class SceneEditor:
 
     def _facts(self, defaults=None):
         return SpatialFactResolver(self.assets, support_contact_tolerance_m=defaults.support_contact_tolerance_m if defaults else .001)
+
+    def _validate_transform_bounds(self, identifier, before, candidate, defaults):
+        """Keep supported model edits within proven support/workspace bounds.
+
+        Do not attach unsupported objects to the default table, or impose the
+        template's world coordinates on an unrelated uploaded workbench.
+        """
+        old_index, index = SceneIndex(before), SceneIndex(candidate)
+        semantic = old_index.semantic(identifier)
+        if semantic is None or semantic.support is None:
+            return
+        support_id = semantic.support
+        facts = self._facts(defaults)
+        if facts.infer_support(old_index.object(identifier), before) != support_id:
+            raise ValueError("scene_edit_support_invalid")
+        obj, support = index.object(identifier), index.object(support_id)
+        # Resolve required geometry explicitly: missing bounds are not evidence
+        # that the edit is safe. In particular infer_support(None) is not enough.
+        bounds = world_bounds(facts.asset(obj, candidate), world_transform(candidate, identifier))
+        if not facts.footprint_contains(obj, support, candidate):
+            raise ValueError("scene_edit_support_footprint_exceeded")
+        configured = defaults or self.scale_defaults
+        if (configured is not None and support_id == configured.table_object_id
+                and self.table_metadata_ref is not None
+                and index.metadata_ref(support_id) == self.table_metadata_ref
+                and index.metadata_type(support_id) != "robot"
+                and (self.scale_table_transform is None
+                     or world_transform(candidate, support_id) == self.scale_table_transform)):
+            if any(bounds[0][i] < configured.workspace_min[i] - 1e-9
+                   or bounds[1][i] > configured.workspace_max[i] + 1e-9 for i in (0, 1)):
+                raise ValueError("scene_edit_workspace_exceeded")
 
     def _replace(self, matches, entity, scene, next_id):
         if len(matches) != entity.count or entity.all_available:

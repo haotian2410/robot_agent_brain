@@ -18,6 +18,14 @@ def task_understanding_wire_schema():
     # optional, it can finish a scene_query without ever emitting scene_query.
     # Replay/Python defaults remain backward compatible; runtime validation stays strict.
     schema["required"] = list(schema["properties"])
+    # Optional fields can be skipped permanently by ordered JSON-grammar decoders
+    # once they emit coordinate_frame/reference. Require explicit values or null
+    # for editing semantics; Python still validates per-operation combinations.
+    edit = schema["$defs"]["SceneEditIntent"]
+    edit["required"] = list(dict.fromkeys(edit.get("required", []) + [
+        "relation", "reference", "direction", "distance_m", "motion_scale",
+        "coordinate_frame", "axis", "angle_deg",
+    ]))
     return schema
 
 

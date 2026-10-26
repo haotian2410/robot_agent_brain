@@ -139,7 +139,7 @@ def test_l_z04_relative_add_uses_verified_support_and_own_bottom():
     assert SceneIndex(final).semantic(banana).support == 0
 
 
-@pytest.mark.parametrize("direction,distance,expected", [("right",.05,1), ("up",.1,0), ("left",.7,0)])
+@pytest.mark.parametrize("direction,distance,expected", [("right",.05,1), ("up",.1,0)])
 def test_f_s01_s04_support_continuity_and_no_guessed_membership(direction, distance, expected):
     scene, assets = supported_scene(), BrainConfig().load_assets()
     patch = SceneEditor(assets).edit(edit_plan("translate", direction=direction, distance_m=distance), scene)
@@ -153,6 +153,14 @@ def test_f_s01_s04_support_continuity_and_no_guessed_membership(direction, dista
         ground = SceneGrounder().ground(TaskIntent(instruction="on", entities=query.entities, operations=[], spatial_relations=query.relations), final)
         assert ground.entities[0].scene_object_id == 1
     assert SceneQueryEngine().query(on_query(), final).count == expected
+
+
+def test_supported_edit_cannot_silently_drop_support_by_leaving_table():
+    scene, assets = supported_scene(), BrainConfig().load_assets()
+    before = scene.model_dump()
+    with pytest.raises(ValueError, match="scene_edit_support_footprint_exceeded"):
+        SceneEditor(assets).edit(edit_plan("translate", direction="left", distance_m=.7), scene)
+    assert scene.model_dump() == before
 
 
 def test_relative_add_without_verified_or_default_support_is_rejected():

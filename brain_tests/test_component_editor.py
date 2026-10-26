@@ -24,6 +24,8 @@ class UnavailableGeometry:
 def test_user_fixture_edit_preserves_light_camera_driver_and_metadata():
     codec = SceneFileCodec()
     scene = codec.load(Path(__file__).parent / "fixtures/shared_scene_v1.json")
+    # This test covers lossless free-space transforms, not unverified support.
+    SceneIndex(scene).component(0, "Semantic").properties["support"] = None
     before = codec.payload(scene)
     plan = SceneEditPlan(entities=[TaskEntity(entity_id="cube", semantic_name="cube", category="object")],
         operations=[SceneEditIntent(operation="translate", target="cube", direction="right", distance_m=.1)])
@@ -38,6 +40,7 @@ def test_user_fixture_edit_preserves_light_camera_driver_and_metadata():
 
 def test_parented_world_move_preserves_components_and_local_parent():
     scene = scene_()
+    SceneIndex(scene).component(11, "Semantic").properties["support"] = None
     scene.objects[2].components.append(SceneComponent(component_type="Sensor", properties={"opaque": [1, None]}))
     before = scene.model_dump()
     plan = SceneEditPlan(entities=[entity_(exclude_scene_object_ids=[12])],
@@ -58,6 +61,7 @@ def test_parented_world_move_preserves_components_and_local_parent():
 
 def test_object_local_move_uses_normalized_world_axis_not_parent_scale():
     scene = scene_()
+    SceneIndex(scene).component(11, "Semantic").properties["support"] = None
     scene.objects[1].components[0].properties["quaternion_xyzw"] = [0, 0, math.sqrt(.5), math.sqrt(.5)]
     before = world_transform(scene, 11)
     plan = SceneEditPlan(entities=[entity_(exclude_scene_object_ids=[12])],

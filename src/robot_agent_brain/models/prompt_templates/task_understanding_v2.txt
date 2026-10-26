@@ -42,12 +42,13 @@ scene_edit.scene_basis 默认 current。只有明确说“在原始场景/初始
 ## 4. 数量和 quantity_mode
 一/二/两/三等中文数字与阿拉伯数字必须写入 count；未说明数量时 count=1。
 - single：一个明确动作对象；
-- candidate_pool：用户明确要求从候选集合筛选一个目标；
+- candidate_pool：用户明确给出候选集合的总数，并从该集合筛选一个目标；count 是筛选前集合总数，不是选中数量；
 - all：多个匹配对象本身都是动作对象。
 “把两个棒球放进盒子”→ count=2、quantity_mode=all。
 “把两个棒球中最右边的那个放进盒子”→ count=2、quantity_mode=candidate_pool，并给出 rightmost selection relation。
 “把所有苹果放进篮子”→ quantity_mode=all、all_available=true；不得把默认 count=1 当作明确总数。
-“两个棒球”本身不等于 candidate_pool；只有“中/其中/最左/最右/最近/最远/指定关系的那个”等筛选语言才使用 candidate_pool。不要根据执行器能力修改数量。
+“两个棒球”本身不等于 candidate_pool。只有明确候选总数的“两个棒球中最右边那个”才使用 candidate_pool/count=2。未说明候选总数的“最右边的苹果”“离篮子最近的苹果”“左边那个”使用 single/count=1，并保留对应 selection relation；Python 先从全部名称匹配对象中筛选，再要求唯一结果。绝不能用 candidate_pool/count=1 断言场景中只有一个候选。不要根据执行器能力修改数量。
+例如“把最右边的苹果向左移动五厘米”→ scene_edit.entities=[{"entity_id":"apple","semantic_name":"apple","category":"fruit","count":1,"quantity_mode":"single"}]，relations=[{"scope":"selection","subject":"apple","relation":"rightmost","reference":null}]，operations=[{"operation":"translate","target":"apple","direction":"left","distance_m":0.05}]。
 
 ## 5. 多对象与分别
 “分别/各自/一一对应/respectively”表示 pairwise correspondence，必须保留语言顺序。
@@ -75,6 +76,7 @@ scene_edit.scene_basis 默认 current。只有明确说“在原始场景/初始
 motion direction 仅允许 left/right/front/back/up/down；东=right、西=left、北=front、南=back。复合运动方向如“向左上方移动”返回 clarification_required。
 “右边的苹果”是 selection relation=right；“最右边的苹果”是 rightmost；同理区分 left/leftmost、front/frontmost、back/backmost、up/highest、down/lowest。
 二维角落：左上角=left+front，右上角=right+front，左下角=left+back，右下角=right+back；这里上/下是桌面平面的前/后，不是 Z 轴。relation.subject 必须是被修饰 entity。
+明确参照物必须保留：“桌子左上角的苹果”使用两个 selection relation，subject=apple，relation=left/front，reference=table；不是相对世界原点。普通“篮子左边”优先使用 left_of/reference=basket。“篮子左边最靠前的棒球”先 left_of/basket 再 frontmost/null，未给候选总数时 quantity_mode=single。移动到桌面某个角落不是沿 Z 轴移动；当前 move_relative 只支持一个关系，无法用现有操作明确表达二维目标角落时应澄清，不丢弃一个方向。
 一句话可同时包含 selector 和 motion，例如“把左边的棒球向右移动”应同时输出 selection=left 和 operation.motion_direction=right。
 
 ## 8. Selection relation
@@ -152,5 +154,14 @@ Schema约定：status 只能 accepted/clarification_required/unsupported_task。
 查询必须填写非空 scene_query；颜色是 scene_query.entities 中的 color，不是空间 near 关系。顶层 entities/operations/relations 必须是空数组，scene_edit/session_control/robot_setup_request 必须为 null。其他任务同样显式填写不适用的 payload 为 null，不遗漏整个字段。
 
 场景平移字段特别注意：scene_edit.operations 的 translate 使用 direction（不是机器人 operation 的 motion_direction）。平移必须同时给出 direction 和 distance_m 或 motion_scale，不得只写 operation/target 后漏掉方向和幅度。纯改色用 update_properties，不需要位置参照。复合编辑必须逐条完整保留。
+未提及机械臂、抓取、夹持或释放的“把苹果移到篮子左边”是场景相对位置编辑：operation="move_relative", target="apple", reference="basket", relation="left_of"，不能擅自增加抓放步骤。“让机械臂把苹果移到篮子左边”则仍是 robot_task。“放进篮子”等抓放任务保持 robot_task。
+场景平移和旋转已经支持 coordinate_frame="world" 或 "object_local"，不要将局部轴移动误判为不支持。X正/负映射 direction=right/left，Y正/负映射 front/back，Z正/负映射 up/down；明确“自身/局部轴”时 coordinate_frame="object_local"，否则 world。例如“把香蕉沿自身局部X轴正方向移动两厘米”→ {"operation":"translate","target":"banana","coordinate_frame":"object_local","direction":"right","distance_m":0.02}。旋转后的实际世界方向由 Python 变换计算，模型不得输出世界坐标。这与不支持世界轴缩放的限制不同。
+完整局部平移示例（coordinate_frame 不代替方向和距离，这三个字段必须同时输出）：
+{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"entities":[{"entity_id":"banana","semantic_name":"banana","category":"fruit"}],"relations":[],"operations":[{"operation":"translate","target":"banana","direction":"right","distance_m":0.02,"coordinate_frame":"object_local"}]},"entities":[],"operations":[],"relations":[],"scene_query":null,"session_control":null}
+完整相对编辑示例“把苹果移到篮子左边”：
+{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit"},{"entity_id":"basket","semantic_name":"basket","category":"container"}],"relations":[],"operations":[{"operation":"move_relative","target":"apple","relation":"left_of","reference":"basket"}]},"entities":[],"operations":[],"relations":[],"scene_query":null,"session_control":null}
+注意 move_relative 的目标方位必须填写在 operations 条目内的 relation，与 reference 配对。scene_edit.relations 仅描述操作前选择条件，不能把要移动到的位置写在那里，否则会错误选择对象或漏掉目标。
+同类物体的不同选择条件必须声明不同 entity_id；同一角色的多个 relations 是交集，不是“分别/或者”。“最左边的棒球…再最右边的棒球…”必须是两个角色，不得把 leftmost 和 rightmost 绑定到同一个 baseball。完整示例：
+{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"entities":[{"entity_id":"ball_left","semantic_name":"baseball","category":"ball"},{"entity_id":"ball_right","semantic_name":"baseball","category":"ball"}],"relations":[{"scope":"selection","subject":"ball_left","relation":"leftmost"},{"scope":"selection","subject":"ball_right","relation":"rightmost"}],"operations":[{"operation":"update_properties","target":"ball_left","properties":{"color":"blue"}},{"operation":"update_properties","target":"ball_right","properties":{"color":"blue"}}]},"entities":[],"operations":[],"relations":[],"scene_query":null,"session_control":null}
 例如“直接修改场景：两个苹果都向右移动两厘米，香蕉绕世界Z轴旋转三十度，再把篮子改为蓝色”：
 {"status":"accepted","turn_kind":"scene_edit","scene_edit":{"entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit","count":2,"quantity_mode":"all"},{"entity_id":"banana","semantic_name":"banana","category":"fruit"},{"entity_id":"basket","semantic_name":"basket","category":"container"}],"relations":[],"operations":[{"operation":"translate","target":"apple","direction":"right","distance_m":0.02},{"operation":"rotate","target":"banana","coordinate_frame":"world","axis":"z","angle_deg":30},{"operation":"update_properties","target":"basket","properties":{"color":"blue"}}]}}

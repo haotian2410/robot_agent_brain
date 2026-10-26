@@ -102,6 +102,13 @@ class SceneEditPlan(BaseModel):
         TaskIntent(instruction="scene selection", entities=self.entities,
                    operations=[], spatial_relations=self.relations)
         ids = {entity.entity_id for entity in self.entities}
+        for identifier in ids:
+            selectors = [r for r in self.relations if r.subject == identifier and r.scope == "selection"]
+            for reference in {r.reference for r in selectors}:
+                kinds = {r.relation.value for r in selectors if r.reference == reference}
+                if any({a,b} <= kinds for a,b in [("leftmost","rightmost"),("frontmost","backmost"),
+                                                 ("highest","lowest"),("nearest","farthest")]):
+                    raise ValueError("scene_edit_selection_conflict: opposing extrema require distinct entity roles")
         for op in self.operations:
             if op.target not in ids:
                 raise ValueError("scene_edit_unknown_selector")
