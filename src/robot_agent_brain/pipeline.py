@@ -83,9 +83,10 @@ class BrainResult(BaseModel):
 
 class BrainPipeline:
     def __init__(self, understanding, assets, scene_editor=None, vision_provider=None,
-                 skill_planning_provider=None, planner_mode="recipe", robot="ur5e", aliases=None):
+                 skill_planning_provider=None, planner_mode="recipe", robot="ur5e", aliases=None, query_near_distance_m=.2):
         self.understanding = understanding
         self.assets = assets
+        self.query_near_distance_m = query_near_distance_m
         self.aliases = getattr(getattr(assets, "metadata", None), "aliases", {})
         if aliases is not None:
             self.aliases = aliases
@@ -190,7 +191,28 @@ class BrainPipeline:
                                focus_object_ids=edited.focus_object_ids or None,
                                deleted_object_ids=edited.deleted_object_ids)
         if turn.turn_kind == TurnKind.SCENE_QUERY:
-            query = SceneQueryEngine(aliases=self.aliases, category_aliases=self.category_aliases, assets=self.assets).query(turn.scene_query, scene, dialogue)
+            visual = turn.scene_query.evidence_source == "image"
+            if visual and (self.vision_provider is None or capture is None):
+                raise ValueError("query_visual_evidence_required")
+            query = SceneQueryEngine(aliases=self.aliases, category_aliases=self.category_aliases, assets=self.assets,
+                                    near_distance_m=self.query_near_distance_m).query(
+                                        turn.scene_query.model_copy(update={"evidence_source": "scene"}), scene, dialogue)
+            if visual:
+                from .scene.component_access import SceneIndex
+                from .contracts.task_intent import TaskEntity
+                index, frame = SceneIndex(scene), capture()
+                identifiers = set(query.object_ids)
+                if query.reference_object_id is not None:
+                    identifiers.add(query.reference_object_id)
+                if not identifiers:
+                    raise ValueError("query_visual_evidence_required: 无候选不能证明画面中没有物体")
+                for oid in sorted(identifiers):
+                    semantic = index.semantic(oid)
+                    entity = TaskEntity(entity_id=semantic.semantic_name, semantic_name=semantic.semantic_name,
+                                        category=semantic.category)
+                    self.vision_fallback.resolve(entity, [index.object(oid)], scene, frame, self.vision_provider)
+                query.evidence_source = "image_and_scene_geometry"
+                query.reply = "已通过当前真实图像核对候选物体；以下关系依据同一快照的场景几何。" + (query.reply or str(query.names))
             return BrainResult(turn_kind=turn.turn_kind, scene_query_result=query, focus_object_ids=query.object_ids)
         intent = turn.task_intent
         if robot_profile is not None and not dual:

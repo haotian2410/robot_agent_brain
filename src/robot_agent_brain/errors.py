@@ -14,3 +14,7 @@ class BrainError(ValueError):
     def __init__(self, code, stage, message, **details):
         self.issue = BrainIssue(code=code, stage=stage, message=message, details=details)
         super().__init__(f"{code}: {message}")
+
+
+class SceneCommitRejected(ValueError):
+    """Authoritative rejection AND an unchanged-world readback; safe to retain state."""

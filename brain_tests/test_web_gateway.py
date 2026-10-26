@@ -56,7 +56,9 @@ class Browser:
             return httpx.Response(200,json=document,headers=headers)
         if route == "/commitWorld":
             body=json.loads(request.content)
-            if self.fault == "reject":return httpx.Response(409,json={"error":"invalid object"})
+            if self.fault == "reject":return httpx.Response(409,json={
+                "transactionID": body["transactionID"], "browserID": "b", "status": "rejected",
+                **body["expected"], "rejected_objects": [], "reason": "invalid object"})
             self.scene=type(self.scene).model_validate(body["scene"])
             # The gateway acknowledges the bytes it was handed (§3 of the digest spec), so the
             # receipt alone cannot expose a non-canonical submission; only the served world can.

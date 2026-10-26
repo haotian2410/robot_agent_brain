@@ -87,6 +87,23 @@ class AgentService:
         if scene.scene_id == 0 and not scene.objects:
             return scene
         if session is not None and session.scene is not None:
+            previous = session.scene
+            if scene.scene_id != previous.scene_id:
+                raise ValueError("browser_new_session_required")
+            old_index, new_index = SceneIndex(previous), SceneIndex(scene)
+            for identifier in session.platform_object_ids or set():
+                def deployment(obj):
+                    value = obj.model_dump(mode="json")
+                    for component in value["components"]:
+                        if component["component_type"] == "RobotDriver":
+                            component["properties"].pop("now_joint_positions_rad", None)
+                    return value
+                try:
+                    unchanged = deployment(old_index.object(identifier)) == deployment(new_index.object(identifier))
+                except LookupError:
+                    unchanged = False
+                if not unchanged:
+                    raise ValueError("web_platform_profile_unsupported")
             return scene
         # This release imports UR5e only. Dual scenes remain display-only.
         if self.app.bootstrapper.template_scene is not None:
@@ -120,6 +137,15 @@ class AgentService:
         if request.camera_id is not None:
             self.camera_bindings[identifier] = request.camera_id
         session = self._bind(identifier)
+        from .camera_policy import choose_camera
+        camera_scene = validate_web_scene(request.scene) if request.scene is not None else session.scene
+        automatic_camera, camera_reason = choose_camera(camera_scene)
+        if request.camera_id is None and camera_scene is not None:
+            session.camera_id = automatic_camera
+            self.camera_bindings[identifier] = automatic_camera
+            session.platform.camera_id = automatic_camera
+            session.platform.original_camera_id = automatic_camera
+            self.app._save_session(identifier)
         if request.camera_id is not None:
             if session.camera_id is not None and session.camera_id != request.camera_id:
                 raise ValueError("camera_binding_immutable")
@@ -127,6 +153,7 @@ class AgentService:
             self.app._save_session(identifier)
         return {"sessionID":identifier,"browserID":request.browserID,
                 "camera_id":getattr(session, "camera_id", None),
+                "camera_selection_reason":camera_reason if request.camera_id is None else "explicit_configuration",
                 "session_phase":getattr(session, "session_phase", "setup"),"active":True}
 
     def execute(self, identifier):
@@ -143,7 +170,16 @@ class AgentService:
                 session.camera_id = self.camera_bindings[request.sessionID]
             platform = session.platform
             scene = self.validate_scene(request.scene, session)
+            from .camera_policy import choose_camera
+            session.camera_id, _ = choose_camera(scene)
+            platform.camera_id = session.camera_id
+            if session.original_scene_manifest is None:
+                platform.original_camera_id = session.camera_id
             platform.receipts = []
+            platform.write_attempted = False
+            platform.last_transaction = None
+            platform.lease_state = "not_requested"
+            platform.lease_uncertain = False
             platform.capabilities()
             if self.config.asset_library_root:
                 with httpx.Client(timeout=10, trust_env=False) as client:
@@ -160,9 +196,15 @@ class AgentService:
             report = self.app.handle(request.command, session_id=request.sessionID)
             record_path = self.output / request.sessionID / report.request_id / "request_record.json"
             turn_record = json.loads(record_path.read_text(encoding="utf-8"))
-            if turn_record.get("id_remap"):
-                platform.remap_camera(turn_record["id_remap"])
+            # Original derivation remaps the frozen original IDs, not the previous
+            # branch's camera ID. Revalidate semantic binding on the confirmed scene.
+            if session.scene is not None:
+                session.camera_id, camera_reason = choose_camera(session.scene)
+                platform.camera_id = session.camera_id
+                self.camera_bindings[request.sessionID] = session.camera_id
             result = self.result(report, identifier)
+            result["camera_id"] = session.camera_id
+            result["camera_selection_reason"] = camera_reason if session.scene is not None else "no_scene"
             # Even non-mutating plans must still refer to the live editor state.
             # A scene edit may have been committed during this task.  Compare the final
             # result with the browser's current world, not the lease's initial snapshot;
@@ -175,9 +217,23 @@ class AgentService:
             uncertain = session.sync_state == "unknown"
         except Exception as exc:
             uncertain = (session is not None and session.sync_state == "unknown") or (platform is not None and platform.lease_uncertain)
+            message, code = str(exc), str(exc).split(":", 1)[0]
+            if isinstance(exc, httpx.HTTPError):
+                if platform is not None and platform.lease_state == "not_granted":
+                    code, message = "gateway_lease_not_granted", "浏览器未连接或未就绪，场景租约明确未授予；场景未修改。重新打开浏览器后可以重试。"
+                else:
+                    code, message = "gateway_transport_error", "与场景服务通信失败；请检查连接。若会话显示待恢复，请先核验恢复证据。"
+                durable_json(self.output / request.sessionID / "web_failures" / f"{identifier}.json",
+                             {"error": str(exc), "taskID": identifier})
             result = {"taskID":identifier,"sessionID":request.sessionID,"outcome":"failed", "executed":False,
-                "reply":str(exc),"error":{"code":str(exc).split(":",1)[0],"message":str(exc)}}
+                "reply":f"{message}（{code}；诊断 task-{identifier}）",
+                "error":{"code":code,"message":message,"details":{"diagnostic_id":f"task-{identifier}"}}}
         finally:
+            if platform is not None:
+                result = {**(result or {}), "recovery_context": {
+                    "lease_state": getattr(platform, "lease_state", "unknown"),
+                    "write_attempted": getattr(platform, "write_attempted", None),
+                    "transactionID": getattr(platform, "last_transaction", None)}}
             if platform is not None:
                 try:
                     platform.release_lease(uncertain=uncertain)
@@ -215,6 +271,10 @@ class AgentService:
         if report.run_status == "failed":
             outcome = "failed"
         result = report.model_dump(mode="json")
+        if isinstance(result.get("error"), dict):
+            result["error"]["details"] = {"diagnostic_id": report.request_id}
+            if result.get("reply"):
+                result["reply"] += f"（{result['error']['code']}；诊断 {report.request_id}）"
         # The public WebEditor envelope exposes a numeric call count.  Keep the
         # detailed trace under a separate key so the browser can render the
         # summary while diagnostics and artifacts retain every call record.
@@ -222,9 +282,13 @@ class AgentService:
         if isinstance(metrics, dict) and isinstance(metrics.get("model_calls"), list):
             metrics["model_call_details"] = metrics["model_calls"]
             metrics["model_calls"] = len(metrics["model_call_details"])
+            for call in metrics["model_call_details"]:
+                if call.get("error"):
+                    call["error"] = f"详见本机诊断 {report.request_id}"
         result.update(taskID=identifier, sessionID=report.session_id, outcome=outcome, executed=False)
-        result["artifacts"] = {name:f"/tasks/{identifier}/artifacts/{quote(name)}" for name in report.artifacts
-                               if name in {"scene_config", "scene_patch", "commands", "query_result"}}
+        result["artifacts"] = [{"name": name, "url": f"/tasks/{identifier}/artifacts/{quote(name)}"}
+                               for name in report.artifacts
+                               if name in {"scene_config", "scene_patch", "commands", "query_result"}]
         if outcome == "plan_ready":
             result["reply"] = "计划已生成，尚未执行。"
         if outcome == "clarification_required":
@@ -404,8 +468,8 @@ def create_http_app(service):
                 raise ValueError("session_browser_not_active")
             if binding["uncertain"]:
                 raise ValueError("session_reconciliation_required")
-            service._bind(value.sessionID)
-            service.validate_scene(value.scene, None)
+            session = service._bind(value.sessionID)
+            service.validate_scene(value.scene, session)
             record, fresh = service.tasks.submit(value)
             if fresh:
                 service.tasks.update(record["id"], "已进入队列", terminal=False)
@@ -429,6 +493,21 @@ def create_http_app(service):
     async def result(request):
         record = service.tasks.get(task_id(request))
         value = record["result"]
+        if value:
+            value = dict(value)
+            # Auditable upgrade for the old worker: its HTTPStatusError at acquireSceneLease
+            # occurs before all writes. A lost grant is still possible; Gateway must fence and
+            # inspect its own lease before recovery. Never infer a commit outcome this way.
+            error = value.get("error") or {}
+            if ("recovery_context" not in value and record["terminal"] and value.get("outcome") == "failed"
+                    and error.get("code", "").startswith(("Server error '503", "Client error '409"))
+                    and f"for url '{service.gateway_url}/acquireSceneLease'" in error.get("message", "")):
+                value["recovery_context"] = {"lease_state": "unknown", "write_attempted": False,
+                                             "transactionID": None, "source": "legacy_acquire_failure"}
+            names = value.get("_artifact_paths", value.get("artifacts", {}))
+            if isinstance(names, dict):
+                value["artifacts"] = [{"name": name, "url": f"/tasks/{record['id']}/artifacts/{quote(name)}"}
+                                      for name in names if name in {"scene_config", "scene_patch", "commands", "query_result"}]
         return web.json_response({**{k:v for k,v in value.items() if not k.startswith("_")},
                                  "taskID":record['id'],"sessionID":record['session']} if value else
                                  {"taskID":record["id"],"state":record["state"],"terminal":record["terminal"],
@@ -534,49 +613,55 @@ def create_http_app(service):
             raise ValueError("resolution_invalid")
         binding = service.tasks.binding(session_id)
         session = service.app.get_session(session_id)
-        evidence = payload.get("evidence") or {}
         if binding["browser"] != browser_id or not binding["uncertain"]:
             return web.json_response({"state":"kept_locked","sessionID":session_id,
                                       "transactionID":transaction_id,
                                       "resolution":resolution,
                                       "reason":"uncertain_evidence_missing"})
-        live = None
+        rows = service.tasks.db.execute("SELECT id,terminal FROM tasks WHERE session=? ORDER BY id DESC", (session_id,)).fetchall()
+        if not rows or any(not row["terminal"] for row in rows):
+            return web.json_response({"state":"kept_locked","sessionID":session_id,
+                                      "reason":"recovery_task_not_terminal"})
+        identifier = rows[0]["id"]
+        record = service.tasks.get(identifier)
+        if transaction_id is None:
+            transaction_id = ((record["result"] or {}).get("recovery_context") or {}).get("transactionID")
+        expected_scene = session.scene or service.validate_scene(record["payload"]["scene"], session)
+        # The gateway itself fences the old task and reads the live target session. Neither
+        # a caller-supplied receipt nor a boolean assertion can authorize this transition.
+        def verify():
+            with httpx.Client(timeout=25, trust_env=False) as client:
+                response = client.post(service.gateway_url + "/resolveUncertain", json={
+                    "sessionID": session_id, "browserID": browser_id, "taskID": identifier,
+                    "transactionID": transaction_id, "expected_digest": digest(expected_scene), "resolution": resolution})
+                response.raise_for_status()
+                return response.json()
         try:
-            live = service.platform().read_live()
-        except Exception:
-            pass
-        receipt_status = evidence.get("receipt_status", "missing")
-        if receipt_status not in {"missing", "committed", "rejected", "unknown"}:
-            return web.json_response({"state":"kept_locked","sessionID":session_id,
-                                      "transactionID":transaction_id,
-                                      "resolution":resolution,
-                                      "reason":"uncertain_evidence_invalid"})
-        expected = evidence.get("expected_digest")
-        live_digest = digest(live) if live is not None else None
-        # Brain cannot infer a transaction outcome from a timeout.  The caller
-        # must provide an explicit receipt status (or ``missing``), exclude
-        # late writes, and identify the live scene it actually read.
-        valid = (bool(evidence.get("late_write_excluded"))
-                 and evidence.get("live_digest") == live_digest
-                 and live is not None)
-        if expected is not None:
-            valid = valid and live_digest == expected
-        if receipt_status in {"committed", "rejected"} and not transaction_id:
-            valid = False
-        if not valid:
-            return web.json_response({"state":"kept_locked","sessionID":session_id,
-                                      "transactionID":transaction_id,
-                                      "resolution":resolution,
-                                      "reason":"uncertain_evidence_invalid"})
+            evidence = await asyncio.to_thread(verify)
+        except (httpx.HTTPError, ValueError):
+            return web.json_response({"state": "kept_locked", "sessionID": session_id,
+                                      "reason": "gateway_recovery_evidence_unavailable"})
+        if (evidence.get("state") != "resolved" or evidence.get("sessionID") != session_id
+                or evidence.get("browserID") != browser_id or evidence.get("taskID") != identifier
+                or evidence.get("sceneDigest") != digest(expected_scene) or not evidence.get("resolutionID")
+                or resolution == "new_session" and evidence.get("retired") is not True):
+            return web.json_response({"state": "kept_locked", "sessionID": session_id,
+                                      "reason": evidence.get("reason", "uncertain_evidence_invalid")})
         with service.tasks.lock, service.tasks.db:
             service.tasks.db.execute("UPDATE sessions SET uncertain=0 WHERE id=?", (session_id,))
+            if resolution == "new_session":
+                service.tasks.db.execute("UPDATE sessions SET active=0 WHERE id=?", (session_id,))
         session.sync_state = "synchronized"
+        session.session_phase = "setup"
+        session.platform.lease = None
+        session.platform.lease_uncertain = False
         session.recovery_context = None
         service.app._save_session(session_id)
-        return web.json_response({"state":"resolved","sessionID":session_id,
+        return web.json_response({"state":"resolved","sessionID":None if resolution == "new_session" else session_id,
             "transactionID":transaction_id,"resolution":resolution,
-            "scene_id":live.scene_id,"scene_version":live.scene_version,
-            "scene_sub_version":live.scene_sub_version,"sceneDigest":live_digest,"reason":"evidence_verified"})
+            "scene_id":expected_scene.scene_id,"scene_version":expected_scene.scene_version,
+            "scene_sub_version":expected_scene.scene_sub_version,"sceneDigest":digest(expected_scene),
+            "resolutionID":evidence["resolutionID"],"reason":"evidence_verified"})
 
     app.router.add_get("/allocateObjectID", allocate_object_id)
     app.router.add_post("/resolveUncertain", resolve_uncertain)

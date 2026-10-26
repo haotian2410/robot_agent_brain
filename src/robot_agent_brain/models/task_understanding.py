@@ -201,6 +201,15 @@ def _open_close_reference_missing(value, error):
 
 def parse_qwen_turn(value, instruction: str) -> BrainTurn:
     """Parse live model output with narrow, fail-closed clarification recovery."""
+    # Some constrained decoders put a query's explicit selector in the robot root
+    # relations slot. Move it only when there is exactly one unambiguous owner;
+    # never invent a reference, predicate, entity, or operation.
+    if (isinstance(value, dict) and value.get("status") == "accepted"
+            and value.get("turn_kind") == "scene_query" and not value.get("entities")
+            and not value.get("operations") and isinstance(value.get("scene_query"), dict)
+            and value.get("relations") and not value["scene_query"].get("relations")
+            and value["scene_query"].get("query_type") == "selection"):
+        value = {**value, "scene_query": {**value["scene_query"], "relations": value["relations"]}, "relations": []}
     if isinstance(value, dict) and value.get("status") in {
         TurnStatus.CLARIFICATION_REQUIRED.value, TurnStatus.UNSUPPORTED_TASK.value,
     }:
@@ -210,13 +219,22 @@ def parse_qwen_turn(value, instruction: str) -> BrainTurn:
         if not isinstance(question, str) or not question.strip():
             question = ("当前 Piper 双臂任务需要明确两只机械臂的对象分配和执行能力。"
                         if value.get("arm_usage") == "both_required"
-                        else "请补充任务所需的对象、数量、参照物或执行条件。")
+                        else ("本期只支持对象局部轴缩放，不支持沿世界轴缩放。" if status == TurnStatus.UNSUPPORTED_TASK and "世界" in instruction
+                              else "该请求超出当前已注册能力，不能生成可执行计划。" if status == TurnStatus.UNSUPPORTED_TASK
+                              else "请补充任务所需的对象、数量、参照物或执行条件。"))
         return BrainTurn(status=status, turn_kind=turn_kind, instruction=instruction,
                          clarification_question=question.strip())
     try:
         parsed = TaskParseOutput.model_validate(value)
         return parsed.to_brain_turn(instruction)
     except (ValidationError, ValueError) as exc:
+        if (isinstance(value, dict) and value.get("turn_kind") == "scene_query"
+                and isinstance(value.get("scene_query"), dict)
+                and (value["scene_query"].get("query_type") == "selection" or
+                     any(isinstance(r, dict) and r.get("relation") == "near" and r.get("reference") is None
+                         for r in (value["scene_query"].get("relations") or []) + (value.get("relations") or [])))):
+            return BrainTurn(status=TurnStatus.CLARIFICATION_REQUIRED, turn_kind=TurnKind.SCENE_QUERY,
+                             instruction=instruction, clarification_question="你想查询哪个参照物旁边的物体？请明确参照物名称；不会猜测缺失的参照关系。")
         if _open_close_reference_missing(value, exc):
             return BrainTurn(
                 status=TurnStatus.CLARIFICATION_REQUIRED,

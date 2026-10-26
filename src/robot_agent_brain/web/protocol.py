@@ -47,6 +47,7 @@ class SessionRequest(BaseModel):
     sessionID: str | None = Field(default=None, pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     camera_id: int | None = Field(default=None, ge=0, le=2**32 - 1)
     allowActiveTask: bool = False
+    scene: dict | None = None
 
 
 def validate_web_scene(scene, joint_inventory=None, reference_registry=None):

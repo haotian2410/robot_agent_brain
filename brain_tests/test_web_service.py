@@ -46,7 +46,7 @@ def test_http_lifecycle_results_and_artifact_whitelist(tmp_path):
             assert result["outcome"]=="scene_updated", result
             assert result["executed"] is False and "_artifact_paths" not in result
             assert result["commitReceipts"]
-            response=await client.get(result["artifacts"]["scene_config"])
+            response=await client.get(next(a["url"] for a in result["artifacts"] if a["name"] == "scene_config"))
             assert response.status==200 and (await response.json())["scene_version"]==1
             response=await client.get(f'/tasks/{identifier}/artifacts/session_state')
             assert response.status==404

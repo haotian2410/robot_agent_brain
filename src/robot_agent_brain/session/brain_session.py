@@ -3,6 +3,7 @@ from ..contracts.commands import ExecutionFeedback, canonical_commands
 from ..contracts.scene import SceneConfig
 from ..scene.scene_manager import SceneManager
 from .dialogue_state import DialogueState
+from ..errors import SceneCommitRejected
 
 class BrainSession:
     """Local semantic state commits only after platform acknowledgement."""
@@ -55,6 +56,8 @@ class BrainSession:
         candidate = self._candidate_manager(scene)
         try:
             self._check_snapshot(self.platform.load_scene(candidate.scene), candidate.scene)
+        except SceneCommitRejected:
+            raise
         except Exception:
             self.sync_state = "unknown"
             raise
@@ -175,6 +178,8 @@ class BrainSession:
         self._validate_identity_range(candidate_scene)
         try:
             snapshot = self.platform.apply_patch(patch)
+        except SceneCommitRejected:
+            raise
         except Exception:
             self.sync_state = "unknown"
             raise
@@ -341,6 +346,8 @@ class BrainSession:
         manager = self._candidate_manager(prepared.scene)
         try:
             self._check_snapshot(self.platform.load_scene(prepared.scene), prepared.scene)
+        except SceneCommitRejected:
+            raise
         except Exception:
             self.sync_state = "unknown"
             raise
@@ -473,6 +480,8 @@ class BrainSession:
         manager = self._candidate_manager(remapped.scene)
         try:
             self._check_snapshot(self.platform.load_scene(remapped.scene), remapped.scene)
+        except SceneCommitRejected:
+            raise
         except Exception:
             self.sync_state = "unknown"
             raise

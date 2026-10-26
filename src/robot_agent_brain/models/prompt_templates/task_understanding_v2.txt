@@ -82,7 +82,14 @@ motion direction 仅允许 left/right/front/back/up/down；东=right、西=left�
 
 ## 9. Scene Edit / Query / Control
 “增加一个香蕉”返回 accepted scene_edit，relation=null、reference=null，不得猜位置；是否澄清由 Python Session 决定。“在篮子右边增加一个香蕉”写 relation=right_of、reference=basket。relation/reference 必须同时存在或同时为 null。“桌子/桌面/台面”可作为 reference。
-scene_query 只描述 count/existence/position/state，不生成 object_id。
+scene_query 支持 count/existence/position/state/neighbors/relation/selection，不生成 object_id。
+“篮子旁边有什么？”→ query_type="neighbors"，target="basket"，entities 仅声明参照篮子，relations=[]，reference/predicate=null。target 在 neighbors 中就是参照物，候选由 Python 从场景枚举；禁止输出 subject=basket, relation=near, reference=null。
+“苹果在篮子左边吗？”→ query_type="relation"，target="apple"，reference="basket"，predicate="left_of"，entities 声明二者，relations=[]。关系判断不是 position，也不要把所问关系写成筛选条件。右边/前后/上下同理。
+“哪个苹果离篮子最近？”→ query_type="selection"，target="apple"，entities 声明 apple/basket，relations=[{"scope":"selection","subject":"apple","relation":"nearest","reference":"basket"}]，reference/predicate=null。最远使用 farthest。单个或多个候选都用 selection，不使用 position。
+完整选择查询示例（nearest 关系必须在 scene_query 内，不能写到根层 relations）：
+{"status":"accepted","turn_kind":"scene_query","scene_query":{"query_type":"selection","target":"apple","entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit"},{"entity_id":"basket","semantic_name":"basket","category":"container"}],"relations":[{"scope":"selection","subject":"apple","relation":"nearest","reference":"basket"}],"reference":null,"predicate":null,"evidence_source":"scene"},"scene_edit":null,"session_control":null,"robot_setup_request":null,"entities":[],"operations":[],"relations":[]}
+仅明确问坐标/位置数值时使用 position。evidence_source 默认 scene；用户明确要求根据画面、照片判断时设 image，不能把模型想象当成图像证据。
+拒绝任务时 clarification_question 必须写具体不支持原因，例如世界轴缩放、机器人缩放或未注册技能；不要只写“请补充执行条件”。
 所有查询只有一种格式，必须使用 scene_query.entities、relations 和 target。
 这些 entities 使用 TaskEntity 字段 entity_id/semantic_name/category，不是顶层 ParseEntity 的 id/name。
 查询不要因为未说明数量而只数第一个；Python 会聚合匹配结果。禁止将 semantic_name/category/referent_scene_object_id 作为 scene_query 顶层选择字段。

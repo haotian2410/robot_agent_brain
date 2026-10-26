@@ -13,6 +13,7 @@ import httpx
 from ..contracts.camera import CameraFrame, CameraInstanceBox
 from ..contracts.scene import SceneSnapshot
 from ..filelock import sync_directory
+from ..errors import SceneCommitRejected
 from ..scene.component_access import SceneIndex
 from ..scene.scene_manager import SceneManager
 from .protocol import PROTOCOL_VERSION, digest, loopback_url, validate_web_scene
@@ -49,6 +50,9 @@ class GatewayScenePlatformAdapter:
         self.receipts = []
         self.lease = None
         self.lease_uncertain = False
+        self.lease_state = "not_requested"
+        self.write_attempted = False
+        self.last_transaction = None
         self.next_object_id = 0
         if self.journal_dir and (self.journal_dir / "camera_binding.json").exists():
             self.camera_id = json.loads((self.journal_dir / "camera_binding.json").read_text(encoding="utf-8"))["camera_id"]
@@ -65,13 +69,29 @@ class GatewayScenePlatformAdapter:
     def acquire_lease(self, task_id, scene):
         # A lost lease ACK may have locked the editor. Never silently continue.
         self.lease_uncertain = True
-        value = self._call("POST", "/acquireSceneLease", json={"taskID": task_id,
+        self.lease_state = "unknown"
+        payload = {"taskID": task_id,
             "browserID": self.browser_id, "sceneDigest": digest(scene),
             "scene_id": scene.scene_id, "scene_version": scene.scene_version,
-            "scene_sub_version": scene.scene_sub_version}).json()
+            "scene_sub_version": scene.scene_sub_version}
+        try:
+            value = self._call("POST", "/acquireSceneLease", json=payload).json()
+        except httpx.HTTPStatusError as exc:
+            try:
+                rejection = exc.response.json()
+            except ValueError:
+                rejection = {}
+            if (rejection.get("lease_status") == "not_granted"
+                    and rejection.get("taskID") == task_id
+                    and rejection.get("browserID") == self.browser_id
+                    and rejection.get("sessionID") == self.session_id):
+                self.lease_state = "not_granted"
+                self.lease_uncertain = False
+            raise
         if value.get("browserID") != self.browser_id or not isinstance(value.get("leaseToken"), str) or not value["leaseToken"]:
             raise ValueError("gateway_lease_invalid")
         self.lease = value["leaseToken"]
+        self.lease_state = "granted"
         self.lease_uncertain = False
 
     def release_lease(self, *, uncertain=False):
@@ -81,6 +101,7 @@ class GatewayScenePlatformAdapter:
             if reply.get("browserID") != self.browser_id or reply.get("state") != ("quarantined" if uncertain else "released"):
                 raise ValueError("gateway_unlock_unconfirmed")
             self.lease = None
+            self.lease_state = "released" if not uncertain else "unknown"
 
     def capabilities(self):
         try:
@@ -121,6 +142,8 @@ class GatewayScenePlatformAdapter:
         return scene
 
     def remap_camera(self, mapping):
+        if self.original_camera_id is None:
+            return
         if str(self.original_camera_id) not in mapping:
             raise ValueError("gateway_camera_remap_missing")
         self.camera_id = mapping[str(self.original_camera_id)]
@@ -162,6 +185,15 @@ class GatewayScenePlatformAdapter:
                 or receipt.get("rejected_objects", []) != []):
             raise ValueError("gateway_commit_receipt_invalid")
 
+    def _confirmed_rejection(self, receipt, transaction, previous):
+        return (receipt.get("status") == "rejected"
+                and receipt.get("transactionID") == transaction
+                and receipt.get("browserID") == self.browser_id
+                and all(receipt.get(key) == value for key, value in {
+                    "scene_id": previous.scene_id, "scene_version": previous.scene_version,
+                    "scene_sub_version": previous.scene_sub_version, "sceneDigest": digest(previous)}.items())
+                and digest(self.read_live(lease_snapshot=False)) == digest(previous))
+
     def load_scene(self, scene):
         candidate = self.validate(scene)
         self.capabilities()
@@ -185,48 +217,53 @@ class GatewayScenePlatformAdapter:
             else candidate.model_dump(mode="json")}
         record = {"request": request, "status": "prepared"}
         self._journal(transaction, record)
+        self.write_attempted = True
+        self.last_transaction = transaction
         try:
             headers = {"X-Brain-Lease": self.lease} if self.lease else {}
             if self.session_id:
                 headers["X-Brain-Session"] = self.session_id
             response = self.client.post(self.base_url + "/commitWorld", json=request, headers=headers)
-            if response.status_code == 409:
-                receipt = response.json()
-                if receipt.get("status") == "rejected":
-                    self._journal(transaction, {**record, "status": "rejected", "receipt": receipt})
-                    raise ValueError("gateway_commit_rejected")
             response.raise_for_status()
             receipt = response.json()
         except httpx.HTTPStatusError as exc:
-            # A browser-level 4xx is a durable, explicit rejection.  A 5xx
-            # means the gateway may have accepted the write but failed to
-            # report its receipt, so keep the transaction unknown and locked.
+            # HTTP status alone is not evidence. Require a fully attributed rejection
+            # receipt plus unchanged live state before retaining synchronized state.
             status = exc.response.status_code
             try:
                 body = exc.response.json()
             except Exception:
                 body = {"status_code": status, "text": exc.response.text[:500]}
-            if 400 <= status < 500:
+            try:
+                confirmed = self._confirmed_rejection(body, transaction, previous)
+            except Exception:
+                confirmed = False
+            if confirmed:
                 self._journal(transaction, {**record, "status": "rejected", "receipt": body})
-            else:
-                self._journal(transaction, {**record, "status": "unknown", "receipt": body})
-            raise ValueError("gateway_commit_rejected" if 400 <= status < 500 else "gateway_commit_unknown") from None
+                self.receipts.append(body)
+                raise SceneCommitRejected("gateway_commit_rejected") from None
+            self._journal(transaction, {**record, "status": "unknown", "receipt": body})
+            raise ValueError("gateway_commit_unknown") from None
         except httpx.TransportError:
             # Never resend a mutating request. Query the transaction plus world.
             try:
                 receipt = self._call("GET", "/queryWorldCommit", params={"transactionID": transaction,
                     "browser_id": self.browser_id}).json()
-                self._check_receipt(receipt, transaction, candidate)
+                if receipt.get("status") != "rejected":
+                    self._check_receipt(receipt, transaction, candidate)
             except Exception:
                 journal = self.journal_record(transaction)
                 self._journal(transaction, {**(journal or record), "status": "unknown"})
                 raise ValueError("gateway_commit_unknown") from None
         try:
+            if self._confirmed_rejection(receipt, transaction, previous):
+                self._journal(transaction, {**record, "status": "rejected", "receipt": receipt})
+                self.receipts.append(receipt)
+                raise SceneCommitRejected("gateway_commit_rejected")
             self._check_receipt(receipt, transaction, candidate)
             if digest(self.read_live(lease_snapshot=False)) != digest(candidate):
                 raise ValueError("gateway_commit_readback_mismatch")
-        except ValueError:
-            self._journal(transaction, {**record, "status": "rejected", "receipt": receipt})
+        except SceneCommitRejected:
             raise
         except Exception:
             self._journal(transaction, {**record, "status": "unknown", "receipt": receipt})
@@ -252,6 +289,8 @@ class GatewayScenePlatformAdapter:
             raise ValueError("camera_frame_scene_mismatch")
 
     def capture(self, request):
+        if self.camera_id is None:
+            raise ValueError("camera_not_configured: 请提供唯一顶视相机或明确的相机配置。")
         if request.camera_id not in {"scene_camera", str(self.camera_id)}:
             raise ValueError("camera_not_configured")
         if "segmentation" in request.outputs:

@@ -113,10 +113,13 @@ class SceneEditPlan(BaseModel):
 
 class SceneQueryIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    query_type: Literal["count", "existence", "position", "state"]
+    query_type: Literal["count", "existence", "position", "state", "neighbors", "relation", "selection"]
     entities: list[TaskEntity] = Field(min_length=1)
     relations: list[SpatialRelation] = Field(default_factory=list)
     target: str
+    reference: str | None = None
+    predicate: Literal["left_of", "right_of", "front_of", "behind", "above", "below", "on"] | None = None
+    evidence_source: Literal["scene", "image"] = "scene"
 
     @model_validator(mode="after")
     def query_selectors(self):
@@ -125,6 +128,16 @@ class SceneQueryIntent(BaseModel):
             raise ValueError("query_target_missing")
         if any(r.scope != "selection" for r in self.relations):
             raise ValueError("query_requires_selection_relations")
+        if self.query_type == "selection" and not any(r.subject == self.target for r in self.relations):
+            raise ValueError("query_selection_requires_explicit_selector")
+        if self.query_type == "relation":
+            if self.reference is None or self.predicate is None:
+                raise ValueError("query_relation_requires_reference_and_predicate")
+            SpatialRelation(scope="selection", subject=self.target, reference=self.reference, relation=self.predicate)
+            if self.reference not in {e.entity_id for e in self.entities}:
+                raise ValueError("query_reference_missing")
+        elif self.reference is not None or self.predicate is not None:
+            raise ValueError("query_predicate_requires_relation_query")
         return self
 
 class SessionControlIntent(BaseModel):

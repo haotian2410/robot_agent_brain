@@ -53,8 +53,11 @@ def discover_candidates(entity, scene: SceneConfig, category_aliases=None, *, al
                  or category(index.semantic(obj.object_id_in_scene).category) in {"object", "graspable", "placement"})
              and canonicalize_name(index.semantic(obj.object_id_in_scene).semantic_name) == name]
     exact = [obj for obj in available if canonicalize_name(index.semantic(obj.object_id_in_scene).semantic_name) == name]
-    if named and not exact:
-        exact = named
+    # Imported Scene v1 objects use broad categories while newly added objects
+    # use lexical ones. Both are the same named candidates; adding one must not
+    # make the imported instances disappear from counts or nearest/farthest.
+    exact_ids = {obj.object_id_in_scene for obj in exact}
+    exact += [obj for obj in named if obj.object_id_in_scene not in exact_ids]
     if exact:
         return features(exact)
     requested_names = {canonicalize_name(alias) for alias in entity.aliases} | {name}
@@ -62,7 +65,9 @@ def discover_candidates(entity, scene: SceneConfig, category_aliases=None, *, al
              if (getattr(assets, "typed_namespaces", False)
                  or category(index.semantic(obj.object_id_in_scene).category) in {"object", "graspable", "placement"})
              and canonicalize_name(index.semantic(obj.object_id_in_scene).semantic_name) in requested_names]
-    return features([obj for obj in available if canonicalize_name(index.semantic(obj.object_id_in_scene).semantic_name) in requested_names] or named)
+    matched = [obj for obj in available if canonicalize_name(index.semantic(obj.object_id_in_scene).semantic_name) in requested_names]
+    matched_ids = {obj.object_id_in_scene for obj in matched}
+    return features(matched + [obj for obj in named if obj.object_id_in_scene not in matched_ids])
 
 
 class SemanticEntitySelector:

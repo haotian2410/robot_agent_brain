@@ -74,6 +74,7 @@ class BrainConfig(BaseModel):
     scene_scale_small: float = Field(default=1.1, gt=1)
     scene_scale_medium: float = Field(default=1.5, gt=1)
     scene_scale_large: float = Field(default=2., gt=1)
+    query_near_distance_m: float = Field(default=.2, gt=0, le=2)
 
     def scale_policy(self):
         from .scene.scale_policy import SceneScalePolicy

@@ -16,6 +16,7 @@ from .adapters.local_scene_platform import LocalScenePlatform
 from .adapters.scene_file_codec import SceneFileCodec
 from .adapters.artifact_writer import ArtifactWriter, safe_identifier
 from .contracts.run_report import BrainRunReport
+from .contracts.turn import TurnStatus
 from .errors import BrainIssue, BrainError
 from .models.qwen_http import QwenHTTPProvider, QwenProviderError
 from .diagnostics import configuration_summary, fingerprint, redact
@@ -50,6 +51,7 @@ class BrainApplication:
                                       vision_provider=provider if self.config.vision else None,
                                       skill_planning_provider=provider if hasattr(provider, "plan") else None,
                                       planner_mode=self.config.planner, robot=self.config.robot,
+                                      query_near_distance_m=self.config.query_near_distance_m,
                                       aliases=self.config.load_semantic_aliases() if self.config.semantic_aliases else None)
         bootstrap = self.config.bootstrap_settings()
         self.bootstrapper = SceneBootstrapper(self.assets, self.defaults, robot=self.config.robot, seed=self.config.seed,
@@ -357,7 +359,9 @@ class BrainApplication:
                 elif result.scene_query_result is not None:
                     query = result.scene_query_result
                     report.delivery_status = "answered"
-                    if query.query_type == "count":
+                    if query.reply:
+                        report.reply = query.reply
+                    elif query.query_type == "count":
                         report.reply = f"匹配对象共 {query.count} 个。"
                     elif query.query_type == "existence":
                         report.reply = "存在匹配对象。" if query.exists else "不存在匹配对象。"
@@ -370,12 +374,18 @@ class BrainApplication:
             if self.config.debug:
                 debug["traceback"] = traceback.format_exc()
             report.error = self._issue(exc, stage)
+            from .scene.user_feedback import explain_issue
+            explain_issue(report.error, exc, session.scene, self.assets)
             report.run_status = "blocked" if report.error.code.startswith(("scene_required", "grounding_", "bootstrap_", "asset_", "holding_", "plan_", "capability_", "dialogue_", "motion_", "execution_pending", "session_paused", "scene_sync_")) else "failed"
             if report.error.code.startswith("scene_scale_") or report.error.code == "scene_edit_color_unknown":
                 report.run_status = "blocked"
             if report.error.code == "scene_edit_color_unknown":
                 report.error.clarification_question = "请提供明确的颜色名称或 #RRGGBB / #RRGGBBAA。"
-            report.reply = report.error.message
+            if report.error.clarification_question:
+                report.run_status = "blocked"
+                report.turn_status = TurnStatus.CLARIFICATION_REQUIRED
+                report.clarification_question = report.error.clarification_question
+            report.reply = report.error.clarification_question or report.error.message
             if session.sync_state == "unknown":
                 report.scene_commit_status = "unknown"
         if session.scene is not None:
