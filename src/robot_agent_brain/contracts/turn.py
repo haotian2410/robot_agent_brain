@@ -1,7 +1,7 @@
 from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from .task_intent import TaskIntent, TaskEntity, Direction, MotionScale
 from .spatial import SpatialRelation
 from .robot_setup import RobotSetupRequest
@@ -19,6 +19,26 @@ class TurnKind(StrEnum):
     SESSION_CONTROL = "session_control"
     UNSUPPORTED_TASK = "unsupported_task"
 
+
+class SceneLayoutRelation(StrEnum):
+    LEFT_OF = "left_of"
+    RIGHT_OF = "right_of"
+    FRONT_OF = "front_of"
+    BEHIND = "behind"
+    ABOVE = "above"
+    BELOW = "below"
+    NEAR = "near"
+    ON = "on"
+    INSIDE = "inside"
+
+
+_SCENE_LAYOUT_RELATION_ALIASES = {
+    "back_of": SceneLayoutRelation.BEHIND,
+    "back": SceneLayoutRelation.BEHIND,
+    "后面": SceneLayoutRelation.BEHIND,
+    "后方": SceneLayoutRelation.BEHIND,
+}
+
 class SceneEditIntent(BaseModel):
     """One operation in a SceneEditPlan; never a standalone turn payload."""
     model_config = ConfigDict(extra="forbid")
@@ -29,7 +49,7 @@ class SceneEditIntent(BaseModel):
     scale_direction: Literal["enlarge", "shrink"] | None = None
     scale_amount: Literal["small", "medium", "large"] | None = None
     target: str = Field(min_length=1)
-    relation: str | None = None
+    relation: SceneLayoutRelation | None = None
     reference: str | None = None
     properties: dict[str, str | float | bool] = Field(default_factory=dict)
     direction: Direction | None = None
@@ -40,6 +60,16 @@ class SceneEditIntent(BaseModel):
     angle_deg: float | None = None
     pivot: Literal["origin"] = "origin"
     explicit_robot: bool = False
+
+    @field_validator("relation", mode="before")
+    @classmethod
+    def normalize_relation(cls, value):
+        if value is None or isinstance(value, SceneLayoutRelation):
+            return value
+        if not isinstance(value, str):
+            return value
+        normalized = value.strip().casefold()
+        return _SCENE_LAYOUT_RELATION_ALIASES.get(normalized, normalized)
 
     @model_validator(mode="after")
     def paired_relation(self):

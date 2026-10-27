@@ -12,6 +12,7 @@ from .component_access import SceneIndex
 from .geometry import world_bounds
 from .scene_graph import WorldTransform, world_transform, local_from_world
 from .scene_layout import SceneLayoutPolicy
+from .layout_geometry import SceneLayoutGeometryRegistry
 from .scene_manager import SceneManager
 from .spatial_facts import SpatialFactResolver
 from .transform_editor import translate, rotate
@@ -30,13 +31,15 @@ class SceneEditResult:
 
 class SceneEditor:
     def __init__(self, assets, layout=None, *, seed=0, aliases=None, category_aliases=None,
-                 scale_policy=None, scale_defaults=None, table_metadata_ref=None):
+                 scale_policy=None, scale_defaults=None, table_metadata_ref=None, layout_interiors=None):
         self.assets, self.seed = assets, seed
         self.layout = layout or SceneLayoutPolicy()
         self.aliases, self.category_aliases = aliases or {}, category_aliases or {}
         self.motion_policy = MotionPolicy()
         self.scale_policy = scale_policy or SceneScalePolicy()
         self.scale_defaults, self.table_metadata_ref = scale_defaults, table_metadata_ref
+        self.layout_interiors = (layout_interiors if isinstance(layout_interiors, SceneLayoutGeometryRegistry)
+                                 else SceneLayoutGeometryRegistry(layout_interiors))
         self.scale_table_transform = None
 
     def edit(self, intent, scene, **kwargs):
@@ -94,19 +97,26 @@ class SceneEditor:
                 obj = index.object(identifier)
                 if edit.operation in {"translate", "rotate", "move_relative", "update"}:
                     self._validate_transform_bounds(identifier, current, candidate, defaults)
-                if self._overlaps(obj, candidate):
+                ignore = {reference.object_id_in_scene} if edit.relation == "inside" and reference is not None else set()
+                if self._overlaps(obj, candidate, ignore_ids=ignore):
                     raise ValueError("scene_edit_transform_collision")
                 semantic = index.semantic(identifier)
                 if semantic is None:
                     continue
                 support = facts.infer_support(obj, candidate)
+                if reference is not None and edit.relation in {"on", "inside"}:
+                    entry = self._layout_entry(reference, candidate)
+                    if edit.relation == "inside" and entry is not None and entry.verified:
+                        support = reference.object_id_in_scene
+                    elif edit.relation == "on" and entry is not None and entry.verified and entry.supports_on_top:
+                        support = reference.object_id_in_scene
                 if edit.operation == "scale":
                     previous_semantic = SceneIndex(current).semantic(identifier)
                     if previous_semantic is None or previous_semantic.support is None:
                         support = None
                     elif support != previous_semantic.support:
                         raise ValueError("scene_scale_support_invalid")
-                if edit.operation == "add" and (reference is None or edit.relation in {"left_of", "right_of", "front_of", "behind"}) and support is None:
+                if edit.operation == "add" and (reference is None or edit.relation in {"left_of", "right_of", "front_of", "behind", "near", "on", "inside"}) and support is None:
                     raise ValueError("scene_edit_support_unknown")
                 operations.append(ScenePatchOperation(action="upsert_component", object_id_in_scene=identifier,
                     component=SceneComponent(component_type="Semantic",
@@ -134,6 +144,53 @@ class SceneEditor:
     def _facts(self, defaults=None):
         return SpatialFactResolver(self.assets, support_contact_tolerance_m=defaults.support_contact_tolerance_m if defaults else .001)
 
+    def _default_surface_id(self, scene, defaults):
+        """Resolve the configured work surface in the *current* scene.
+
+        Browser scene synchronization is allowed to allocate new object IDs for
+        platform objects.  ``LayoutDefaults.table_object_id`` is therefore only
+        a bootstrap hint, never a durable identity.  Prefer the configured
+        metadata reference and fall back to an unambiguous table-like Semantic
+        object.  We deliberately refuse to guess when there are several
+        candidates.
+        """
+        if defaults is None:
+            raise ValueError("scene_edit_default_surface_missing")
+        index = SceneIndex(scene)
+
+        def is_table(identifier):
+            if index.metadata_type(identifier) == "robot":
+                return False
+            if self.table_metadata_ref is not None:
+                return index.metadata_ref(identifier) == self.table_metadata_ref
+            semantic = index.semantic(identifier)
+            if semantic is None:
+                return False
+            name = (semantic.semantic_name or "").casefold().replace("-", "_")
+            return semantic.category == "surface" and name in {"table", "work_table", "桌子", "工作台"}
+
+        # Keep the fast path for the original template IDs, but validate that
+        # the object is actually the configured table before accepting it.
+        try:
+            configured = defaults.table_object_id
+            if is_table(configured):
+                return configured
+        except LookupError:
+            pass
+
+        candidates = [obj.object_id_in_scene for obj in scene.objects if is_table(obj.object_id_in_scene)]
+        if len(candidates) == 1:
+            return candidates[0]
+        if not candidates:
+            raise ValueError("scene_edit_default_surface_missing")
+        raise ValueError("scene_edit_default_surface_ambiguous")
+
+    def _is_default_surface(self, scene, identifier, defaults):
+        try:
+            return self._default_surface_id(scene, defaults) == identifier
+        except ValueError:
+            return False
+
     def _validate_transform_bounds(self, identifier, before, candidate, defaults):
         """Keep supported model edits within proven support/workspace bounds.
 
@@ -155,7 +212,7 @@ class SceneEditor:
         if not facts.footprint_contains(obj, support, candidate):
             raise ValueError("scene_edit_support_footprint_exceeded")
         configured = defaults or self.scale_defaults
-        if (configured is not None and support_id == configured.table_object_id
+        if (configured is not None and self._is_default_surface(candidate, support_id, configured)
                 and self.table_metadata_ref is not None
                 and index.metadata_ref(support_id) == self.table_metadata_ref
                 and index.metadata_type(support_id) != "robot"
@@ -206,7 +263,7 @@ class SceneEditor:
                 if not facts.footprint_contains(obj, support, candidate) or facts.infer_support(obj, candidate) != support_id:
                     raise ValueError("scene_replace_support_footprint_invalid")
                 defaults = self.scale_defaults
-                if (defaults is not None and support_id == defaults.table_object_id
+                if (defaults is not None and self._is_default_surface(scene, support_id, defaults)
                         and self.table_metadata_ref is not None and index.metadata_ref(support_id) == self.table_metadata_ref
                         and index.metadata_type(support_id) != "robot"
                         and (self.scale_table_transform is None or world_transform(scene, support_id) == self.scale_table_transform)):
@@ -248,14 +305,78 @@ class SceneEditor:
             elif edit.operation == "rotate":
                 moved = rotate(world, edit.axis, edit.angle_deg, edit.coordinate_frame)
             elif edit.operation in {"move_relative", "update"} and reference is not None:
-                moved = self.layout.relative_transform(edit.relation, world_transform(scene, reference.object_id_in_scene),
-                    facts.asset(reference, scene), facts.asset(obj, scene), world)
+                moved = self._choose_relative_transform(edit.relation, obj, reference, scene, world)
             else:
                 raise ValueError("scene_edit_update_missing")
             local = local_from_world(scene, identifier, moved)
             operations.append(ScenePatchOperation(action="upsert_component", object_id_in_scene=identifier,
                 component=SceneComponent(component_type="Transform", properties=local.model_dump(mode="json"))))
         return operations
+
+    def _layout_entry(self, obj, scene):
+        index = SceneIndex(scene)
+        return self.layout_interiors.get(index.metadata_ref(obj.object_id_in_scene),
+                                         index.metadata_type(obj.object_id_in_scene))
+
+    def _choose_relative_transform(self, relation, obj, reference, scene, current_world):
+        """Choose a deterministic, collision-checked relative transform."""
+        relation = getattr(relation, "value", relation)
+        facts, index = self._facts(), SceneIndex(scene)
+        reference_world = world_transform(scene, reference.object_id_in_scene)
+        reference_model, object_model = facts.asset(reference, scene), facts.asset(obj, scene)
+        if relation in {"left_of", "right_of", "front_of", "behind", "above", "below", "near"}:
+            candidates = self.layout.relative_candidates(relation, reference_world, reference_model,
+                                                         object_model, current_world)
+        elif relation == "on":
+            entry = self._layout_entry(reference, scene)
+            if not facts.is_surface(reference, scene) and not (entry and entry.verified and entry.supports_on_top):
+                raise ValueError("scene_edit_on_reference_not_support")
+            candidates = [self.layout.on_transform(reference_world, reference_model, object_model, current_world)]
+        elif relation == "inside":
+            entry = self._layout_entry(reference, scene)
+            if entry is None or not entry.verified:
+                raise ValueError("scene_edit_inside_geometry_missing")
+            candidates = self.layout.inside_candidates(reference_world, object_model, current_world, entry)
+        else:
+            raise ValueError("unsupported_scene_layout_relation: " + str(relation))
+
+        old_semantic = index.semantic(obj.object_id_in_scene)
+        support_id = old_semantic.support if old_semantic else None
+        for candidate_world in candidates:
+            local = local_from_world(scene, obj.object_id_in_scene, candidate_world)
+            transform_component = index.component(obj.object_id_in_scene, "Transform")
+            properties = dict(transform_component.properties)
+            properties.update(local.model_dump(mode="json"))
+            changed = obj.model_copy(update={"components": [
+                SceneComponent(component_type="Transform", properties=properties)
+                if component.component_type == "Transform" else component
+                for component in obj.components
+            ]})
+            candidate_scene = scene.model_copy(update={"objects": [
+                changed if item.object_id_in_scene == obj.object_id_in_scene else item
+                for item in scene.objects
+            ]})
+            if relation == "inside":
+                entry = self._layout_entry(reference, scene)
+                if not self.layout.contained_interior(object_model, candidate_world, reference_world, entry):
+                    continue
+            if relation == "on":
+                entry = self._layout_entry(reference, scene)
+                if (facts.is_surface(reference, scene) or (entry and entry.verified and entry.supports_on_top)) \
+                        and not facts.footprint_contains(changed, reference, candidate_scene):
+                    continue
+            if support_id is not None and relation != "inside":
+                try:
+                    if facts.infer_support(changed, candidate_scene) != support_id:
+                        continue
+                except (ValueError, LookupError):
+                    continue
+            if self._overlaps(changed, candidate_scene):
+                continue
+            return candidate_world
+        if relation == "inside":
+            raise ValueError("scene_edit_inside_boundary_invalid")
+        raise ValueError("scene_edit_layout_collision")
 
     def _scale(self, edit, obj, scene):
         index, facts = SceneIndex(scene), self._facts(self.scale_defaults)
@@ -338,13 +459,11 @@ class SceneEditor:
 
     def _placement(self, model, scene, reference, relation, defaults, identifier):
         facts, index = self._facts(defaults), SceneIndex(scene)
-        planar = relation in {"left_of", "right_of", "front_of", "behind"}
+        relation = getattr(relation, "value", relation)
+        planar = relation in {"left_of", "right_of", "front_of", "behind", "near"}
         support = None
         if reference is None:
-            try:
-                support = index.object(defaults.table_object_id)
-            except LookupError as exc:
-                raise ValueError("scene_edit_default_surface_missing") from exc
+            support = index.object(self._default_surface_id(scene, defaults))
         elif planar:
             support_id = (reference.object_id_in_scene if facts.is_surface(reference, scene)
                           else facts.infer_support(reference, scene))
@@ -353,10 +472,34 @@ class SceneEditor:
             if support_id is None:
                 raise ValueError("scene_edit_support_unknown")
             support = index.object(support_id)
+        elif relation == "on":
+            entry = self._layout_entry(reference, scene)
+            if not facts.is_surface(reference, scene) and not (entry and entry.verified and entry.supports_on_top):
+                raise ValueError("scene_edit_on_reference_not_support")
+            if facts.is_surface(reference, scene):
+                support = reference
+        elif relation == "inside":
+            entry = self._layout_entry(reference, scene)
+            if entry is None or not entry.verified:
+                raise ValueError("scene_edit_inside_geometry_missing")
+        elif relation in {"above", "below"}:
+            # Vertical relative placement does not invent a support relation.
+            pass
+        elif reference is not None:
+            raise ValueError("unsupported_scene_layout_relation: " + str(relation))
+
         world = facts.support_transform(model, support, scene, x=0, y=0) if support is not None else WorldTransform((0, 0, 0), IDENTITY)
+        relation_candidates = None
         if reference is not None:
-            world = self.layout.relative_transform(relation, world_transform(scene, reference.object_id_in_scene),
-                facts.asset(reference, scene), model, world)
+            reference_world = world_transform(scene, reference.object_id_in_scene)
+            reference_model = facts.asset(reference, scene)
+            if relation in {"left_of", "right_of", "front_of", "behind", "above", "below", "near"}:
+                relation_candidates = self.layout.relative_candidates(relation, reference_world, reference_model, model, world)
+            elif relation == "on":
+                relation_candidates = [self.layout.on_transform(reference_world, reference_model, model, world)]
+            elif relation == "inside":
+                relation_candidates = self.layout.inside_candidates(reference_world, model, world,
+                                                                    self._layout_entry(reference, scene))
         origin_low, origin_high = world_bounds(model, WorldTransform((0, 0, 0), world.linear))
         rng = random.Random(f"{self.seed}:{identifier}")
         limit = defaults.max_attempts if defaults else 2 * len(scene.objects) + 5
@@ -367,31 +510,52 @@ class SceneEditor:
                     raise ValueError("bootstrap_layout_failed")
                 position = (rng.uniform(*limits[0]), rng.uniform(*limits[1]), world.position[2])
             else:
-                axis = 0 if relation in {"front_of", "behind"} else 1
-                spacing = origin_high[axis] - origin_low[axis] + self.layout.clearance_m
-                step = 0 if attempt == 0 else ((attempt + 1) // 2) * (1 if attempt % 2 else -1)
-                position = tuple(value + (step * spacing if i == axis else 0) for i, value in enumerate(world.position))
+                if not relation_candidates:
+                    break
+                base = relation_candidates[attempt % len(relation_candidates)]
+                position = base.position
+                if attempt >= len(relation_candidates):
+                    axis = 0 if relation in {"front_of", "behind"} else 1
+                    spacing = origin_high[axis] - origin_low[axis] + self.layout.clearance_m
+                    ring = (attempt // len(relation_candidates) + 1)
+                    sign = 1 if ring % 2 else -1
+                    values = list(position)
+                    values[axis] += sign * ((ring + 1) // 2) * spacing
+                    position = tuple(values)
             obj = make_object(identifier, model.semantic_name, model.metadata_ref, position, category=model.category or "object",
                               asset_type=model.asset_type if getattr(self.assets, "supports_features", False) else None)
             candidate = scene.model_copy(update={"objects": [*scene.objects, obj]})
-            box = world_bounds(model, WorldTransform(position, world.linear))
+            candidate_world = WorldTransform(position, world.linear)
+            box = world_bounds(model, candidate_world)
             if defaults and any(box[0][i] < defaults.workspace_min[i] or box[1][i] > defaults.workspace_max[i] for i in (0, 1)):
                 continue
             if support is not None and not facts.footprint_contains(obj, support, candidate):
                 continue
-            if not self._overlaps(obj, candidate, clearance=defaults.clearance_m if defaults else self.layout.clearance_m):
+            entry = self._layout_entry(reference, scene) if relation == "on" and reference is not None else None
+            if relation == "on" and (facts.is_surface(reference, scene) or (entry and entry.verified and entry.supports_on_top)) \
+                    and not facts.footprint_contains(obj, reference, candidate):
+                continue
+            if relation == "inside":
+                interior = self._layout_entry(reference, scene)
+                if not self.layout.contained_interior(model, candidate_world,
+                                                      world_transform(scene, reference.object_id_in_scene), interior):
+                    continue
+            ignored = {reference.object_id_in_scene} if relation == "inside" and reference is not None else set()
+            if not self._overlaps(obj, candidate, clearance=defaults.clearance_m if defaults else self.layout.clearance_m,
+                                  ignore_ids=ignored):
                 return position
         raise ValueError("scene_edit_layout_collision")
 
-    def _overlaps(self, obj, scene, *, clearance=0):
+    def _overlaps(self, obj, scene, *, clearance=0, ignore_ids=None):
         # Existing conservative AABB layout guard, not physics collision checking.
         facts = self._facts()
+        ignore_ids = set(ignore_ids or ())
         try:
             low, high = world_bounds(facts.asset(obj, scene), world_transform(scene, obj.object_id_in_scene))
         except (ValueError, LookupError):
             return False  # Unknown resource geometry is not asserted as contact evidence.
         for other in scene.objects:
-            if other.object_id_in_scene == obj.object_id_in_scene:
+            if other.object_id_in_scene == obj.object_id_in_scene or other.object_id_in_scene in ignore_ids:
                 continue
             try:
                 olow, ohigh = world_bounds(facts.asset(other, scene), world_transform(scene, other.object_id_in_scene))

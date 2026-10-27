@@ -49,6 +49,7 @@ class BrainConfig(BaseModel):
     asset_library_root: str | None = None
     asset_geometry_cache: str | None = None
     asset_category_index: str | None = None
+    scene_layout_interiors: str | None = None
     semantic_aliases: str | None = None
     library_ref_prefix: str = "$LIBRARY_SERVER/"
     default_table_metadata_ref: str | None = None
@@ -107,7 +108,8 @@ class BrainConfig(BaseModel):
                 raise ValueError("config_secret_forbidden: use ROBOT_BRAIN_API_KEY")
             values.update(user)
             for key in ("assets", "defaults", "replay_file", "asset_library_root",
-                        "asset_geometry_cache", "asset_category_index", "semantic_aliases", "default_scene"):
+                        "asset_geometry_cache", "asset_category_index", "semantic_aliases",
+                        "scene_layout_interiors", "default_scene"):
                 if user.get(key) and not Path(user[key]).is_absolute():
                     values[key] = str((Path(path).resolve().parent / user[key]).resolve())
         env = os.environ if environ is None else environ

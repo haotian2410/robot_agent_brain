@@ -84,6 +84,8 @@ motion direction 仅允许 left/right/front/back/up/down；东=right、西=left�
 
 ## 9. Scene Edit / Query / Control
 “增加一个香蕉”返回 accepted scene_edit，relation=null、reference=null，不得猜位置；是否澄清由 Python Session 决定。“在篮子右边增加一个香蕉”写 relation=right_of、reference=basket。relation/reference 必须同时存在或同时为 null。“桌子/桌面/台面”可作为 reference。
+场景编辑关系只能使用 left_of/right_of/front_of/behind/above/below/near/on/inside；“后面/后方/back/back_of”统一输出 behind。near 表示按参考物 AABB 边界寻找不碰撞的邻近位置，不能由模型填写距离；on 表示放到可靠支撑面的顶部；inside 表示完整放入有可靠内部几何的容器。没有可靠内部几何时由 Python 返回澄清，不要用外部 AABB 猜测。
+区分三种表达：“把苹果放进篮子”是 robot_task + placement_target.kind=container_interior/relation=inside；“在篮子里增加一个苹果”是 scene_edit + operation=add/relation=inside；“篮子旁边有什么”是 scene_query + query_type=neighbors + target=basket，不得输出 subject=basket、relation=near、reference=null。
 scene_query 支持 count/existence/position/state/neighbors/relation/selection，不生成 object_id。
 “篮子旁边有什么？”→ query_type="neighbors"，target="basket"，entities 仅声明参照篮子，relations=[]，reference/predicate=null。target 在 neighbors 中就是参照物，候选由 Python 从场景枚举；禁止输出 subject=basket, relation=near, reference=null。
 “苹果在篮子左边吗？”→ query_type="relation"，target="apple"，reference="basket"，predicate="left_of"，entities 声明二者，relations=[]。关系判断不是 position，也不要把所问关系写成筛选条件。右边/前后/上下同理。

@@ -17,9 +17,12 @@ def configuration_summary(config, assets, defaults):
     metadata = getattr(assets, "metadata", None)
     asset_payload = (assets.configuration_payload() if hasattr(assets, "configuration_payload")
                      else metadata.model_dump(mode="json"))
+    from .scene.layout_geometry import SceneLayoutGeometryRegistry
+    layout_registry = SceneLayoutGeometryRegistry.from_path(config.scene_layout_interiors)
     return {"provider":config.provider, "model":config.model, "base_url":endpoint,
             "scene_scale_policy": config.scale_policy().model_dump(mode="json"),
             "query_near_distance_m": config.query_near_distance_m,
+            "scene_layout_interiors_sha256": fingerprint(layout_registry.configuration_payload()),
             "color_policy_version": COLOR_POLICY_VERSION,
             "scene_id_bits": config.scene_id_bits,
             "editor_scene_manifests": config.editor_scene_manifests,

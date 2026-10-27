@@ -7,6 +7,8 @@ from robot_agent_brain.scene.editor import SceneEditor
 from robot_agent_brain.scene.scene_manager import SceneManager
 from robot_agent_brain.scene.component_access import SceneIndex
 from robot_agent_brain.scene.scene_graph import world_transform
+from robot_agent_brain.errors import BrainIssue
+from robot_agent_brain.scene.user_feedback import explain_issue
 from component_fixtures import demo_bootstrap, named_objects, semantic_names
 
 
@@ -85,3 +87,51 @@ def test_canonical_reference_add_bootstraps_reference_only():
     apple = named_objects(final, "apple")[0]
     banana = named_objects(final, "banana")[0]
     assert world_transform(final, banana.object_id_in_scene).position[0] > world_transform(final, apple.object_id_in_scene).position[0]
+
+
+def test_add_resolves_remapped_platform_table_by_metadata():
+    """Browser-assigned platform IDs must not break implicit table placement."""
+    config = BrainConfig()
+    assets, defaults = config.load_assets(), config.load_defaults()
+    turn = BrainTurn(status="accepted", turn_kind="scene_edit", instruction="增加一个苹果",
+                     scene_edit=SceneEditPlan(
+                         entities=[TaskEntity(entity_id="apple", semantic_name="apple", category="fruit")],
+                         operations=[SceneEditIntent(operation="add", target="apple")]))
+    initial = demo_bootstrap(config)[1].prepare(turn, scene_id=1)
+    # Simulate the WebEditor allocating a new ID range for platform objects.
+    mapping = {0: 16, 1: 19}
+    remapped_objects = []
+    for obj in initial.scene.objects:
+        components = []
+        for component in obj.components:
+            properties = dict(component.properties)
+            if component.component_type == "Transform" and properties.get("parent") in mapping:
+                properties["parent"] = mapping[properties["parent"]]
+            if component.component_type == "Semantic" and properties.get("support") in mapping:
+                properties["support"] = mapping[properties["support"]]
+            components.append(component.model_copy(update={"properties": properties}))
+        remapped_objects.append(obj.model_copy(update={
+            "object_id_in_scene": mapping.get(obj.object_id_in_scene, obj.object_id_in_scene),
+            "components": components,
+        }))
+    scene = initial.scene.model_copy(update={"objects": remapped_objects})
+    editor = SceneEditor(assets, table_metadata_ref="$DEMO_LIBRARY/1")
+    patch = editor.edit(turn.scene_edit, scene, defaults=defaults)
+    changed = SceneManager(scene).apply_patch(patch)
+    apple = named_objects(changed, "apple")
+    assert len(apple) == 1
+    assert SceneIndex(changed).semantic(apple[0].object_id_in_scene).support == 16
+
+
+def test_missing_grounding_feedback_names_absent_object():
+    config = BrainConfig()
+    assets, defaults = config.load_assets(), config.load_defaults()
+    turn = BrainTurn(status="accepted", turn_kind="scene_edit", instruction="增加一个苹果",
+                     scene_edit=SceneEditPlan(
+                         entities=[TaskEntity(entity_id="apple", semantic_name="apple", category="fruit")],
+                         operations=[SceneEditIntent(operation="add", target="apple")]))
+    scene = demo_bootstrap(config)[1].prepare(turn, scene_id=1).scene
+    issue = BrainIssue(code="grounding_missing", stage="processing", message="grounding_missing: apple")
+    explain_issue(issue, ValueError(issue.message), scene, assets)
+    assert "没有可绑定的“苹果”对象" in issue.message
+    assert "先增加该物体" in issue.clarification_question

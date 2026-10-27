@@ -6,6 +6,7 @@
   "asset_library_root": "../model/final_models",
   "asset_geometry_cache": "final_models_geometry_cache.json",
   "asset_category_index": "final_models_categories.json",
+  "scene_layout_interiors": "scene_layout_interiors.json",
   "semantic_aliases": "final_models_aliases.json",
   "defaults": "final_models_defaults.json",
   "library_ref_prefix": "$LIBRARY_SERVER/",

@@ -6,6 +6,7 @@
   "asset_library_root": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data",
   "asset_geometry_cache": "../var/webeditor/geometry_cache.json",
   "asset_category_index": "webeditor_categories.json",
+  "scene_layout_interiors": "scene_layout_interiors.json",
   "semantic_aliases": "webeditor_aliases.json",
   "defaults": "final_models_defaults.json",
   "library_ref_prefix": "$LIBRARY_SERVER/",

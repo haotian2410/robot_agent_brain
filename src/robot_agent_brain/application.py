@@ -12,6 +12,7 @@ from .session.store import SessionStore
 from .scene.bootstrapper import SceneBootstrapper
 from .scene.editor import SceneEditor
 from .scene.scene_layout import SceneLayoutPolicy
+from .scene.layout_geometry import SceneLayoutGeometryRegistry
 from .adapters.local_scene_platform import LocalScenePlatform
 from .adapters.scene_file_codec import SceneFileCodec
 from .adapters.artifact_writer import ArtifactWriter, safe_identifier
@@ -43,10 +44,12 @@ class BrainApplication:
         aliases = (self.config.load_semantic_aliases() if self.config.semantic_aliases is not None
                    else getattr(getattr(self.assets, "metadata", None), "aliases", {}))
         category_aliases = getattr(getattr(self.assets, "metadata", None), "category_aliases", {})
+        layout_interiors = SceneLayoutGeometryRegistry.from_path(self.config.scene_layout_interiors)
         editor = SceneEditor(self.assets, SceneLayoutPolicy(clearance_m=self.defaults.clearance_m), seed=self.config.seed,
                              aliases=aliases, category_aliases=category_aliases,
                              scale_policy=self.config.scale_policy(), scale_defaults=self.defaults,
-                             table_metadata_ref=self.config.bootstrap_settings().get("default_table_metadata_ref"))
+                             table_metadata_ref=self.config.bootstrap_settings().get("default_table_metadata_ref"),
+                             layout_interiors=layout_interiors)
         self.pipeline = BrainPipeline(provider, self.assets, scene_editor=editor,
                                       vision_provider=provider if self.config.vision else None,
                                       skill_planning_provider=provider if hasattr(provider, "plan") else None,
@@ -64,7 +67,15 @@ class BrainApplication:
             template = self.codec.load(self.config.default_scene)
             self.bootstrapper.template_scene = template
             from .scene.scene_graph import world_transform
-            editor.scale_table_transform = world_transform(template, self.defaults.table_object_id)
+            # The editor defaults contain bootstrap IDs, while an imported
+            # browser scene may remap platform object IDs.  Resolve the table
+            # from the template's metadata instead of assuming the numeric
+            # bootstrap ID remains valid.
+            try:
+                table_id = editor._default_surface_id(template, self.defaults)
+            except ValueError:
+                table_id = self.defaults.table_object_id
+            editor.scale_table_transform = world_transform(template, table_id)
         self.writer = ArtifactWriter(self.config.output_dir)
         self.sessions = {}
         self.store = SessionStore(self.config.output_dir)

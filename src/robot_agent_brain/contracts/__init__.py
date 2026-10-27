@@ -5,7 +5,7 @@ from .model_property import ModelProperty
 from .scene import SceneConfig, SceneDocument, SceneObject, ScenePatch, ScenePatchOperation, SceneSnapshot, Transform, parse_scene_document
 from .skill_plan import SkillPlan, SkillStep
 from .spatial import RelationScope, SpatialRelation, SpatialRelationType
-from .turn import BrainTurn, SceneEditIntent, SceneEditPlan, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
+from .turn import BrainTurn, SceneEditIntent, SceneEditPlan, SceneLayoutRelation, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
 from .task_intent import Direction, MotionScale, Operation, PlacementTarget, QuantityMode, TaskEntity, TaskIntent, TaskType
 
 __all__ = [
@@ -14,6 +14,6 @@ __all__ = [
     "ScenePatch", "ScenePatchOperation", "SceneSnapshot", "Transform", "SkillPlan",
     "SkillStep", "Direction", "MotionScale", "Operation", "PlacementTarget",
     "QuantityMode", "TaskEntity", "TaskIntent", "TaskType",
-    "RelationScope", "SpatialRelation", "SpatialRelationType", "BrainTurn", "SceneEditIntent", "SceneEditPlan",
+    "RelationScope", "SpatialRelation", "SpatialRelationType", "BrainTurn", "SceneEditIntent", "SceneEditPlan", "SceneLayoutRelation",
     "SceneQueryIntent", "SessionControlIntent", "TurnKind", "TurnStatus", "parse_scene_document",
 ]
