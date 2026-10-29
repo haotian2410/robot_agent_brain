@@ -409,7 +409,7 @@ class BrainApplication:
             report.error = self._issue(exc, stage)
             from .scene.user_feedback import explain_issue
             explain_issue(report.error, exc, session.scene, self.assets)
-            report.run_status = "blocked" if report.error.code.startswith(("scene_required", "grounding_", "bootstrap_", "asset_", "holding_", "plan_", "capability_", "dialogue_", "motion_", "execution_pending", "session_paused", "scene_sync_")) else "failed"
+            report.run_status = "blocked" if report.error.code.startswith(("scene_required", "grounding_", "bootstrap_", "asset_", "holding_", "plan_", "capability_", "dialogue_", "motion_", "execution_pending", "session_paused", "scene_sync_", "scene_reference_", "semantic_protocol")) else "failed"
             if report.error.code.startswith("scene_scale_") or report.error.code == "scene_edit_color_unknown":
                 report.run_status = "blocked"
             if report.error.code == "scene_edit_color_unknown":

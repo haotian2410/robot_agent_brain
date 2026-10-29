@@ -5,6 +5,8 @@ import json
 from robot_agent_brain.models.task_understanding import parse_qwen_turn
 from robot_agent_brain.config import BrainConfig
 from robot_agent_brain.grounding.scene_reference_resolver import SceneReferenceResolver
+from robot_agent_brain.scene.editor import SceneEditor
+from robot_agent_brain.scene.scene_manager import SceneManager
 from component_fixtures import demo_bootstrap
 
 
@@ -72,3 +74,17 @@ def test_unknown_scene_reference_is_not_guessed():
     else:
         raise AssertionError("unknown reference was guessed")
 
+
+def test_three_add_operations_using_table_reference_produce_one_scene_patch():
+    config = BrainConfig()
+    assets, bootstrapper = demo_bootstrap(config)
+    turn = parse_qwen_turn(_scene_edit_payload(), "在桌面上放置篮子、苹果和香蕉")
+    initial = bootstrapper.prepare(turn, scene_id=1)
+    result = SceneEditor(assets, table_metadata_ref="$DEMO_LIBRARY/1").edit_result(
+        turn.scene_edit, initial.scene, defaults=config.load_defaults())
+    final = SceneManager(initial.scene).apply_patch(result.patch)
+    names = [obj.object_name_in_scene for obj in final.objects]
+    assert names.count("basket") == 1
+    assert names.count("apple") == 1
+    assert names.count("banana") == 1
+    assert len(result.patch.operations) == 6  # add + Semantic for each object

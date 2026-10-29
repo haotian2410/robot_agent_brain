@@ -18,6 +18,7 @@ from .spatial_facts import SpatialFactResolver
 from .transform_editor import translate, rotate
 from .scale_policy import SceneScalePolicy
 from .colors import ColorResolver
+from ..grounding.scene_reference_resolver import SceneReferenceResolver
 
 
 @dataclass
@@ -43,6 +44,7 @@ class SceneEditor:
         self.default_scene_edit_assets = dict(default_scene_edit_assets or {})
         self.layout_interiors = (layout_interiors if isinstance(layout_interiors, SceneLayoutGeometryRegistry)
                                  else SceneLayoutGeometryRegistry(layout_interiors))
+        self.reference_resolver = SceneReferenceResolver(table_metadata_ref=table_metadata_ref)
         self.scale_table_transform = None
 
     def edit(self, intent, scene, **kwargs):
@@ -71,9 +73,21 @@ class SceneEditor:
             current = preview.scene
             reference = None
             if edit.reference is not None:
-                references = ([SceneIndex(current).object(i) for i in selected_targets[edit.reference]]
-                              if edit.reference in selected_targets else
-                              selector.resolve(edit.reference, intent.entities, intent.relations, current, dialogue, bindings))
+                entity_ids = {entity.entity_id for entity in intent.entities}
+                if edit.reference in selected_targets:
+                    references = [SceneIndex(current).object(i) for i in selected_targets[edit.reference]]
+                elif edit.reference in entity_ids:
+                    references = selector.resolve(edit.reference, intent.entities, intent.relations,
+                                                  current, dialogue, bindings)
+                else:
+                    resolved = self.reference_resolver.resolve(
+                        edit.reference, entities=intent.entities, scene=current,
+                        default_surface_id=defaults.table_object_id if defaults is not None else None,
+                        scene_basis=intent.scene_basis,
+                    )
+                    if resolved.object_id is None:
+                        raise ValueError("scene_reference_unresolved: " + edit.reference)
+                    references = [SceneIndex(current).object(resolved.object_id)]
                 if len(references) != 1:
                     raise ValueError("scene_edit_reference_ambiguous")
                 reference = references[0]

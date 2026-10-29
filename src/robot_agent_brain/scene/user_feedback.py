@@ -52,6 +52,14 @@ def explain_issue(issue, exc, scene, assets):
             question = f"当前场景中没有可绑定的“{_display_entity_name(original_detail)}”对象。请先增加该物体，或改用场景中已有的对象。"
         else:
             question = "当前场景无法确定所需对象或参照物。请说明场景中已有物体的名称、颜色或编号。"
+    elif code in {"scene_reference_unresolved", "scene_reference_ambiguous"}:
+        if code == "scene_reference_ambiguous":
+            candidates = issue.details.get("candidates") or getattr(exc, "candidates", [])
+            choices = "、".join(f"#{item}" for item in candidates)
+            question = "当前场景中有多个可能的参照物" + (f"（{choices}）" if choices else "") + "，请明确参照物或编号。"
+        else:
+            raw = issue.value or original
+            question = f"当前场景无法找到参照物“{raw}”。请说明场景中已有物体的名称、颜色或编号；不会猜测成桌面。"
     elif code.startswith(("scene_edit_reference", "scene_relation_reference", "query_subject_reference")):
         question = "当前场景无法确定所需参照物。请说明场景中已有物体的名称、颜色或编号。"
     elif code.startswith(("grounding_evidence_missing", "query_geometry", "query_visual", "scene_relation_evidence", "camera_not_configured", "vision_grounding_", "scene_attachment_pose", "asset_geometry_")):
