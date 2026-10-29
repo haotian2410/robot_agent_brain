@@ -97,8 +97,8 @@ b739db7 refactor(prompt): split common and route-specific semantic contracts
 - 全量 `conda run --no-capture-output -n robot_agent_integ pytest -q`：通过，退出码 `0`。
 - 场景引用、Bootstrapper、协议和 Qwen HTTP 专项测试：通过。
 - 独立 wheel 构建：成功，SHA256：
-  `2b8127b60e2ae8ecf28b588ca0f4a2b1e5b27f0addbb744fba05ff8c318dea72`。
-- wheel smoke import：`robot_agent_brain wheel-smoke-ok`。
+  `577d8d529c0822338c03784a6f6d6aafa685e7cbb83666f6c085de97669c4360`。
+- wheel smoke import：`wheel-smoke-ok 25142 ['turn_kind']`。
 - 资产原文件、current/original 快照协议、双臂和 Commands v3 未修改。
 
 ## 剩余风险与边界
