@@ -66,7 +66,8 @@ class BrainApplication:
             robot_metadata_ref=bootstrap.get("default_robot_metadata_ref"),
             robot_driver=bootstrap.get("default_robot_driver"),
             aliases=aliases, category_aliases=category_aliases,
-            default_scene_edit_assets=self.config.default_scene_edit_assets)
+            default_scene_edit_assets=self.config.default_scene_edit_assets,
+            scene_reference_catalog=scene_reference_catalog)
         self.codec = SceneFileCodec(self.assets)
         if self.config.default_scene:
             template = self.codec.load(self.config.default_scene)

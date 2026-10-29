@@ -5,6 +5,7 @@ from ..contracts.bootstrap import BootstrapResult
 from ..contracts.scene import SceneConfig, SceneObject, SceneComponent, RobotDriverProperties
 from ..contracts.spatial import ResolvedSelectionRelation
 from ..grounding.scene_relation_resolver import SceneRelationResolver
+from ..grounding.scene_reference_resolver import SceneReferenceResolver
 from .asset_resolver import AssetResolver
 from .geometry import world_bounds
 from .scene_graph import WorldTransform, world_transform
@@ -30,7 +31,7 @@ def make_object(identifier, name, reference, position, *, category=None, support
 class SceneBootstrapper:
     def __init__(self, assets, defaults, *, robot="ur5e", seed=0, table_metadata_ref=None,
                  robot_metadata_ref=None, robot_driver=None, template_scene=None, aliases=None, category_aliases=None,
-                 default_scene_edit_assets=None):
+                 default_scene_edit_assets=None, scene_reference_catalog=None):
         self.assets, self.defaults, self.robot, self.seed = assets, defaults, robot, seed
         self.table_ref, self.robot_ref = table_metadata_ref, robot_metadata_ref
         self.driver = robot_driver
@@ -38,6 +39,7 @@ class SceneBootstrapper:
         self.robot_profile = None
         self.resolver = AssetResolver(assets, aliases=aliases, category_aliases=category_aliases)
         self.default_scene_edit_assets = dict(default_scene_edit_assets or {})
+        self.scene_reference_catalog = scene_reference_catalog
 
     def for_profile(self, profile):
         from .component_access import SceneIndex
@@ -55,6 +57,7 @@ class SceneBootstrapper:
             robot_driver=index.robot_driver(robot_id), template_scene=template,
             aliases=self.resolver.aliases, category_aliases=self.resolver.category_aliases)
         bootstrap.default_scene_edit_assets = dict(self.default_scene_edit_assets)
+        bootstrap.scene_reference_catalog = self.scene_reference_catalog
         bootstrap.robot_profile = profile
         return bootstrap
 
@@ -76,8 +79,12 @@ class SceneBootstrapper:
             if all(op.operation in {"remove", "replace"} for op in plan.operations):
                 raise ValueError("scene_required: cannot create objects only to remove them")
             defined, needed = set(), set()
+            entity_ids = {entity.entity_id for entity in plan.entities}
             for op in plan.operations:
-                if op.reference and op.reference not in defined:
+                # Only task entities participate in bootstrap grounding.  A
+                # reference such as ``table`` is resolved later through the
+                # scene-reference catalog and must not be sent to AssetResolver.
+                if op.reference and op.reference in entity_ids and op.reference not in defined:
                     needed.add(op.reference)
                 if op.operation == "add":
                     if op.target in needed:
@@ -86,7 +93,8 @@ class SceneBootstrapper:
                 elif op.target not in defined:
                     needed.add(op.target)
             while True:
-                refs = {r.reference for r in plan.relations if r.subject in needed and r.reference}
+                refs = {r.reference for r in plan.relations if r.subject in needed and r.reference
+                        and r.reference in entity_ids}
                 if refs <= needed:
                     break
                 needed.update(refs)
@@ -132,6 +140,15 @@ class SceneBootstrapper:
             robot = make_object(robot_id, self.robot, self.robot_ref, self.defaults.robot_position,
                                 driver=driver)
             base_max = max(table_id, robot_id)
+        reference_resolver = SceneReferenceResolver(self.scene_reference_catalog,
+                                                    table_metadata_ref=self.table_ref)
+        if turn.turn_kind == "scene_edit":
+            for operation in plan.operations:
+                if operation.reference and operation.reference not in entity_ids:
+                    reference_resolver.resolve(operation.reference, entities=plan.entities,
+                                               scene=self.template_scene,
+                                               default_surface_id=table_id,
+                                               scene_basis=plan.scene_basis)
         table_transform = (world_transform(self.template_scene, table_id)
                            if self.template_scene is not None
                            else WorldTransform(self.defaults.table_position, IDENTITY))
@@ -202,9 +219,18 @@ class SceneBootstrapper:
                         continue
                     ref = None
                     if rel.reference is not None:
-                        if len(candidates.get(rel.reference, [])) != 1:
-                            raise ValueError("bootstrap_relation_unsupported: reference is not unique")
-                        ref = candidates[rel.reference][0]
+                        if rel.reference in candidates:
+                            if len(candidates[rel.reference]) != 1:
+                                raise ValueError("bootstrap_relation_unsupported: reference is not unique")
+                            ref = candidates[rel.reference][0]
+                        else:
+                            resolved = reference_resolver.resolve(
+                                rel.reference, entities=plan.entities if turn.turn_kind == "scene_edit" else entities,
+                                scene=scene, default_surface_id=table_id,
+                                scene_basis=plan.scene_basis if turn.turn_kind == "scene_edit" else "current")
+                            if resolved.object_id is None:
+                                raise ValueError("bootstrap_relation_unsupported: reference is not bound")
+                            ref = resolved.object_id
                     selection.append(ResolvedSelectionRelation(relation=rel.relation, reference_object_id=ref))
                 matches = SceneRelationResolver().resolve([by_id[i] for i in candidates[entity.entity_id]], selection, scene)
                 required = 1 if entity.quantity_mode == "candidate_pool" else len(candidates[entity.entity_id])

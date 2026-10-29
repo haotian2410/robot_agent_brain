@@ -94,6 +94,18 @@ def test_three_add_operations_using_table_reference_produce_one_scene_patch():
     assert len(result.patch.operations) == 6  # add + Semantic for each object
 
 
+def test_bootstrap_resolves_environment_table_without_precreating_add_targets():
+    config = BrainConfig()
+    _, bootstrapper = demo_bootstrap(config)
+    turn = parse_qwen_turn(_scene_edit_payload(), "在桌面上放置篮子、苹果和香蕉")
+    result = bootstrapper.prepare(turn, scene_id=1)
+    names = [component.properties.get("semantic_name")
+             for obj in result.scene.objects
+             for component in obj.components if component.component_type == "Semantic"]
+    assert names == ["table"]
+    assert result.asset_bindings == {}
+
+
 def test_selection_relation_can_use_environment_table_reference():
     scene = supported_scene()
     entities = [TaskEntity(entity_id="apple", semantic_name="apple", category="fruit")]
