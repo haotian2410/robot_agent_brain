@@ -125,7 +125,16 @@ class QwenHTTPProvider:
             raise
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, QwenProviderError) as exc:
             record["error"] = self._redact(f"{type(exc).__name__}: {exc}")
-            code = str(exc) if str(exc) in {"motion_distance_evidence_missing", "motion_clause_binding_ambiguous"} else "provider_error"
+            text = str(exc)
+            semantic_prefixes = (
+                "task_semantic_invalid", "scene_edit_", "scene_replace_", "query_",
+                "dialogue_", "motion_distance_evidence_missing", "motion_clause_binding_ambiguous",
+            )
+            code = "semantic_protocol_error" if text.startswith(semantic_prefixes) else "provider_error"
+            if text in {"motion_distance_evidence_missing", "motion_clause_binding_ambiguous"}:
+                code = text
+            if code == "semantic_protocol_error":
+                record["status"] = "rejected"
             if stage == "skill_planning" and isinstance(exc, ValidationError):
                 code = "planner_unknown_skill" if any(e["loc"][-1:] == ("skill",) and e["type"] == "enum" for e in exc.errors()) else "skill_plan_output_invalid"
             record["error_code"] = code

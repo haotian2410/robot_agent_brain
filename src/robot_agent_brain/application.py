@@ -557,4 +557,7 @@ class BrainApplication:
             code = str(exc)
         else:
             code = "internal_error"
-        return BrainIssue(code=code, stage=stage, message=str(exc))
+        semantic_codes = ("semantic_", "scene_", "query_", "dialogue_", "grounding_", "motion_")
+        category = "semantic_protocol" if code.startswith(semantic_codes) else (
+            "provider" if code.startswith("provider_") or code == "model_output_invalid" else "internal")
+        return BrainIssue(code=code, stage=stage, message=str(exc), category=category)
