@@ -102,6 +102,28 @@ def test_multiple_scene_surfaces_are_ambiguous_without_explicit_reference():
         raise AssertionError("ambiguous table reference was silently selected")
 
 
+def test_wire_semantic_validation_rejects_invalid_basis_and_relation_subject():
+    payload = _scene_edit_payload()
+    payload["scene_edit"]["scene_basis"] = "future"
+    try:
+        parse_qwen_turn(payload, "在未来场景放置苹果")
+    except Exception as exc:
+        assert "semantic_protocol_error" in str(exc)
+    else:
+        raise AssertionError("invalid scene basis was accepted")
+
+    payload = _scene_edit_payload()
+    payload["scene_edit"]["relations"] = [
+        {"scope": "selection", "subject": "missing", "relation": "leftmost"}
+    ]
+    try:
+        parse_qwen_turn(payload, "选择不存在的对象")
+    except Exception as exc:
+        assert "semantic_protocol_error" in str(exc)
+    else:
+        raise AssertionError("unknown relation subject was accepted")
+
+
 def test_three_add_operations_using_table_reference_produce_one_scene_patch():
     config = BrainConfig()
     assets, bootstrapper = demo_bootstrap(config)

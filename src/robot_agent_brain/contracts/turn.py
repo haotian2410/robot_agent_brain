@@ -230,7 +230,16 @@ class SceneEditPlan(BaseModel):
         calls this method, so an environment reference such as ``table`` can be
         resolved by the scene resolver instead of being mistaken for an entity.
         """
+        if self.scene_basis not in {"current", "original"}:
+            raise ValueError("scene_basis_unavailable: " + str(self.scene_basis))
         ids = {entity.entity_id for entity in self.entities}
+        if len(ids) != len(self.entities):
+            raise ValueError("scene_edit_duplicate_entity_id")
+        for relation in self.relations:
+            if relation.subject not in ids:
+                raise ValueError("scene_edit_unknown_selector: " + relation.subject)
+            if relation.reference and relation.reference not in ids and not allow_unresolved_references:
+                raise ValueError("scene_edit_unknown_reference_selector: " + relation.reference)
         for op in self.operations:
             if op.target not in ids:
                 raise ValueError("scene_edit_unknown_selector: " + op.target)
