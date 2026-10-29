@@ -45,8 +45,10 @@ class BrainApplication:
                    else getattr(getattr(self.assets, "metadata", None), "aliases", {}))
         category_aliases = getattr(getattr(self.assets, "metadata", None), "category_aliases", {})
         layout_interiors = SceneLayoutGeometryRegistry.from_path(self.config.scene_layout_interiors)
-        editor = SceneEditor(self.assets, SceneLayoutPolicy(clearance_m=self.defaults.clearance_m), seed=self.config.seed,
+        editor = SceneEditor(self.assets, SceneLayoutPolicy(clearance_m=self.config.scene_layout_near_clearance_m,
+                                                            grid_size=self.config.scene_layout_grid_size), seed=self.config.seed,
                              aliases=aliases, category_aliases=category_aliases,
+                             default_scene_edit_assets=self.config.default_scene_edit_assets,
                              scale_policy=self.config.scale_policy(), scale_defaults=self.defaults,
                              table_metadata_ref=self.config.bootstrap_settings().get("default_table_metadata_ref"),
                              layout_interiors=layout_interiors)
@@ -61,7 +63,8 @@ class BrainApplication:
             table_metadata_ref=bootstrap.get("default_table_metadata_ref"),
             robot_metadata_ref=bootstrap.get("default_robot_metadata_ref"),
             robot_driver=bootstrap.get("default_robot_driver"),
-            aliases=aliases, category_aliases=category_aliases)
+            aliases=aliases, category_aliases=category_aliases,
+            default_scene_edit_assets=self.config.default_scene_edit_assets)
         self.codec = SceneFileCodec(self.assets)
         if self.config.default_scene:
             template = self.codec.load(self.config.default_scene)
@@ -359,6 +362,8 @@ class BrainApplication:
                 else:
                     result = session.process_turn(request_id, turn, bindings_override=bindings,
                                                   edit_defaults=self.defaults if report.scene_created else self._editor_defaults(session))
+                if getattr(result, "assumptions", None):
+                    report.assumptions.extend(result.assumptions)
                 report.run_status = "success"
                 if result.robot_setup_was_changed:
                     report.scene_commit_status = "committed"
@@ -376,6 +381,14 @@ class BrainApplication:
                     report.delivery_status = "scene_updated"
                     report.scene_commit_status = "committed"
                     report.reply = "场景元数据已更新（未运行仿真）。"
+                    default_choices = [item for item in report.assumptions
+                                       if item.startswith("source=default_asset:")]
+                    alternatives = [item for item in report.assumptions
+                                    if item.startswith("alternatives=")]
+                    if default_choices:
+                        report.reply += " 已按默认样式放置；如需其他款式，请说明颜色或款式。"
+                        if alternatives:
+                            report.reply += " 当前还有候选：" + alternatives[0].split("=", 1)[1] + "。"
                 elif result.scene_query_result is not None:
                     query = result.scene_query_result
                     report.delivery_status = "answered"

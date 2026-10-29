@@ -70,6 +70,12 @@ def explain_issue(issue, exc, scene, assets):
         issue.message = "编辑失败：没有找到完全位于容器内部且不碰撞的位置，场景未改变。"
     elif code == "scene_edit_on_reference_not_support":
         question = "当前参照物没有可靠的顶部支撑面，无法执行“放在其上”。请改用桌面或明确的支撑面。"
+    elif code == "scene_edit_position_ambiguous":
+        question = "“桌子右边”未说明是在桌面右侧还是桌外地面。请明确说“桌面右侧”或补充支撑面。"
+    elif code == "scene_edit_support_unknown":
+        question = "无法确认目标物应放在哪个支撑面上。请明确桌面、托盘或其他可靠支撑物。"
+    elif code == "scene_edit_properties_unsupported" or code == "scene_edit_property_unsupported":
+        issue.message = "编辑失败：仅支持颜色属性和明确的放置位置字段，不能写入任意 properties；场景未改变。"
     elif code.startswith("unsupported_scene_layout_relation"):
         issue.message = "当前场景编辑关系暂不支持（" + original.split(":", 1)[-1].strip() + "），场景未改变。请使用左/右/前/后、旁边、桌面上或容器内部等明确表达。"
     elif code == "scene_edit_layout_collision":

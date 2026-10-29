@@ -11,12 +11,13 @@ class AssetBinding:
 
 
 class AssetResolver:
-    def __init__(self, catalog, *, aliases=None, category_aliases=None):
+    def __init__(self, catalog, *, aliases=None, category_aliases=None, default_refs=None):
         self.catalog = catalog
         self.aliases = {k.strip().casefold(): v.strip().casefold() for k, v in (aliases or {}).items()}
         self.category_aliases = {k.strip().casefold(): v.strip().casefold() for k, v in (category_aliases or {}).items()}
+        self.default_refs = {k.strip().casefold(): v for k, v in (default_refs or {}).items()}
 
-    def resolve(self, entity, *, infer_category=False):
+    def resolve(self, entity, *, infer_category=False, allow_default=False):
         name = entity.semantic_name.strip().casefold()
         name = self.aliases.get(name, name)
         category = entity.category.strip().casefold()
@@ -45,6 +46,24 @@ class AssetResolver:
             if not candidates:
                 raise ValueError("asset_category_mismatch: " + entity.category)
         if len(candidates) != 1:
+            # Defaults are intentionally limited to scene additions without
+            # explicit style evidence. Existing-object selection and robot
+            # planning continue to require an unambiguous match.
+            if (allow_default and not entity.color and not entity.tags and not entity.category_only
+                    and name in self.default_refs):
+                ref = self.default_refs[name]
+                try:
+                    default_model = self.catalog.resolve(ref, asset_type="model")
+                except (AttributeError, ValueError) as exc:
+                    raise ValueError("default_asset_invalid: " + name) from exc
+                alternatives = [f"{m.asset_type}:{m.library_asset_id} ({', '.join(m.tags)})" for m in candidates
+                                if m.metadata_ref != default_model.metadata_ref]
+                assumptions = [f"source=default_asset: {name} -> {default_model.asset_type}:{default_model.library_asset_id}"]
+                if alternatives:
+                    assumptions.append("alternatives=" + ",".join(alternatives))
+                if getattr(self.catalog, "demo_assets", False):
+                    assumptions.append("demo_assets: metadata only; no real mesh or rendered material")
+                return AssetBinding(default_model, assumptions)
             raise ValueError("asset_ambiguous: " + entity.semantic_name + "; 请补充颜色或款式: " +
                              ", ".join(f"{m.asset_type}:{m.library_asset_id} ({' '.join(m.tags)})" for m in candidates))
         assumptions = ["demo_assets: metadata only; no real mesh or rendered material"] if getattr(self.catalog, "demo_assets", False) else []

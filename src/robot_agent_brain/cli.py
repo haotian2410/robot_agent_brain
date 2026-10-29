@@ -20,6 +20,12 @@ def parser():
             cmd.add_argument("instruction")
         if name == "batch":
             cmd.add_argument("--cases", required=True)
+            cmd.add_argument("--transport", choices=["direct", "service"], default="direct")
+            cmd.add_argument("--agent-url", default="http://127.0.0.1:8500")
+            cmd.add_argument("--gateway-url", default="http://127.0.0.1:8099")
+            cmd.add_argument("--browser-id")
+            cmd.add_argument("--task-timeout", type=float, default=300)
+            cmd.add_argument("--allow-missing-screenshots", action="store_true")
         options = ["config", "assets", "defaults", "base-url", "model", "output-dir", "replay-file"]
         if name != "batch":
             options.extend(["scene", "session"])
@@ -64,6 +70,16 @@ def main(argv=None):
                 path.write_text(json.dumps(model.model_json_schema(), ensure_ascii=False, indent=2), encoding="utf-8")
                 print(path)
             return 0
+        if args.command == "batch" and args.transport == "service":
+            from .batch_service import ServiceBatchRunner
+            runner = ServiceBatchRunner(agent_url=args.agent_url, gateway_url=args.gateway_url,
+                                        browser_id=args.browser_id, task_timeout=args.task_timeout,
+                                        screenshot_required=not args.allow_missing_screenshots,
+                                        output_dir=args.output_dir or "var/batch-runs")
+            summary, directory = runner.run(args.cases)
+            print(json.dumps({**summary, "output_dir": str(directory)}, ensure_ascii=False)
+                  if args.json else f"{summary['totals']}\n{directory}")
+            return 5 if summary["totals"]["blocked"] else (4 if summary["totals"]["failed"] else (2 if summary["totals"]["skipped"] else 0))
         options = {key:value for key,value in vars(args).items() if key in BrainConfig.model_fields and value is not None}
         if args.structured_output is not None:
             options["structured_output"] = args.structured_output == "json_schema"

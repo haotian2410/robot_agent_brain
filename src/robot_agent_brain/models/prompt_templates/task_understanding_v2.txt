@@ -85,6 +85,8 @@ motion direction 仅允许 left/right/front/back/up/down；东=right、西=left�
 ## 9. Scene Edit / Query / Control
 “增加一个香蕉”返回 accepted scene_edit，relation=null、reference=null，不得猜位置；是否澄清由 Python Session 决定。“在篮子右边增加一个香蕉”写 relation=right_of、reference=basket。relation/reference 必须同时存在或同时为 null。“桌子/桌面/台面”可作为 reference。
 场景编辑关系只能使用 left_of/right_of/front_of/behind/above/below/near/on/inside；“后面/后方/back/back_of”统一输出 behind。near 表示按参考物 AABB 边界寻找不碰撞的邻近位置，不能由模型填写距离；on 表示放到可靠支撑面的顶部；inside 表示完整放入有可靠内部几何的容器。没有可靠内部几何时由 Python 返回澄清，不要用外部 AABB 猜测。
+场景编辑的新增位置控制必须单独填写 placement_hint 和 placement_region，不要写入 properties：普通“放到桌子上”使用 relation=on、placement_hint=any，Python 会在桌面二维网格搜索；“放到桌子中间”使用 placement_hint=center，中心是硬约束；“桌面右侧/左侧/前后半区”使用 placement_region=right_half/left_half/front_half/back_half（角区使用 right_front 等）。同一轮多个普通 on 对象可以在网格中分散，但多个 center 对象占用同一中心时应由 Python 碰撞拒绝。历史输入 properties.position_hint=center 仅作为兼容输入，Python 会归一化为 placement_hint=center；不得生成其他 properties。
+“桌面右侧”表示桌面支撑区域内的 right_half；“桌子右边”表示桌子外部相对位置，若没有明确支撑面必须 clarification_required，不得擅自当作桌面右侧。放到桌面和放到桌子右边是不同语义。
 区分三种表达：“把苹果放进篮子”是 robot_task + placement_target.kind=container_interior/relation=inside；“在篮子里增加一个苹果”是 scene_edit + operation=add/relation=inside；“篮子旁边有什么”是 scene_query + query_type=neighbors + target=basket，不得输出 subject=basket、relation=near、reference=null。
 scene_query 支持 count/existence/position/state/neighbors/relation/selection，不生成 object_id。
 “篮子旁边有什么？”→ query_type="neighbors"，target="basket"，entities 仅声明参照篮子，relations=[]，reference/predicate=null。target 在 neighbors 中就是参照物，候选由 Python 从场景枚举；禁止输出 subject=basket, relation=near, reference=null。
@@ -130,6 +132,8 @@ D. “把两个苹果分别放进红盒和蓝盒”：apple count=2；两个 des
 E. “先把两个球向右移动5厘米，再把它们向前移动5厘米”：同一个 ball set；两个 move operation，分别 right/0.05 和 front/0.05。
 F. “打开两个柜门”：door count=2；保留 door 与 handle 语义，物理配对由后续 grounding 完成。
 G. “增加一个香蕉”：scene_edit relation/reference 都为 null。
+H. “在桌面右侧增加两个苹果”：scene_edit operations 中使用 relation=on、reference=table、placement_hint=any、placement_region=right_half；“在桌子右边增加苹果”未说明支撑面，必须 clarification_required。
+I. “把篮子和托盘都放在桌子中间”：两个 add 操作均使用 relation=on、placement_hint=center；第二个若与第一个重叠由 Python 拒绝，不得自行移到别处。
 
 ## 14. Turn 输出结构示例（字段必须嵌套）
 scene_edit 唯一格式为 SceneEditPlan：entities + relations + operations，即使只有一次编辑也使用 operations 数组。名称、类别、数量、颜色和指代只放在 TaskEntity 中；每个 operation 必须通过 target 引用 entity_id，reference 也必须引用 entity_id。禁止直接输出旧式 scene_edit.operation/semantic_name/category/count，也禁止在 operations 条目中放 semantic_name/category/count。例如：

@@ -24,7 +24,7 @@ def task_understanding_wire_schema():
     edit = schema["$defs"]["SceneEditIntent"]
     edit["required"] = list(dict.fromkeys(edit.get("required", []) + [
         "relation", "reference", "direction", "distance_m", "motion_scale",
-        "coordinate_frame", "axis", "angle_deg",
+        "coordinate_frame", "axis", "angle_deg", "placement_hint", "placement_region",
     ]))
     return schema
 

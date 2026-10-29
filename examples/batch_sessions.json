@@ -1,0 +1,22 @@
+{
+  "sessions": [
+    {
+      "name": "empty_scene_edit",
+      "scene": null,
+      "instructions": [
+        "在桌面上放置一个篮子还有苹果和香蕉",
+        "把香蕉移动到篮子旁边",
+        "把苹果改成绿色的",
+        "删除篮子"
+      ]
+    },
+    {
+      "name": "sorting_scene",
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/3/ur5e_table_sorting.json",
+      "instructions": [
+        "在桌子左侧添加两个苹果",
+        "把右边的苹果变成白色"
+      ]
+    }
+  ]
+}

@@ -25,9 +25,51 @@ class BatchCase(BaseModel):
     continue_after_failure: bool = False
 
 
-def run_batch(app, path):
+class BatchSession(BaseModel):
+    """The small user-facing format: one scene and an ordered instruction list."""
+    model_config = ConfigDict(extra="forbid")
+    name: str | None = None
+    scene: str | None = None
+    instructions: list[str] = Field(min_length=1)
+
+
+def load_batch_input(path):
+    """Load the simple JSON format, while retaining the historical JSONL format."""
     path = Path(path).resolve()
-    cases = [BatchCase.model_validate(json.loads(line)) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    text = path.read_text(encoding="utf-8")
+    try:
+        document = json.loads(text)
+    except json.JSONDecodeError:
+        cases = [BatchCase.model_validate(json.loads(line)) for line in text.splitlines() if line.strip()]
+        return {"kind": "legacy", "path": path, "cases": cases}
+    if isinstance(document, dict) and isinstance(document.get("sessions"), list):
+        sessions = [BatchSession.model_validate(item) for item in document["sessions"]]
+        names = set()
+        normalized = []
+        for index, session in enumerate(sessions, 1):
+            name = session.name or f"session-{index:03d}"
+            if name in names:
+                raise ValueError("batch_duplicate_session_name")
+            names.add(name)
+            normalized.append(session.model_copy(update={"name": name}))
+        return {"kind": "sessions", "path": path, "sessions": normalized}
+    if isinstance(document, list):
+        cases = [BatchCase.model_validate(item) for item in document]
+        return {"kind": "legacy", "path": path, "cases": cases}
+    raise ValueError("batch_input_requires_sessions_or_jsonl")
+
+
+def run_batch(app, path):
+    loaded = load_batch_input(path)
+    path = loaded["path"]
+    if loaded["kind"] == "sessions":
+        cases = []
+        for session in loaded["sessions"]:
+            for turn, instruction in enumerate(session.instructions, 1):
+                cases.append(BatchCase(case_id=f"{session.name}-{turn:04d}", session_group=session.name,
+                                       instruction=instruction, scene=session.scene if turn == 1 else None))
+    else:
+        cases = loaded["cases"]
     if len({case.case_id for case in cases}) != len(cases):
         raise ValueError("batch_duplicate_case_id")
     sessions, failed_groups, results = {}, set(), []

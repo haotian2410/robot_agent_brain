@@ -48,8 +48,13 @@ class TaskDomainPolicy:
                                  robot_setup_request=turn.robot_setup_request,
                                  task_intent=TaskIntent(instruction=instruction, entities=entities,
                                                         operations=operations, spatial_relations=plan.relations))
-            if interaction and not explicit_scene:
-                return self._clarify(instruction)
+            # The understanding model has already selected the scene-edit
+            # domain and supplied a validated edit payload.  Words such as
+            # “放置/移动” also occur in ordinary scene editing (for example,
+            # “在桌面上放置一个篮子”), so do not downgrade an explicit
+            # scene_edit solely because the interaction lexicon matched.  An
+            # explicit robot/arm request is still handled above and remains a
+            # separate, safety-gated path.
             return turn
         if turn.turn_kind != TurnKind.ROBOT_TASK or turn.task_intent is None:
             return turn

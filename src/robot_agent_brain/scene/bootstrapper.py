@@ -29,13 +29,15 @@ def make_object(identifier, name, reference, position, *, category=None, support
 
 class SceneBootstrapper:
     def __init__(self, assets, defaults, *, robot="ur5e", seed=0, table_metadata_ref=None,
-                 robot_metadata_ref=None, robot_driver=None, template_scene=None, aliases=None, category_aliases=None):
+                 robot_metadata_ref=None, robot_driver=None, template_scene=None, aliases=None, category_aliases=None,
+                 default_scene_edit_assets=None):
         self.assets, self.defaults, self.robot, self.seed = assets, defaults, robot, seed
         self.table_ref, self.robot_ref = table_metadata_ref, robot_metadata_ref
         self.driver = robot_driver
         self.template_scene = template_scene
         self.robot_profile = None
         self.resolver = AssetResolver(assets, aliases=aliases, category_aliases=category_aliases)
+        self.default_scene_edit_assets = dict(default_scene_edit_assets or {})
 
     def for_profile(self, profile):
         from .component_access import SceneIndex
@@ -52,6 +54,7 @@ class SceneBootstrapper:
             table_metadata_ref=index.metadata_ref(table_id), robot_metadata_ref=index.metadata_ref(robot_id),
             robot_driver=index.robot_driver(robot_id), template_scene=template,
             aliases=self.resolver.aliases, category_aliases=self.resolver.category_aliases)
+        bootstrap.default_scene_edit_assets = dict(self.default_scene_edit_assets)
         bootstrap.robot_profile = profile
         return bootstrap
 
@@ -139,7 +142,10 @@ class SceneBootstrapper:
         assumptions = ["source=system_default: tabletop placement; x right, y front, z up"]
         next_id = base_max + 1
         for entity in entities:
-            binding = self.resolver.resolve(entity)
+            binding = AssetResolver(self.assets, aliases=self.resolver.aliases,
+                                    category_aliases=self.resolver.category_aliases,
+                                    default_refs=self.default_scene_edit_assets).resolve(
+                                        entity, allow_default=turn.turn_kind == "scene_edit")
             model = binding.model
             bindings[entity.entity_id] = model.metadata_ref
             assumptions.extend(binding.assumptions)

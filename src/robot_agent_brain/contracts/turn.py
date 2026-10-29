@@ -48,6 +48,13 @@ class SceneEditIntent(BaseModel):
     scale_xyz: tuple[float, float, float] | None = None
     scale_direction: Literal["enlarge", "shrink"] | None = None
     scale_amount: Literal["small", "medium", "large"] | None = None
+    # Placement controls are deliberately separate from generic properties.
+    # ``center`` is a hard constraint; ``any`` permits deterministic grid search.
+    placement_hint: Literal["center", "any"] | None = None
+    placement_region: Literal[
+        "left_half", "right_half", "front_half", "back_half",
+        "left_front", "right_front", "left_back", "right_back",
+    ] | None = None
     target: str = Field(min_length=1)
     relation: SceneLayoutRelation | None = None
     reference: str | None = None
@@ -60,6 +67,31 @@ class SceneEditIntent(BaseModel):
     angle_deg: float | None = None
     pivot: Literal["origin"] = "origin"
     explicit_robot: bool = False
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_position_hint(cls, values):
+        """Accept the one historical Qwen field without opening arbitrary props.
+
+        Older prompts occasionally emitted ``properties.position_hint`` for a
+        centered placement.  It is a semantic placement control, not a Scene
+        component property, so normalize only the exact supported value.
+        """
+        if not isinstance(values, dict):
+            return values
+        props = values.get("properties")
+        if isinstance(props, dict) and "position_hint" in props:
+            value = props.get("position_hint")
+            if value != "center":
+                raise ValueError("scene_edit_properties_unsupported: position_hint must be center")
+            if values.get("placement_hint") not in (None, "center"):
+                raise ValueError("scene_edit_placement_hint_conflict")
+            values = dict(values)
+            values["placement_hint"] = values.get("placement_hint") or "center"
+            new_props = dict(props)
+            new_props.pop("position_hint", None)
+            values["properties"] = new_props
+        return values
 
     @field_validator("relation", mode="before")
     @classmethod
@@ -108,6 +140,15 @@ class SceneEditIntent(BaseModel):
         }[self.operation]
         if any(value is not None and key not in allowed for key, value in fields.items()):
             raise ValueError(f"scene_edit_fields_forbidden: {self.operation}")
+        if self.placement_hint is not None or self.placement_region is not None:
+            if self.operation not in {"add", "move_relative", "update"}:
+                raise ValueError(f"scene_edit_fields_forbidden: {self.operation}")
+            if self.placement_region is not None and self.relation != SceneLayoutRelation.ON:
+                raise ValueError("scene_edit_placement_region_requires_on")
+        if self.relation == SceneLayoutRelation.ON and self.operation in {"add", "move_relative", "update"}:
+            # A missing hint means ordinary placement and is intentionally
+            # handled as ``any`` by the deterministic Python grid policy.
+            pass
         if self.operation == "move_relative" and self.reference is None:
             raise ValueError("scene_edit_relative_reference_missing")
         if self.operation == "translate" and self.distance_m is not None and self.motion_scale is not None:

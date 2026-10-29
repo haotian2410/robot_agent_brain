@@ -250,7 +250,8 @@ class BrainSession:
             remapped = self.derive_original_scene(self.original_store, edit, reset_allowed=self.scene_reset_allowed)
             final = BrainResult(turn_kind="scene_edit", scene_replacement=remapped.scene,
                 scene_source_snapshot=self.original_scene_manifest.snapshot_id, scene_id_remap=remapped.id_map,
-                focus_object_ids=[remapped.id_map[i] for i in result.focus_object_ids])
+                focus_object_ids=[remapped.id_map[i] for i in result.focus_object_ids],
+                assumptions=result.assumptions)
             self.dialogue.observe(final)
             return final
         profile = None

@@ -38,3 +38,16 @@ def test_unregistered_pour_cannot_be_disguised_as_grasp_by_model():
     text = "用双臂倒水"
     result = TaskDomainPolicy().classify(parsed.to_brain_turn(text), text)
     assert result.status == "unsupported_task" and result.task_intent is None
+
+
+def test_explicit_scene_placement_is_not_downgraded_by_interaction_word():
+    text = "在桌面上放置一个苹果"
+    turn = BrainTurn(status="accepted", turn_kind="scene_edit", instruction=text,
+        scene_edit={"entities": [
+            {"entity_id": "apple", "semantic_name": "apple", "category": "fruit"},
+            {"entity_id": "table", "semantic_name": "table", "category": "surface"},
+        ], "operations": [{"operation": "add", "target": "apple",
+                            "relation": "on", "reference": "table"}]})
+    result = TaskDomainPolicy().classify(turn, text)
+    assert result.status == "accepted"
+    assert result.turn_kind == "scene_edit"

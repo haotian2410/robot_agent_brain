@@ -54,6 +54,7 @@ class BrainConfig(BaseModel):
     library_ref_prefix: str = "$LIBRARY_SERVER/"
     default_table_metadata_ref: str | None = None
     default_robot_metadata_ref: str | None = None
+    default_scene_edit_assets: dict[str, str] = Field(default_factory=dict)
     default_scene: str | None = None
     default_robot_driver: RobotDriverProperties | None = None
     defaults: str | None = None
@@ -76,6 +77,8 @@ class BrainConfig(BaseModel):
     scene_scale_medium: float = Field(default=1.5, gt=1)
     scene_scale_large: float = Field(default=2., gt=1)
     query_near_distance_m: float = Field(default=.2, gt=0, le=2)
+    scene_layout_grid_size: int = Field(default=5, ge=3, le=9)
+    scene_layout_near_clearance_m: float = Field(default=.02, ge=0, le=1)
 
     def scale_policy(self):
         from .scene.scale_policy import SceneScalePolicy
@@ -97,6 +100,9 @@ class BrainConfig(BaseModel):
             raise ValueError("asset_library_config_ambiguous: choose demo assets or a real library")
         if not self.library_ref_prefix or not self.library_ref_prefix.endswith("/"):
             raise ValueError("library_ref_prefix_invalid")
+        for name, ref in self.default_scene_edit_assets.items():
+            if not isinstance(name, str) or not name.strip() or not isinstance(ref, str) or not ref.startswith(self.library_ref_prefix):
+                raise ValueError("default_scene_edit_asset_ref_invalid")
         return self
 
     @classmethod

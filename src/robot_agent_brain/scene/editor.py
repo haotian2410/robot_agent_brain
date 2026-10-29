@@ -27,17 +27,20 @@ class SceneEditResult:
     created_object_ids: list[int] = field(default_factory=list)
     deleted_object_ids: list[int] = field(default_factory=list)
     entity_bindings: dict[str, list[int]] = field(default_factory=dict)
+    assumptions: list[str] = field(default_factory=list)
 
 
 class SceneEditor:
     def __init__(self, assets, layout=None, *, seed=0, aliases=None, category_aliases=None,
-                 scale_policy=None, scale_defaults=None, table_metadata_ref=None, layout_interiors=None):
+                 scale_policy=None, scale_defaults=None, table_metadata_ref=None, layout_interiors=None,
+                 default_scene_edit_assets=None):
         self.assets, self.seed = assets, seed
         self.layout = layout or SceneLayoutPolicy()
         self.aliases, self.category_aliases = aliases or {}, category_aliases or {}
         self.motion_policy = MotionPolicy()
         self.scale_policy = scale_policy or SceneScalePolicy()
         self.scale_defaults, self.table_metadata_ref = scale_defaults, table_metadata_ref
+        self.default_scene_edit_assets = dict(default_scene_edit_assets or {})
         self.layout_interiors = (layout_interiors if isinstance(layout_interiors, SceneLayoutGeometryRegistry)
                                  else SceneLayoutGeometryRegistry(layout_interiors))
         self.scale_table_transform = None
@@ -57,6 +60,7 @@ class SceneEditor:
         bindings = dict(bindings_override or {})
         selected_targets = {}
         all_operations = []
+        assumptions = []
         for edit in intent.operations:
             if edit.operation == "update_properties":
                 if set(edit.properties) != {"color"}:
@@ -75,7 +79,8 @@ class SceneEditor:
                 reference = references[0]
             entity = next(item for item in intent.entities if item.entity_id == edit.target)
             if edit.operation == "add":
-                operations = self._add(edit, entity, current, preview.next_scene_object_id, reference, defaults)
+                operations, add_assumptions = self._add(edit, entity, current, preview.next_scene_object_id, reference, defaults)
+                assumptions.extend(add_assumptions)
             else:
                 matches = ([SceneIndex(current).object(i) for i in selected_targets[edit.target]]
                            if edit.target in selected_targets else
@@ -139,7 +144,8 @@ class SceneEditor:
         focus = list(dict.fromkeys(op.object_id_in_scene for op in all_operations
                                    if op.action != "remove_object" and op.object_id_in_scene not in deleted))
         return SceneEditResult(result, focus, created, deleted,
-                               {key: [i for i in ids if i not in deleted] for key, ids in bindings.items()})
+                               {key: [i for i in ids if i not in deleted] for key, ids in bindings.items()},
+                               list(dict.fromkeys(assumptions)))
 
     def _facts(self, defaults=None):
         return SpatialFactResolver(self.assets, support_contact_tolerance_m=defaults.support_contact_tolerance_m if defaults else .001)
@@ -305,7 +311,7 @@ class SceneEditor:
             elif edit.operation == "rotate":
                 moved = rotate(world, edit.axis, edit.angle_deg, edit.coordinate_frame)
             elif edit.operation in {"move_relative", "update"} and reference is not None:
-                moved = self._choose_relative_transform(edit.relation, obj, reference, scene, world)
+                moved = self._choose_relative_transform(edit, obj, reference, scene, world)
             else:
                 raise ValueError("scene_edit_update_missing")
             local = local_from_world(scene, identifier, moved)
@@ -318,20 +324,29 @@ class SceneEditor:
         return self.layout_interiors.get(index.metadata_ref(obj.object_id_in_scene),
                                          index.metadata_type(obj.object_id_in_scene))
 
-    def _choose_relative_transform(self, relation, obj, reference, scene, current_world):
+    def _choose_relative_transform(self, edit, obj, reference, scene, current_world):
         """Choose a deterministic, collision-checked relative transform."""
+        relation = edit.relation
         relation = getattr(relation, "value", relation)
         facts, index = self._facts(), SceneIndex(scene)
         reference_world = world_transform(scene, reference.object_id_in_scene)
         reference_model, object_model = facts.asset(reference, scene), facts.asset(obj, scene)
         if relation in {"left_of", "right_of", "front_of", "behind", "above", "below", "near"}:
-            candidates = self.layout.relative_candidates(relation, reference_world, reference_model,
-                                                         object_model, current_world)
+            if relation in {"left_of", "right_of", "front_of", "behind"} and facts.is_surface(reference, scene):
+                raise ValueError("scene_edit_position_ambiguous")
+            candidates = (self.layout.near_candidates(reference_world, reference_model, object_model, current_world)
+                          if relation == "near" else
+                          self.layout.relative_candidates(relation, reference_world, reference_model,
+                                                         object_model, current_world))
         elif relation == "on":
             entry = self._layout_entry(reference, scene)
             if not facts.is_surface(reference, scene) and not (entry and entry.verified and entry.supports_on_top):
                 raise ValueError("scene_edit_on_reference_not_support")
-            candidates = [self.layout.on_transform(reference_world, reference_model, object_model, current_world)]
+            candidates = self.layout.surface_candidates(reference_world, reference_model, object_model, current_world,
+                                                        region=edit.placement_region,
+                                                        center_only=edit.placement_hint == "center",
+                                                        workspace_min=self.scale_defaults.workspace_min if self.scale_defaults else None,
+                                                        workspace_max=self.scale_defaults.workspace_max if self.scale_defaults else None)
         elif relation == "inside":
             entry = self._layout_entry(reference, scene)
             if entry is None or not entry.verified:
@@ -434,7 +449,8 @@ class SceneEditor:
             component=SceneComponent(component_type="Transform", properties=properties))
 
     def _add(self, edit, entity, scene, next_id, reference, defaults):
-        binding = AssetResolver(self.assets, aliases=self.aliases, category_aliases=self.category_aliases).resolve(entity)
+        binding = AssetResolver(self.assets, aliases=self.aliases, category_aliases=self.category_aliases,
+                                default_refs=self.default_scene_edit_assets).resolve(entity, allow_default=True)
         model = binding.model
         count = entity.count
         if entity.all_available:
@@ -449,22 +465,25 @@ class SceneEditor:
             identifier = next_id + offset
             if identifier > 2**53 - 1:
                 raise ValueError("scene_object_ids_exhausted")
-            position = self._placement(model, temporary, reference, edit.relation, defaults, identifier)
+            position = self._placement(model, temporary, reference, edit, defaults, identifier)
             obj = make_object(identifier, model.semantic_name, model.metadata_ref, position,
                               category=model.category or entity.category,
                               asset_type=model.asset_type if getattr(self.assets, "supports_features", False) else None)
             operations.append(ScenePatchOperation(action="add_object", object_id_in_scene=identifier, object=obj))
             temporary = temporary.model_copy(update={"objects": [*temporary.objects, obj]})
-        return operations
+        return operations, binding.assumptions
 
-    def _placement(self, model, scene, reference, relation, defaults, identifier):
+    def _placement(self, model, scene, reference, edit, defaults, identifier):
         facts, index = self._facts(defaults), SceneIndex(scene)
+        relation = edit.relation
         relation = getattr(relation, "value", relation)
         planar = relation in {"left_of", "right_of", "front_of", "behind", "near"}
         support = None
         if reference is None:
             support = index.object(self._default_surface_id(scene, defaults))
         elif planar:
+            if facts.is_surface(reference, scene):
+                raise ValueError("scene_edit_position_ambiguous")
             support_id = (reference.object_id_in_scene if facts.is_surface(reference, scene)
                           else facts.infer_support(reference, scene))
             if support_id is None and defaults is not None:
@@ -494,15 +513,21 @@ class SceneEditor:
             reference_world = world_transform(scene, reference.object_id_in_scene)
             reference_model = facts.asset(reference, scene)
             if relation in {"left_of", "right_of", "front_of", "behind", "above", "below", "near"}:
-                relation_candidates = self.layout.relative_candidates(relation, reference_world, reference_model, model, world)
+                relation_candidates = (self.layout.near_candidates(reference_world, reference_model, model, world)
+                                      if relation == "near" else
+                                      self.layout.relative_candidates(relation, reference_world, reference_model, model, world))
             elif relation == "on":
-                relation_candidates = [self.layout.on_transform(reference_world, reference_model, model, world)]
+                relation_candidates = self.layout.surface_candidates(
+                    reference_world, reference_model, model, world,
+                    region=edit.placement_region, center_only=edit.placement_hint == "center",
+                    workspace_min=defaults.workspace_min if defaults else None,
+                    workspace_max=defaults.workspace_max if defaults else None)
             elif relation == "inside":
                 relation_candidates = self.layout.inside_candidates(reference_world, model, world,
                                                                     self._layout_entry(reference, scene))
         origin_low, origin_high = world_bounds(model, WorldTransform((0, 0, 0), world.linear))
         rng = random.Random(f"{self.seed}:{identifier}")
-        limit = defaults.max_attempts if defaults else 2 * len(scene.objects) + 5
+        limit = defaults.max_attempts if defaults else max(2 * len(scene.objects) + 5, len(relation_candidates or ()))
         for attempt in range(limit):
             if reference is None:
                 limits = [(defaults.workspace_min[i] - origin_low[i], defaults.workspace_max[i] - origin_high[i]) for i in (0, 1)]
@@ -514,7 +539,10 @@ class SceneEditor:
                     break
                 base = relation_candidates[attempt % len(relation_candidates)]
                 position = base.position
-                if attempt >= len(relation_candidates):
+                # Directional relations retain the historical deterministic
+                # lateral retries.  ``on`` and ``near`` use their full 2-D
+                # candidate grids instead of this single-axis fallback.
+                if attempt >= len(relation_candidates) and relation in {"left_of", "right_of", "front_of", "behind"}:
                     axis = 0 if relation in {"front_of", "behind"} else 1
                     spacing = origin_high[axis] - origin_low[axis] + self.layout.clearance_m
                     ring = (attempt // len(relation_candidates) + 1)
@@ -541,7 +569,8 @@ class SceneEditor:
                                                       world_transform(scene, reference.object_id_in_scene), interior):
                     continue
             ignored = {reference.object_id_in_scene} if relation == "inside" and reference is not None else set()
-            if not self._overlaps(obj, candidate, clearance=defaults.clearance_m if defaults else self.layout.clearance_m,
+            overlap_clearance = 0 if relation == "on" else (defaults.clearance_m if defaults else self.layout.clearance_m)
+            if not self._overlaps(obj, candidate, clearance=overlap_clearance,
                                   ignore_ids=ignored):
                 return position
         raise ValueError("scene_edit_layout_collision")

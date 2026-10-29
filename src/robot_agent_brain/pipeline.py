@@ -45,6 +45,7 @@ class BrainResult(BaseModel):
     session_action: SessionControlIntent | None = None
     focus_object_ids: list[SceneId] | None = None
     deleted_object_ids: list[SceneId] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
     planner_used: Literal["recipe", "qwen"] | None = None
     planner_trace: dict | None = Field(default=None, exclude=True)
 
@@ -189,7 +190,8 @@ class BrainPipeline:
                                                   next_scene_object_id=next_scene_object_id)
             return BrainResult(turn_kind=turn.turn_kind, scene_patch=edited.patch,
                                focus_object_ids=edited.focus_object_ids or None,
-                               deleted_object_ids=edited.deleted_object_ids)
+                               deleted_object_ids=edited.deleted_object_ids,
+                               assumptions=edited.assumptions)
         if turn.turn_kind == TurnKind.SCENE_QUERY:
             visual = turn.scene_query.evidence_source == "image"
             if visual and (self.vision_provider is None or capture is None):

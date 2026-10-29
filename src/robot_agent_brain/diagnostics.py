@@ -43,6 +43,11 @@ def configuration_summary(config, assets, defaults):
             "bootstrap_settings_sha256":fingerprint(config.bootstrap_settings()),
             "default_table_metadata_ref":config.default_table_metadata_ref,
             "default_robot_metadata_ref":config.default_robot_metadata_ref,
+            "default_scene_edit_assets":config.default_scene_edit_assets,
+            "scene_layout_policy_version":"grid-v2",
+            "scene_layout_clearance_m": getattr(defaults, "clearance_m", None),
+            "scene_layout_grid_size": config.scene_layout_grid_size,
+            "scene_layout_near_clearance_m": config.scene_layout_near_clearance_m,
             "robot_driver_sha256":fingerprint(config.default_robot_driver.model_dump(mode="json")
                                                if config.default_robot_driver is not None else None),
             "defaults_sha256":fingerprint(defaults.model_dump(mode="json")),
