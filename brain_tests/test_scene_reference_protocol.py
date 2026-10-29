@@ -7,6 +7,10 @@ from robot_agent_brain.config import BrainConfig
 from robot_agent_brain.grounding.scene_reference_resolver import SceneReferenceResolver
 from robot_agent_brain.scene.editor import SceneEditor
 from robot_agent_brain.scene.scene_manager import SceneManager
+from robot_agent_brain.grounding.scene_object_selector import SceneObjectSelector
+from robot_agent_brain.contracts.spatial import SpatialRelation
+from robot_agent_brain.contracts.task_intent import TaskEntity
+from test_query_scene_continuity import supported_scene
 from component_fixtures import demo_bootstrap
 
 
@@ -88,3 +92,13 @@ def test_three_add_operations_using_table_reference_produce_one_scene_patch():
     assert names.count("apple") == 1
     assert names.count("banana") == 1
     assert len(result.patch.operations) == 6  # add + Semantic for each object
+
+
+def test_selection_relation_can_use_environment_table_reference():
+    scene = supported_scene()
+    entities = [TaskEntity(entity_id="apple", semantic_name="apple", category="fruit")]
+    relations = [SpatialRelation(subject="apple", relation="left_of", reference="table")]
+    selected = SceneObjectSelector(assets=BrainConfig().load_assets()).resolve(
+        "apple", entities, relations, scene
+    )
+    assert [obj.object_id_in_scene for obj in selected] == [1]

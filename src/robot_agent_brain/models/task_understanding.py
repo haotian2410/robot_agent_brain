@@ -271,8 +271,9 @@ def _wire_scene_edit(value: dict[str, Any]) -> SceneEditPlan:
     entity_ids = {entity.entity_id for entity in entities}
     catalog = SceneReferenceCatalog()
     scene_refs = []
-    for operation in operations:
-        raw_reference = operation.reference
+    raw_references = [operation.reference for operation in operations]
+    raw_references.extend(relation.reference for relation in relations)
+    for raw_reference in raw_references:
         if raw_reference and raw_reference not in entity_ids:
             spec = catalog.lookup(raw_reference)
             if spec is not None and all(ref.raw_value != raw_reference for ref in scene_refs):

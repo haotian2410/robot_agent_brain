@@ -59,7 +59,9 @@ class SceneEditor:
             raise ValueError("original_scene_requires_session_routing")
         preview = SceneManager(scene, seen_scene_object_ids=seen_scene_object_ids,
                                next_scene_object_id=next_scene_object_id)
-        selector = SceneObjectSelector(aliases=self.aliases, category_aliases=self.category_aliases, assets=self.assets)
+        selector = SceneObjectSelector(aliases=self.aliases, category_aliases=self.category_aliases, assets=self.assets,
+                                      scene_reference_catalog=self.reference_resolver.catalog,
+                                      table_metadata_ref=self.table_metadata_ref)
         bindings = dict(bindings_override or {})
         selected_targets = {}
         all_operations = []
