@@ -211,7 +211,7 @@ class TaskParseWireOutput(BaseModel):
     ``table``) that is not a task entity.
     """
     model_config = ConfigDict(extra="ignore")
-    protocol_version: str = "task_understanding.v2"
+    protocol_version: Literal["task_understanding.v2", "task_understanding.v3"] = "task_understanding.v3"
     arm_usage: Literal["unspecified", "both_required"] = "unspecified"
     hold_constraints: list[dict[str, Any]] = Field(default_factory=list)
     status: TurnStatus = TurnStatus.ACCEPTED
@@ -251,7 +251,11 @@ def _wire_scene_edit(value: dict[str, Any]) -> SceneEditPlan:
     try:
         entities = [_wire_entity(item) for item in value.get("entities", [])]
         relations = [SpatialRelation.model_validate(item) for item in value.get("relations", [])]
-        operations = [SceneEditIntent.model_validate(item) for item in value.get("operations", [])]
+        operations = []
+        for index, item in enumerate(value.get("operations", []), 1):
+            item = dict(item)
+            item.setdefault("operation_id", f"op-{index}")
+            operations.append(SceneEditIntent.model_validate(item))
     except BrainError:
         raise
     except ValidationError as exc:
@@ -299,7 +303,8 @@ def _parse_scene_edit_wire(value: dict[str, Any], instruction: str) -> BrainTurn
     # SceneEditPlan model.  The wire path has already run the staged semantic
     # checks above, so construct the canonical turn without re-running the
     # legacy entity-only reference rule.
-    return BrainTurn.model_construct(status=TurnStatus.ACCEPTED, turn_kind=TurnKind.SCENE_EDIT,
+    return BrainTurn.model_construct(protocol_version=wire.protocol_version,
+                                     status=TurnStatus.ACCEPTED, turn_kind=TurnKind.SCENE_EDIT,
                                      instruction=instruction, scene_edit=plan)
 
 

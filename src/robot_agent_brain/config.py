@@ -51,6 +51,7 @@ class BrainConfig(BaseModel):
     asset_category_index: str | None = None
     scene_layout_interiors: str | None = None
     semantic_aliases: str | None = None
+    scene_reference_catalog: str | None = None
     library_ref_prefix: str = "$LIBRARY_SERVER/"
     default_table_metadata_ref: str | None = None
     default_robot_metadata_ref: str | None = None
@@ -115,7 +116,7 @@ class BrainConfig(BaseModel):
             values.update(user)
             for key in ("assets", "defaults", "replay_file", "asset_library_root",
                         "asset_geometry_cache", "asset_category_index", "semantic_aliases",
-                        "scene_layout_interiors", "default_scene"):
+                        "scene_layout_interiors", "scene_reference_catalog", "default_scene"):
                 if user.get(key) and not Path(user[key]).is_absolute():
                     values[key] = str((Path(path).resolve().parent / user[key]).resolve())
         env = os.environ if environ is None else environ
@@ -165,6 +166,25 @@ class BrainConfig(BaseModel):
                 raise ValueError("semantic_aliases_conflict")
             normalized[key] = target
         return normalized
+
+    def load_scene_reference_catalog(self):
+        from .semantics.scene_references import SceneReferenceCatalog, SceneReferenceSpec
+        if self.scene_reference_catalog is None:
+            return SceneReferenceCatalog()
+        value = json.loads(Path(self.scene_reference_catalog).read_text(encoding="utf-8"))
+        if not isinstance(value, dict) or not isinstance(value.get("scene_references"), list):
+            raise ValueError("scene_reference_catalog_invalid")
+        specs = []
+        for item in value["scene_references"]:
+            if not isinstance(item, dict) or not isinstance(item.get("canonical_id"), str):
+                raise ValueError("scene_reference_catalog_invalid")
+            aliases = item.get("aliases", [])
+            if not isinstance(aliases, list) or any(not isinstance(alias, str) for alias in aliases):
+                raise ValueError("scene_reference_catalog_invalid")
+            specs.append(SceneReferenceSpec(canonical_id=item["canonical_id"], aliases=tuple(aliases),
+                kind=item.get("kind", "environment"), selector=item.get("selector", "semantic"),
+                allow_default=bool(item.get("allow_default", False))))
+        return SceneReferenceCatalog(specs)
 
     def load_defaults(self):
         resource = Path(self.defaults) if self.defaults else files("robot_agent_brain.resources").joinpath("defaults.json")

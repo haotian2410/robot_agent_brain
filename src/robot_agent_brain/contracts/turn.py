@@ -62,6 +62,8 @@ class SceneEditIntent(BaseModel):
     """One operation in a SceneEditPlan; never a standalone turn payload."""
     model_config = ConfigDict(extra="forbid")
     operation: Literal["add", "remove", "replace", "translate", "rotate", "move_relative", "update_properties", "update", "scale"]
+    operation_id: str | None = Field(default=None, pattern=r"^op-[\w-]+$")
+    depends_on: list[str] = Field(default_factory=list)
     replacement_entity: str | None = None
     scale_mode: Literal["multiply", "set"] | None = None
     scale_xyz: tuple[float, float, float] | None = None
@@ -176,6 +178,8 @@ class SceneEditIntent(BaseModel):
             raise ValueError("scene_edit_properties_forbidden")
         if self.operation not in {"translate", "rotate"} and self.coordinate_frame != "world":
             raise ValueError("scene_edit_coordinate_frame_forbidden")
+        if any(dep == self.operation_id for dep in self.depends_on if self.operation_id is not None):
+            raise ValueError("scene_edit_dependency_self_reference")
         return self
 
 
@@ -207,6 +211,15 @@ class SceneEditPlan(BaseModel):
                 raise ValueError("scene_replace_unknown_entity")
             if op.reference and op.reference not in ids:
                 raise ValueError("scene_edit_unknown_reference_selector")
+        operation_ids = [op.operation_id for op in self.operations if op.operation_id is not None]
+        if len(operation_ids) != len(set(operation_ids)):
+            raise ValueError("scene_edit_duplicate_operation_id")
+        seen_operations = set()
+        for op in self.operations:
+            if not set(op.depends_on) <= seen_operations:
+                raise ValueError("scene_edit_invalid_dependency")
+            if op.operation_id:
+                seen_operations.add(op.operation_id)
         return self
 
     def validate_semantics(self, *, allow_unresolved_references=False):
@@ -225,6 +238,15 @@ class SceneEditPlan(BaseModel):
                 raise ValueError("scene_replace_unknown_entity: " + op.replacement_entity)
             if op.reference and op.reference not in ids and not allow_unresolved_references:
                 raise ValueError("scene_edit_unknown_reference_selector: " + op.reference)
+        operation_ids = [op.operation_id for op in self.operations if op.operation_id is not None]
+        if len(operation_ids) != len(set(operation_ids)):
+            raise ValueError("scene_edit_duplicate_operation_id")
+        seen_operations = set()
+        for op in self.operations:
+            if not set(op.depends_on) <= seen_operations:
+                raise ValueError("scene_edit_invalid_dependency")
+            if op.operation_id:
+                seen_operations.add(op.operation_id)
         return self
 
 class SceneQueryIntent(BaseModel):

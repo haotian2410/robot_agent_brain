@@ -19,6 +19,7 @@ def configuration_summary(config, assets, defaults):
                      else metadata.model_dump(mode="json"))
     from .scene.layout_geometry import SceneLayoutGeometryRegistry
     layout_registry = SceneLayoutGeometryRegistry.from_path(config.scene_layout_interiors)
+    scene_reference_catalog = config.load_scene_reference_catalog()
     return {"provider":config.provider, "model":config.model, "base_url":endpoint,
             "scene_scale_policy": config.scale_policy().model_dump(mode="json"),
             "query_near_distance_m": config.query_near_distance_m,
@@ -40,6 +41,7 @@ def configuration_summary(config, assets, defaults):
             "demo_assets":getattr(assets, "demo_assets", getattr(metadata, "demo_assets", False)),
             "assets_sha256":fingerprint(asset_payload),
             "semantic_aliases_sha256":fingerprint(config.load_semantic_aliases()),
+            "scene_reference_catalog_sha256": fingerprint(scene_reference_catalog.configuration_payload()),
             "bootstrap_settings_sha256":fingerprint(config.bootstrap_settings()),
             "default_table_metadata_ref":config.default_table_metadata_ref,
             "default_robot_metadata_ref":config.default_robot_metadata_ref,

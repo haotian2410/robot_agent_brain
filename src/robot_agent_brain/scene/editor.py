@@ -34,7 +34,7 @@ class SceneEditResult:
 class SceneEditor:
     def __init__(self, assets, layout=None, *, seed=0, aliases=None, category_aliases=None,
                  scale_policy=None, scale_defaults=None, table_metadata_ref=None, layout_interiors=None,
-                 default_scene_edit_assets=None):
+                 default_scene_edit_assets=None, scene_reference_catalog=None):
         self.assets, self.seed = assets, seed
         self.layout = layout or SceneLayoutPolicy()
         self.aliases, self.category_aliases = aliases or {}, category_aliases or {}
@@ -44,7 +44,8 @@ class SceneEditor:
         self.default_scene_edit_assets = dict(default_scene_edit_assets or {})
         self.layout_interiors = (layout_interiors if isinstance(layout_interiors, SceneLayoutGeometryRegistry)
                                  else SceneLayoutGeometryRegistry(layout_interiors))
-        self.reference_resolver = SceneReferenceResolver(table_metadata_ref=table_metadata_ref)
+        self.reference_resolver = SceneReferenceResolver(scene_reference_catalog,
+                                                         table_metadata_ref=table_metadata_ref)
         self.scale_table_transform = None
 
     def edit(self, intent, scene, **kwargs):

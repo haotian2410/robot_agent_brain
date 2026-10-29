@@ -3,10 +3,14 @@ from __future__ import annotations
 from ..contracts.turn import BrainTurn, SceneEditIntent, SceneEditPlan, TurnKind, TurnStatus
 from ..contracts.task_intent import Operation, TaskIntent
 from .robot_interactions import RobotInteractionLexicon
+from .domain_policy_registry import DomainPolicyRegistry
 
 
 class TaskDomainPolicy:
     """Validate the model's domain; explicit robot > explicit scene > action semantics."""
+
+    def __init__(self, registry=None):
+        self.registry = registry or DomainPolicyRegistry()
 
     def classify(self, turn: BrainTurn, instruction: str) -> BrainTurn:
         if turn.status != TurnStatus.ACCEPTED:
@@ -84,3 +88,5 @@ class TaskDomainPolicy:
     @staticmethod
     def _clarify(instruction):
         return BrainTurn(status="clarification_required", turn_kind="scene_edit", instruction=instruction)
+    def __init__(self, registry=None):
+        self.registry = registry or DomainPolicyRegistry()

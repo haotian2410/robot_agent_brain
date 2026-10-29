@@ -81,3 +81,9 @@ class SceneReferenceCatalog:
 
     def specs(self):
         return tuple(self._specs.values())
+
+    def configuration_payload(self):
+        return [{"canonical_id": spec.canonical_id, "aliases": list(spec.aliases),
+                 "kind": spec.kind, "selector": spec.selector,
+                 "allow_default": spec.allow_default}
+                for spec in self.specs()]
