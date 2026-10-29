@@ -5,6 +5,23 @@ semantic names that must be bound to a concrete scene object before geometry
 or editing code can use them.
 """
 from dataclasses import dataclass
+from enum import StrEnum
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class RefScope(StrEnum):
+    ENTITY = "entity"
+    SCENE_REF = "scene_ref"
+    ANCHOR = "anchor"
+
+
+class CanonicalReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    raw_value: str = Field(min_length=1)
+    canonical_value: str = Field(min_length=1)
+    scope: RefScope
+    kind: str | None = None
+    resolved_object_id: int | None = None
 
 
 @dataclass(frozen=True)

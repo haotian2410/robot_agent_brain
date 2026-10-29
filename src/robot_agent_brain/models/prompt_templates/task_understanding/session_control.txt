@@ -1,0 +1,1 @@
+session_control 只能是 pause、resume 或 close，不携带其他任务 payload。

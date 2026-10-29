@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 
 from ..errors import BrainError
-from ..semantics.scene_references import SceneReferenceCatalog
+from ..semantics.scene_references import CanonicalReference, RefScope, SceneReferenceCatalog
 from ..scene.component_access import SceneIndex
 
 
@@ -14,6 +14,11 @@ class ResolvedSceneReference:
     kind: str
     object_id: int | None = None
     source: str = ""
+
+    def canonical(self):
+        return CanonicalReference(raw_value=self.raw_value, canonical_value=self.canonical_id,
+                                  scope=RefScope(self.scope), kind=self.kind,
+                                  resolved_object_id=self.object_id)
 
 
 class SceneReferenceResolver:

@@ -1,0 +1,4 @@
+只输出一个 JSON 对象。accepted 输出对应 route payload；clarification_required 或 unsupported_task 的 entities、operations、relations、robot_setup_request 和其他可执行字段必须为空或 null，并提供具体 clarification_question。实体字段优先使用 entity_id、semantic_name；仍兼容旧版 id/name，Python 会规范化为统一 canonical model。
+
+{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"entities":[{"entity_id":"banana","semantic_name":"banana","category":"fruit"}],"relations":[],"operations":[{"operation":"add","target":"banana","relation":null,"reference":null}]}}
+{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"entities":[{"entity_id":"banana","semantic_name":"banana","category":"fruit"},{"entity_id":"basket","semantic_name":"basket","category":"container"}],"relations":[],"operations":[{"operation":"add","target":"banana","relation":"right_of","reference":"basket"}]}}

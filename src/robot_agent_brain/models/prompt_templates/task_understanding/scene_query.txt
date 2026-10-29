@@ -1,0 +1,1 @@
+scene_query 只描述查询，不生成场景编辑或机器人 operations。“篮子旁边有什么”使用 query_type=neighbors、target=basket，不能输出 subject=basket、relation=near、reference=null。关系判断和最近/最远选择保留主体、参照物与查询类型，答案由 Python 根据当前快照计算。

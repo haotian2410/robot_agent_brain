@@ -10,6 +10,7 @@ from ..contracts.turn import BrainTurn, SceneEditIntent, SceneEditPlan, SceneQue
 from ..contracts.spatial import RelationScope, SpatialRelation, SpatialRelationType
 from ..contracts.task_intent import Direction, MotionScale, Operation, PlacementTarget, QuantityMode, TaskEntity, TaskIntent, TaskType
 from ..errors import BrainError
+from ..semantics.scene_references import CanonicalReference, RefScope, SceneReferenceCatalog
 
 
 def task_understanding_wire_schema():
@@ -27,6 +28,17 @@ def task_understanding_wire_schema():
         "relation", "reference", "direction", "distance_m", "motion_scale",
         "coordinate_frame", "axis", "angle_deg", "placement_hint", "placement_region",
     ]))
+    return schema
+
+
+def task_understanding_v3_wire_schema():
+    """Lightweight v3 envelope schema for providers that support it."""
+    schema = TaskParseWireOutput.model_json_schema() if "TaskParseWireOutput" in globals() else None
+    if schema is None:
+        # The class is declared below for import-time ordering; callers invoke
+        # this after module initialization.
+        return {}
+    schema["required"] = ["turn_kind"]
     return schema
 
 
@@ -252,9 +264,20 @@ def _wire_scene_edit(value: dict[str, Any]) -> SceneEditPlan:
                          "scene_edit requires entities and operations", category="semantic_protocol")
     # Bypass only SceneEditPlan's historical entity/reference cross-field check;
     # operation/field validators have already run and are retained.
+    entity_ids = {entity.entity_id for entity in entities}
+    catalog = SceneReferenceCatalog()
+    scene_refs = []
+    for operation in operations:
+        raw_reference = operation.reference
+        if raw_reference and raw_reference not in entity_ids:
+            spec = catalog.lookup(raw_reference)
+            if spec is not None and all(ref.raw_value != raw_reference for ref in scene_refs):
+                scene_refs.append(CanonicalReference(raw_value=raw_reference,
+                    canonical_value=spec.canonical_id, scope=RefScope.SCENE_REF,
+                    kind=spec.kind))
     plan = SceneEditPlan.model_construct(
         scene_basis=value.get("scene_basis", "current"), entities=entities,
-        relations=relations, operations=operations,
+        relations=relations, operations=operations, scene_refs=scene_refs,
     )
     try:
         plan.validate_semantics(allow_unresolved_references=True)

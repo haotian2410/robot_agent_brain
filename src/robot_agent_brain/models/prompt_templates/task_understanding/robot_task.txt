@@ -1,0 +1,1 @@
+robot_task 只保留用户明确的 source、destination、target、数量、顺序、抓取/释放关系。放进容器用 placement_target.kind=container_interior；不要把 inside 误写成场景编辑。缺少门/抽屉操作参照物时返回 clarification_required；双臂没有明确对象分配时同样只返回无 payload 的澄清。

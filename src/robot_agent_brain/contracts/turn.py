@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from .task_intent import TaskIntent, TaskEntity, Direction, MotionScale
 from .spatial import SpatialRelation
 from .robot_setup import RobotSetupRequest
+from ..semantics.scene_references import CanonicalReference
 
 class TurnStatus(StrEnum):
     ACCEPTED = "accepted"
@@ -30,6 +31,24 @@ class SceneLayoutRelation(StrEnum):
     NEAR = "near"
     ON = "on"
     INSIDE = "inside"
+
+
+class SelectionRelation(BaseModel):
+    """A relation used to filter existing scene candidates."""
+    model_config = ConfigDict(extra="forbid")
+    subject: str = Field(min_length=1)
+    predicate: str = Field(min_length=1)
+    reference: str | None = None
+
+
+class PlacementGoal(BaseModel):
+    """A relation describing where an edit should place its target."""
+    model_config = ConfigDict(extra="forbid")
+    relation: Literal[
+        "on", "inside", "near", "left_of", "right_of", "front_of", "behind",
+    ]
+    reference: str = Field(min_length=1)
+    region: str | None = None
 
 
 _SCENE_LAYOUT_RELATION_ALIASES = {
@@ -167,6 +186,7 @@ class SceneEditPlan(BaseModel):
     entities: list[TaskEntity] = Field(min_length=1)
     relations: list[SpatialRelation] = Field(default_factory=list)
     operations: list[SceneEditIntent] = Field(min_length=1)
+    scene_refs: list[CanonicalReference] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_selectors(self):
@@ -242,6 +262,7 @@ class SessionControlIntent(BaseModel):
 
 class BrainTurn(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    protocol_version: Literal["task_understanding.v2", "task_understanding.v3"] = "task_understanding.v3"
     status: TurnStatus
     turn_kind: TurnKind
     instruction: str
