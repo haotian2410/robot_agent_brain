@@ -63,7 +63,7 @@ class ArtifactWriter:
                 directory = staged / "debug"
                 directory.mkdir()
                 for name, value in debug.items():
-                    if name not in {"brain_turn", "task_intent", "grounded_task", "skill_plan", "model_calls", "raw_model_response", "traceback",
+                    if name not in {"brain_turn", "task_intent", "grounded_task", "skill_plan", "model_calls", "semantic_protocol", "raw_model_response", "traceback",
                                     "planner_context", "planner_skill_catalog", "raw_skill_plan", "normalized_skill_plan", "skill_plan_validation"}:
                         raise ValueError("artifact_debug_name_invalid")
                     if isinstance(value, str):
