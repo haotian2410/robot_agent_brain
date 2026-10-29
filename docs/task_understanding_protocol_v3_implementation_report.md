@@ -86,6 +86,11 @@ b739db7 refactor(prompt): split common and route-specific semantic contracts
 
 ## 验证结果
 
+- 分阶段回归命令均在对应改动后执行：
+  - P0：`pytest -q brain_tests/test_scene_reference_protocol.py brain_tests/test_scene_bootstrap.py brain_tests/test_component_bootstrap.py brain_tests/test_pipeline_stages.py`，通过。
+  - P1：`pytest -q brain_tests/test_scene_edit_contract.py brain_tests/test_web_protocol.py brain_tests/test_qwen_http.py`，通过。
+  - P2：`pytest -q brain_tests/test_domain_policy_registry.py brain_tests/test_scene_edit_contract.py brain_tests/test_pipeline_stages.py`，通过。
+  - P3：`pytest -q brain_tests/test_semantic_protocol_corpus.py brain_tests/test_diagnostics_artifacts.py`，通过。
 - 全量 `conda run --no-capture-output -n robot_agent_integ pytest -q`：通过，退出码 `0`。
 - 场景引用、Bootstrapper、协议和 Qwen HTTP 专项测试：通过。
 - 独立 wheel 构建：成功，SHA256：
