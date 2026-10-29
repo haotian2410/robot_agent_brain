@@ -84,6 +84,9 @@ b739db7 refactor(prompt): split common and route-specific semantic contracts
 023e741  6815deb  cc2131a  ee99090  42c37ac  36f417e  7bf6d5e  0f8e161
 ```
 
+最终审计收尾提交：`5696128`、`51c0d7d`、`1688a70`；其中 `1688a70`
+确保旧 v2 provider schema 的字段形状不因内部协议版本标记而改变。
+
 ## 验证结果
 
 - 分阶段回归命令均在对应改动后执行：
