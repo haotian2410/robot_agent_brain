@@ -95,6 +95,10 @@ class ParseRelation(BaseModel):
 
 class TaskParseOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    # Responses emitted by the historical envelope are v2 unless the model
+    # explicitly opts into the canonical v3 envelope.  Keeping this marker on
+    # the adapter output makes migration metrics truthful for non-scene turns.
+    protocol_version: Literal["task_understanding.v2", "task_understanding.v3"] = "task_understanding.v2"
     arm_usage: Literal["unspecified", "both_required"] = "unspecified"
     hold_constraints: list[TaskHoldConstraint] = Field(default_factory=list)
     status: TurnStatus = TurnStatus.ACCEPTED
@@ -196,7 +200,7 @@ class TaskParseOutput(BaseModel):
     def to_brain_turn(self, instruction: str) -> BrainTurn:
         task = self.to_task_intent(instruction) if self.status == TurnStatus.ACCEPTED and self.turn_kind == TurnKind.ROBOT_TASK else None
         status = self.status
-        return BrainTurn(status=status, turn_kind=self.turn_kind, instruction=instruction,
+        return BrainTurn(protocol_version=self.protocol_version, status=status, turn_kind=self.turn_kind, instruction=instruction,
                          clarification_question=self.clarification_question,
                          task_intent=task, scene_edit=self.scene_edit, scene_query=self.scene_query,
                          session_control=self.session_control, robot_setup_request=self.robot_setup_request)
@@ -248,6 +252,12 @@ def _wire_scene_edit(value: dict[str, Any]) -> SceneEditPlan:
     if not isinstance(value, dict):
         raise BrainError("provider_output_schema_invalid", "wire_parse", "scene_edit must be an object",
                          category="provider_schema", path="scene_edit")
+    scene_basis = value.get("scene_basis", "current")
+    if scene_basis not in {"current", "original"}:
+        raise BrainError("semantic_protocol_error", "semantic_validation",
+                         f"unsupported scene_basis: {scene_basis!r}",
+                         category="semantic_protocol", path="scene_edit.scene_basis",
+                         value=scene_basis)
     try:
         entities = [_wire_entity(item) for item in value.get("entities", [])]
         relations = [SpatialRelation.model_validate(item) for item in value.get("relations", [])]
@@ -281,7 +291,7 @@ def _wire_scene_edit(value: dict[str, Any]) -> SceneEditPlan:
                     canonical_value=spec.canonical_id, scope=RefScope.SCENE_REF,
                     kind=spec.kind))
     plan = SceneEditPlan.model_construct(
-        scene_basis=value.get("scene_basis", "current"), entities=entities,
+        scene_basis=scene_basis, entities=entities,
         relations=relations, operations=operations, scene_refs=scene_refs,
     )
     try:

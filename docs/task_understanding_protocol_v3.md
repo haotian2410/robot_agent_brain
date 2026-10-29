@@ -15,7 +15,11 @@ are reported as `scene_reference_unresolved`; multiple matching scene objects
 are reported as `scene_reference_ambiguous`.
 
 The Brain keeps the original v2 prompt and replay/direct model validation for
-compatibility. Live scene-edit responses additionally record
-`protocol_version=task_understanding.v3`, parser stage, canonical references,
-and the original model response in debug diagnostics. No coordinates, IK or
-execution details are added to the semantic response.
+compatibility. Legacy `TaskParseOutput` responses are marked
+`protocol_version=task_understanding.v2` and adapted to the same canonical
+turn shape; the staged scene-edit wire path defaults to v3. Live responses
+record the parser stage, canonical references, and the original model response
+in debug diagnostics. `models.protocol_migration.compare_v2_v3` provides an
+offline shadow comparison that ignores only the envelope version and compares
+canonical semantic payloads. No coordinates, IK or execution details are added
+to the semantic response.

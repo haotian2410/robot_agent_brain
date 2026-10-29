@@ -428,6 +428,20 @@ class BrainApplication:
             report.scene_id, report.scene_version = session.scene.scene_id, session.scene.scene_version
         current_calls = getattr(self.provider,"calls",[])[calls_start:]
         planning_trace = self.pipeline.skill_planner.last_trace
+        scene_edit = turn.scene_edit if turn is not None else None
+        reference_specs = {ref.raw_value: ref for ref in (scene_edit.scene_refs if scene_edit is not None else [])}
+        protocol_references = []
+        if scene_edit is not None:
+            for operation in scene_edit.operations:
+                if operation.reference is None:
+                    continue
+                canonical = reference_specs.get(operation.reference)
+                protocol_references.append({
+                    "raw_reference": operation.reference,
+                    "canonical_reference": canonical.canonical_value if canonical else operation.reference,
+                    "reference_scope": canonical.scope.value if canonical else "entity_or_scene_object",
+                    "kind": canonical.kind if canonical else None,
+                })
         report.metrics = {"understanding_calls":understanding_calls,
                           "skill_planning_calls":planning_trace.model_calls if planning_trace else 0,
                           "planner_requested":self.config.planner,
@@ -437,7 +451,16 @@ class BrainApplication:
                           "model_calls":current_calls,
                           "protocol_version": getattr(turn, "protocol_version", "task_understanding.v2"),
                           "parser_stage": ("canonical_v3" if turn is not None and getattr(turn, "protocol_version", "").endswith(".v3")
-                                           else "legacy_v2_adapter")}
+                                           else "legacy_v2_adapter"),
+                          "semantic_protocol": {
+                              "protocol_version": getattr(turn, "protocol_version", "task_understanding.v2"),
+                              "parser_stage": ("canonical_v3" if turn is not None and getattr(turn, "protocol_version", "").endswith(".v3")
+                                                else "legacy_v2_adapter"),
+                              "turn_kind": turn.turn_kind if turn is not None else None,
+                              "scene_basis": scene_edit.scene_basis if scene_edit is not None else None,
+                              "references": protocol_references,
+                              "error_code": report.error.code if report.error is not None else None,
+                          }}
         previous_config = getattr(session, "restored_config_fingerprint", None)
         if previous_config and previous_config != self.config_fingerprint:
             report.assumptions.append("configuration_changed_since_restore: confirmed scene retained; review deployment metadata")

@@ -16,7 +16,8 @@ class TaskDomainPolicy:
         if turn.status != TurnStatus.ACCEPTED:
             return turn
         text = instruction.casefold()
-        if any(token in text for token in ("倒水", "倾倒", "pour water", "pouring water")):
+        if "pour" not in self.registry.supported_robot_actions() and any(
+                token in text for token in ("倒水", "倾倒", "pour water", "pouring water")):
             return BrainTurn(status="unsupported_task", turn_kind="unsupported_task", instruction=instruction)
         explicit_robot = (turn.robot_setup_request is not None
                           or bool(turn.task_intent and any(op.arm is not None for op in turn.task_intent.operations))

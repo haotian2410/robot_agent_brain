@@ -1,6 +1,8 @@
 import json
 from importlib.resources import files
 from ..semantics.robot_interactions import RobotInteractionLexicon
+from ..semantics.domain_policy_registry import DomainPolicyRegistry
+from ..contracts.turn import TurnKind
 
 
 def _load_prompt(filename: str) -> str:
@@ -14,8 +16,11 @@ def _load_task_understanding_v3() -> str:
     route_dir = "task_understanding"
     names = ("common.txt", "route_selection.txt", "scene_edit.txt", "scene_query.txt",
              "robot_task.txt", "session_control.txt", "output_contract.txt")
+    registry = DomainPolicyRegistry()
+    route_rules = "\n".join(registry.prompt_rules_for(route) for route in (
+        TurnKind.SCENE_EDIT, TurnKind.SCENE_QUERY, TurnKind.ROBOT_TASK))
     return "\n\n".join(files("robot_agent_brain.models.prompt_templates").joinpath(route_dir, name)
-                         .read_text(encoding="utf-8") for name in names)
+                         .read_text(encoding="utf-8") for name in names) + "\n" + route_rules
 
 
 # Keep the mature v2 examples/rules while appending the shorter v3 route

@@ -26,10 +26,12 @@ class DomainPolicyRegistry:
         return list(self.reference_catalog.specs())
 
     def prompt_rules_for(self, route):
+        relation_rules = "场景编辑规范关系：" + ", ".join(sorted(self.scene_relations))
+        action_rules = "机器人能力名称：" + ", ".join(sorted(self.robot_actions))
         if route == TurnKind.SCENE_EDIT:
-            return "场景编辑引用由 SceneReferenceCatalog 绑定；几何和能力由 Python 校验。"
+            return relation_rules + "。" + action_rules + "。场景编辑引用由 SceneReferenceCatalog 绑定；几何和能力由 Python 校验。"
         if route == TurnKind.SCENE_QUERY:
-            return "场景查询只读取当前确认快照，不产生编辑或机器人操作。"
+            return relation_rules + "。场景查询只读取当前确认快照，不产生编辑或机器人操作。"
         if route == TurnKind.ROBOT_TASK:
-            return "机器人任务在语义抽取后再由能力 registry 判定可执行性。"
+            return action_rules + "。机器人任务在语义抽取后再由能力 registry 判定可执行性。"
         return ""
