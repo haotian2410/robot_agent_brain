@@ -30,25 +30,36 @@ class SceneReferenceResolver:
     def _entity_ids(entities):
         return {getattr(entity, "entity_id", None) for entity in (entities or [])}
 
-    def _scene_candidates(self, spec, scene):
+    @staticmethod
+    def _key(value):
+        return str(value).strip().casefold().replace("-", "_")
+
+    def _scene_candidates(self, selector, spec, scene):
         if scene is None:
             return []
         index = SceneIndex(scene)
+        raw = self._key(selector)
         candidates = []
         for obj in scene.objects:
             identifier = obj.object_id_in_scene
             if index.metadata_type(identifier) == "robot":
                 continue
-            if spec.canonical_id == "table" and self.table_metadata_ref is not None:
+            semantic = index.semantic(identifier)
+            object_name = self._key(obj.object_name_in_scene or "")
+            if str(identifier) == str(selector) or object_name == raw:
+                candidates.append(identifier)
+                continue
+            if spec is not None and spec.canonical_id == "table" and self.table_metadata_ref is not None:
                 if index.metadata_ref(identifier) == self.table_metadata_ref:
                     candidates.append(identifier)
                     continue
-            semantic = index.semantic(identifier)
             if semantic is None:
                 continue
             name = str(semantic.semantic_name or "").strip().casefold().replace("-", "_")
-            if name == spec.canonical_id or (spec.canonical_id == "table" and
-                    semantic.category == "surface" and name in {"table", "work_table", "工作台", "桌子"}):
+            if spec is not None and (name == spec.canonical_id or (spec.canonical_id == "table" and
+                    semantic.category == "surface" and name in {"table", "work_table", "工作台", "桌子"})):
+                candidates.append(identifier)
+            elif spec is None and name == raw:
                 candidates.append(identifier)
         return candidates
 
@@ -61,19 +72,21 @@ class SceneReferenceResolver:
         if raw in self._entity_ids(entities):
             return ResolvedSceneReference(raw, raw, "entity", "task_entity", source="declared_entity")
         spec = self.catalog.lookup(raw)
-        if spec is None:
-            raise BrainError("scene_reference_unresolved", "reference_resolution",
-                             f"no registered scene reference matches {raw!r}",
-                             category="semantic_protocol", value=raw)
-        candidates = self._scene_candidates(spec, scene)
+        candidates = self._scene_candidates(raw, spec, scene)
         if len(candidates) > 1:
             raise BrainError("scene_reference_ambiguous", "reference_resolution",
-                             f"multiple scene objects match {spec.canonical_id!r}",
+                             f"multiple scene objects match {(spec.canonical_id if spec else raw)!r}",
                              category="semantic_protocol", value=raw,
                              candidates=candidates)
         if len(candidates) == 1:
-            return ResolvedSceneReference(raw, spec.canonical_id, "scene_ref", spec.kind,
+            canonical_id = spec.canonical_id if spec is not None else self._key(raw)
+            kind = spec.kind if spec is not None else "scene_object"
+            return ResolvedSceneReference(raw, canonical_id, "scene_ref", kind,
                                           candidates[0], source=f"{scene_basis}_scene")
+        if spec is None:
+            raise BrainError("scene_reference_unresolved", "reference_resolution",
+                             f"no registered scene reference or scene object matches {raw!r}",
+                             category="semantic_protocol", value=raw)
         if spec.allow_default and default_surface_id is not None:
             if scene is None:
                 return ResolvedSceneReference(raw, spec.canonical_id, "anchor", spec.kind,

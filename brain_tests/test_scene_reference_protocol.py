@@ -79,6 +79,29 @@ def test_unknown_scene_reference_is_not_guessed():
         raise AssertionError("unknown reference was guessed")
 
 
+def test_scene_object_name_and_id_can_resolve_without_catalog_entry():
+    scene = supported_scene()
+    scene.objects[0].object_name_in_scene = "work_surface_01"
+    resolver = SceneReferenceResolver()
+    by_name = resolver.resolve("work_surface_01", entities=[], scene=scene)
+    by_id = resolver.resolve("0", entities=[], scene=scene)
+    assert by_name.object_id == by_id.object_id == 0
+    assert by_name.scope == by_id.scope == "scene_ref"
+
+
+def test_multiple_scene_surfaces_are_ambiguous_without_explicit_reference():
+    scene = supported_scene()
+    duplicate = scene.objects[0].model_copy(deep=True)
+    duplicate.object_id_in_scene = 4
+    scene.objects.append(duplicate)
+    try:
+        SceneReferenceResolver().resolve("table", entities=[], scene=scene)
+    except Exception as exc:
+        assert "scene_reference_ambiguous" in str(exc)
+    else:
+        raise AssertionError("ambiguous table reference was silently selected")
+
+
 def test_three_add_operations_using_table_reference_produce_one_scene_patch():
     config = BrainConfig()
     assets, bootstrapper = demo_bootstrap(config)
