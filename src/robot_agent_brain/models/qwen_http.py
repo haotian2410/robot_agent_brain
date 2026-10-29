@@ -17,7 +17,7 @@ from ..contracts.task_intent import TaskIntent
 from ..errors import BrainError
 from .prompts import TASK_UNDERSTANDING_PROMPT, VISION_GROUNDING_PROMPT, SKILL_PLANNING_PROMPT, prompt_payload
 from .skill_planning import SkillPlanningRequest, SkillPlanLLMOutput
-from .task_understanding import (TaskParseOutput, TaskUnderstandingRequest, parse_qwen_turn,
+from .task_understanding import (TaskUnderstandingRequest, parse_qwen_turn,
                                   task_understanding_v3_wire_schema)
 from .vision_grounding import VisionEntity, VisionGroundingOutput
 
@@ -145,13 +145,20 @@ class QwenHTTPProvider:
             self.calls.append(record)
 
     def understand(self, request: TaskUnderstandingRequest) -> TaskIntent:
-        from .task_understanding import task_understanding_wire_schema
+        """Legacy TaskIntent adapter backed by the same v3 wire contract.
+
+        ``understand_turn`` is the canonical route-aware API.  This method is
+        retained for providers implementing the older TaskUnderstandingProvider
+        protocol, but it must not reintroduce the historical v2 prompt/schema
+        pair.  Non-robot routes are deliberately rejected because this method
+        cannot represent their payloads as TaskIntent.
+        """
         return self._call(
             "task_understanding",
             TASK_UNDERSTANDING_PROMPT,
             prompt_payload({"instruction": request.instruction}),
-            task_understanding_wire_schema(),
-            lambda value: TaskParseOutput.model_validate(value).to_task_intent(request.instruction),
+            task_understanding_v3_wire_schema(),
+            lambda value: _task_intent_from_v3(value, request.instruction),
         )
 
     def understand_turn(self, request: TaskUnderstandingRequest):
@@ -201,6 +208,14 @@ class QwenHTTPProvider:
             VisionGroundingOutput.model_json_schema(),
             VisionGroundingOutput.model_validate,
         )
+
+
+def _task_intent_from_v3(value: dict[str, Any], instruction: str) -> TaskIntent:
+    """Convert the canonical route-aware response for legacy callers."""
+    turn = parse_qwen_turn(value, instruction)
+    if turn.task_intent is None:
+        raise ValueError("task_semantic_invalid: task understanding did not return robot_task")
+    return turn.task_intent
 
 
 def _extract_json(content: str) -> dict[str, Any]:

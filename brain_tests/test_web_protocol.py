@@ -53,9 +53,10 @@ def test_typed_inventory_accepts_passive_model_driver_and_reports_model_joint():
     raw = {
         "scene_schema_version": 1, "scene_id": 1, "scene_version": 0,
         "scene_name": "passive-model", "objects": [{
-            "object_id_in_scene": 1, "object_name_in_scene": "cabinet",
-            "components": [
-                {"component_type": "MetadataRef", "properties": {"path": "$LIBRARY_SERVER/28", "type": "model"}},
+                "object_id_in_scene": 1, "object_name_in_scene": "cabinet",
+                "components": [
+                    {"component_type": "Transform", "properties": {}},
+                    {"component_type": "MetadataRef", "properties": {"path": "$LIBRARY_SERVER/28", "type": "model"}},
                 {"component_type": "RobotDriver", "properties": {
                     "role": "passive", "joint_sequence": ["cabinet0132_door01"]}},
             ],
@@ -65,6 +66,7 @@ def test_typed_inventory_accepts_passive_model_driver_and_reports_model_joint():
     with pytest.raises(ValueError, match="model_28_joint_unknown:missing_joint"):
         validate_web_scene({**raw, "objects": [{**raw["objects"][0], "components": [
             raw["objects"][0]["components"][0],
+            raw["objects"][0]["components"][1],
             {"component_type": "RobotDriver", "properties": {"role": "passive", "joint_sequence": ["missing_joint"]}},
         ]}]}, {"model:28": {"joints": ["cabinet0132_door01"]}})
 

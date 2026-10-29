@@ -82,6 +82,8 @@ def explain_issue(issue, exc, scene, assets):
         question = "“桌子右边”未说明是在桌面右侧还是桌外地面。请明确说“桌面右侧”或补充支撑面。"
     elif code == "scene_edit_support_unknown":
         question = "无法确认目标物应放在哪个支撑面上。请明确桌面、托盘或其他可靠支撑物。"
+    elif code == "scene_edit_default_surface_missing":
+        question = "当前上传的空场景没有可确认的默认支撑面，无法安全放置对象。请加载包含桌面/工作台的场景，或先明确提供可靠支撑面。"
     elif code == "scene_edit_properties_unsupported" or code == "scene_edit_property_unsupported":
         issue.message = "编辑失败：仅支持颜色属性和明确的放置位置字段，不能写入任意 properties；场景未改变。"
     elif code.startswith("unsupported_scene_layout_relation"):

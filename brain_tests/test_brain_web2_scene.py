@@ -26,19 +26,22 @@ def test_raw_digest_is_not_rewritten_by_view_defaults():
         "scene_version": 0,
         "scene_name": "minimal",
         "objects": [{
-            "object_id_in_scene": 1,
-            "object_name_in_scene": "empty",
-            "components": [{
-                "component_type": "MeshRenderer",
-                "properties": {"note": "keep", "forceOverrideColor": "#FFFFFF"},
-            }],
+                "object_id_in_scene": 1,
+                "object_name_in_scene": "empty",
+                "components": [{
+                    "component_type": "Transform",
+                    "properties": {},
+                }, {
+                    "component_type": "MeshRenderer",
+                    "properties": {"note": "keep", "forceOverrideColor": "#FFFFFF"},
+                }],
         }],
     }
     document = parse_scene_document(raw)
     assert document.raw == raw
     assert digest(document) == digest(raw)
     assert document.view.scene_sub_version == 0
-    assert document.view.objects[0].components[0].properties["note"] == "keep"
+    assert document.view.objects[0].components[1].properties["note"] == "keep"
 
 
 def test_sub_version_changes_digest_without_scene_version_change():

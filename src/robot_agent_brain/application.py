@@ -410,9 +410,20 @@ class BrainApplication:
             if self.config.debug:
                 debug["traceback"] = traceback.format_exc()
             report.error = self._issue(exc, stage)
+            # A genuinely uploaded empty scene has no Brain-owned default
+            # workspace.  Keep the low-level editor distinction for direct
+            # callers, but expose the actionable Web/CLI contract to users:
+            # this is missing default surface data, not an unresolved object
+            # name that can be fixed by guessing a table.
+            if (report.error.code == "scene_edit_reference_missing"
+                    and session.scene is not None and not session.scene.objects):
+                report.error = report.error.model_copy(update={
+                    "code": "scene_edit_default_surface_missing",
+                    "message": "scene_edit_default_surface_missing",
+                })
             from .scene.user_feedback import explain_issue
             explain_issue(report.error, exc, session.scene, self.assets)
-            report.run_status = "blocked" if report.error.code.startswith(("scene_required", "grounding_", "bootstrap_", "asset_", "holding_", "plan_", "capability_", "dialogue_", "motion_", "execution_pending", "session_paused", "scene_sync_", "scene_reference_", "semantic_protocol")) else "failed"
+            report.run_status = "blocked" if report.error.code.startswith(("scene_required", "grounding_", "bootstrap_", "asset_", "holding_", "plan_", "capability_", "dialogue_", "motion_", "execution_pending", "session_paused", "scene_sync_", "scene_reference_", "scene_edit_default_surface_missing", "semantic_protocol")) else "failed"
             if report.error.code.startswith("scene_scale_") or report.error.code == "scene_edit_color_unknown":
                 report.run_status = "blocked"
             if report.error.code == "scene_edit_color_unknown":

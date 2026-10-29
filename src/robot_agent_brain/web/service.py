@@ -130,27 +130,118 @@ class AgentService:
         return scene
 
     def activate(self, request):
-        # No checkpoint writes or browser writes on activation. Live validation
-        # occurs in the task worker; a restarted uncertain binding stays blocked.
-        identifier = self.tasks.activate(request.browserID, request.sessionID,
-                                         allow_active_task=request.allowActiveTask)
-        if request.camera_id is not None:
-            self.camera_bindings[identifier] = request.camera_id
-        session = self._bind(identifier)
+        # Validate the requested scene/profile before changing the active binding.
+        # An invalid upload or camera request must not deactivate the current
+        # conversation and strand the browser without a recoverable session.
         from .camera_policy import choose_camera
-        camera_scene = validate_web_scene(request.scene) if request.scene is not None else session.scene
-        automatic_camera, camera_reason = choose_camera(camera_scene)
-        if request.camera_id is None and camera_scene is not None:
-            session.camera_id = automatic_camera
-            self.camera_bindings[identifier] = automatic_camera
-            session.platform.camera_id = automatic_camera
-            session.platform.original_camera_id = automatic_camera
-            self.app._save_session(identifier)
-        if request.camera_id is not None:
-            if session.camera_id is not None and session.camera_id != request.camera_id:
+        previous_active = [item for item in self.tasks.sessions() if item["active"]]
+        previous_binding = dict(self.binding) if isinstance(self.binding, dict) else self.binding
+        new_session = request.sessionID is None
+        existing = None
+        previous_session_camera = None
+        previous_platform_camera = None
+        previous_platform_original_camera = None
+        candidate = None
+        camera_scene = None
+        automatic_camera, camera_reason = None, "scene_not_available"
+        try:
+            # Inspect ownership before _bind(), because _bind() updates the
+            # process-local platform binding.  A foreign browser must not be
+            # able to alter that pointer even when activation is rejected.
+            if request.sessionID is not None:
+                binding = self.tasks.binding(request.sessionID)
+                if binding["browser"] != request.browserID:
+                    raise ValueError("session_browser_not_active")
+                if binding["uncertain"]:
+                    raise ValueError("session_reconciliation_required")
+                existing = self._bind(request.sessionID)
+                previous_session_camera = getattr(existing, "camera_id", None)
+                previous_platform_camera = getattr(existing.platform, "camera_id", None)
+                previous_platform_original_camera = getattr(existing.platform, "original_camera_id", None)
+            candidate = self.validate_scene(request.scene, existing) if request.scene is not None else None
+            camera_scene = candidate if candidate is not None else (existing.scene if existing is not None else None)
+            automatic_camera, camera_reason = choose_camera(camera_scene) if camera_scene is not None else (None, "scene_not_available")
+            if request.camera_id is not None and camera_scene is not None:
+                if SceneIndex(camera_scene).component(request.camera_id, "Camera") is None:
+                    raise ValueError("camera_binding_invalid")
+            if (request.camera_id is not None and existing is not None
+                    and existing.camera_id is not None and existing.camera_id != request.camera_id):
                 raise ValueError("camera_binding_immutable")
-            session.camera_id = request.camera_id
-            self.app._save_session(identifier)
+        except Exception:
+            # No TaskStore mutation has happened yet, but _bind() may have
+            # changed the service's process-local pointer.
+            self.binding = previous_binding
+            raise
+
+        # Live validation still repeats in the worker; a restarted uncertain
+        # binding stays blocked. TaskStore.activate performs the final CAS.
+        camera_sentinel = object()
+        previous_camera = self.camera_bindings.get(request.sessionID, camera_sentinel)
+        try:
+            identifier = self.tasks.activate(request.browserID, request.sessionID,
+                                             allow_active_task=request.allowActiveTask)
+        except Exception:
+            # The preflight bind is intentionally read-only from the database's
+            # point of view, but it updates the process-local platform pointer.
+            # Restore it when the final CAS rejects (for example task_busy), so
+            # a failed switch cannot make the worker address the wrong session.
+            self.binding = previous_binding
+            raise
+        try:
+            if request.camera_id is not None:
+                self.camera_bindings[identifier] = request.camera_id
+            session = existing if existing is not None else self._bind(identifier)
+            if existing is not None and getattr(session, "platform", None) is None:
+                session = self._bind(identifier)
+        except Exception:
+            self.binding = previous_binding
+            if existing is not None:
+                existing.camera_id = previous_session_camera
+                existing.platform.camera_id = previous_platform_camera
+                existing.platform.original_camera_id = previous_platform_original_camera
+            if previous_camera is camera_sentinel:
+                self.camera_bindings.pop(identifier, None)
+            else:
+                self.camera_bindings[identifier] = previous_camera
+            self.tasks.rollback_activation(identifier, previous_active,
+                                           remove_new=new_session)
+            if new_session:
+                # _bind() creates an in-memory BrainSession before the first
+                # checkpoint.  If activation later fails, remove that cache
+                # too; otherwise a future request could resurrect a deleted
+                # TaskStore row from this half-created session.
+                self.app.sessions.pop(identifier, None)
+                self.app.revisions.pop(identifier, None)
+            raise
+        try:
+            if candidate is None:
+                camera_scene = session.scene
+                automatic_camera, camera_reason = choose_camera(camera_scene) if camera_scene is not None else (None, "scene_not_available")
+            if request.camera_id is None and camera_scene is not None:
+                session.camera_id = automatic_camera
+                self.camera_bindings[identifier] = automatic_camera
+                session.platform.camera_id = automatic_camera
+                session.platform.original_camera_id = automatic_camera
+                self.app._save_session(identifier)
+            if request.camera_id is not None:
+                session.camera_id = request.camera_id
+                self.app._save_session(identifier)
+        except Exception:
+            self.binding = previous_binding
+            if existing is not None:
+                existing.camera_id = previous_session_camera
+                existing.platform.camera_id = previous_platform_camera
+                existing.platform.original_camera_id = previous_platform_original_camera
+            if previous_camera is camera_sentinel:
+                self.camera_bindings.pop(identifier, None)
+            else:
+                self.camera_bindings[identifier] = previous_camera
+            self.tasks.rollback_activation(identifier, previous_active,
+                                           remove_new=new_session)
+            if new_session:
+                self.app.sessions.pop(identifier, None)
+                self.app.revisions.pop(identifier, None)
+            raise
         return {"sessionID":identifier,"browserID":request.browserID,
                 "camera_id":getattr(session, "camera_id", None),
                 "camera_selection_reason":camera_reason if request.camera_id is None else "explicit_configuration",
@@ -585,13 +676,19 @@ def create_http_app(service):
         count = int(request.query.get("count", "1"))
         if count < 1 or count > 10000:
             raise ValueError("gateway_object_allocator_invalid")
-        binding = service.tasks.binding(request.query.get("browser_id", ""))
-        if not binding["active"]:
+        browser_id = request.query.get("browserID") or request.query.get("browser_id")
+        if not browser_id:
+            raise ValueError("session_context_required")
+        sessions = [item for item in service.tasks.sessions()
+                    if item["active"] and item["browser"] == browser_id]
+        if len(sessions) != 1:
             raise ValueError("session_browser_not_active")
+        binding = sessions[0]
+        if binding["uncertain"]:
+            raise ValueError("session_reconciliation_required")
         # Brain's local allocator is monotonic; Gateway remains the final
         # authority in the real deployment and may return a larger range.
-        session = service.app.get_session(next(s["id"] for s in service.tasks.sessions()
-                                               if s["browser"] == binding["browser"]))
+        session = service.app.get_session(binding["id"])
         start = max(session.next_scene_object_id, 0)
         if start + count > 2**32 - 1:
             raise ValueError("object_id_space_exhausted")

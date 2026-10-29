@@ -51,7 +51,11 @@ class OriginalSceneStore:
                 raise ValueError("snapshot_hash_mismatch")
             if expected is not None and manifest != expected:
                 raise ValueError("snapshot_manifest_mismatch")
-            scene = parse_scene_document(json.loads(scene_bytes), uint32=False).view
+            document = parse_scene_document(json.loads(scene_bytes), uint32=False)
+            if document.rejected_objects:
+                reasons = ",".join(sorted({str(item.get("reason", "unknown")) for item in document.rejected_objects}))
+                raise ValueError("scene_object_rejected:" + reasons)
+            scene = document.view
             ids = {o.object_id_in_scene for o in scene.objects}
             tasks, platform = set(manifest.task_object_ids), set(manifest.platform_object_ids)
             if tasks & platform or tasks | platform != ids:
@@ -80,7 +84,11 @@ class OriginalSceneStore:
             raise ValueError("snapshot_prepare_hash_mismatch")
         if expected is not None and manifest != expected:
             raise ValueError("snapshot_manifest_mismatch")
-        scene = parse_scene_document(json.loads(scene_bytes), uint32=False).view
+        document = parse_scene_document(json.loads(scene_bytes), uint32=False)
+        if document.rejected_objects:
+            reasons = ",".join(sorted({str(item.get("reason", "unknown")) for item in document.rejected_objects}))
+            raise ValueError("scene_object_rejected:" + reasons)
+        scene = document.view
         ids = {o.object_id_in_scene for o in scene.objects}
         tasks, platform = set(manifest.task_object_ids), set(manifest.platform_object_ids)
         if tasks & platform or tasks | platform != ids:

@@ -292,44 +292,48 @@ def parse_scene_document(value, *, uint32=True):
     if type(value.get("scene_schema_version")) is not int or value.get("scene_schema_version") != 1:
         raise ValueError("scene_schema_unsupported")
     raw = copy.deepcopy(value)
+    for field in ("scene_id", "scene_version", "scene_sub_version"):
+        if field not in raw:
+            continue
+        item = raw[field]
+        if type(item) is not int or item < 0 or item >= (2**32 if uint32 else 2**53):
+            raise ValueError(f"scene_{field}_invalid")
+    if "scene_name" in raw and not isinstance(raw["scene_name"], str):
+        raise ValueError("scene_name_invalid")
     objects_raw = raw.get("objects", [])
     if not isinstance(objects_raw, list):
-        objects_raw = []
+        raise ValueError("scene_objects_invalid")
     limit = 2**32 if uint32 else 2**53
     rejected, warnings, accepted = [], [], []
     id_to_index, id_to_obj = {}, {}
     for index, item in enumerate(objects_raw):
         if not isinstance(item, dict):
-            rejected.append({"index": index, "reason": "object_invalid"})
-            continue
+            raise ValueError(f"scene_object_invalid:{index}")
         identifier = item.get("object_id_in_scene")
-        if type(identifier) is not int or not 0 <= identifier < limit or identifier in id_to_obj:
-            rejected.append({"index": index, "reason": "object_id_invalid"})
-            continue
+        if type(identifier) is not int or not 0 <= identifier < limit:
+            raise ValueError(f"scene_object_id_invalid:{index}")
+        if identifier in id_to_obj:
+            raise ValueError(f"scene_object_duplicate:{identifier}")
         id_to_index[identifier] = index
         id_to_obj[identifier] = item
     def components_for(item):
         values = item.get("components", [])
         if not isinstance(values, list):
-            warnings.append("components_not_array")
-            values = []
+            raise ValueError(f"scene_components_invalid:{item.get('object_id_in_scene')}")
         seen, components = set(), []
         for component in values:
             if not isinstance(component, dict) or not isinstance(component.get("component_type"), str):
-                warnings.append("component_invalid")
-                continue
+                raise ValueError(f"scene_component_invalid:{item.get('object_id_in_scene')}")
             name = component["component_type"]
             if name in seen:
-                warnings.append(f"component_duplicate:{name}")
-                continue
+                raise ValueError(f"scene_component_duplicate:{name}")
             seen.add(name)
             properties = component.get("properties", {})
-            components.append({"component_type": name, "properties": copy.deepcopy(properties) if isinstance(properties, dict) else {}})
+            if not isinstance(properties, dict):
+                raise ValueError(f"scene_component_properties_invalid:{name}")
+            components.append({"component_type": name, "properties": copy.deepcopy(properties)})
         if "Transform" not in seen:
-            warnings.append("transform_missing")
-            components.append({"component_type": "Transform", "properties": {
-                "position": [0.0, 0.0, 0.0], "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
-                "scale": [1.0, 1.0, 1.0], "parent": None}})
+            raise ValueError(f"scene_transform_missing:{item.get('object_id_in_scene')}")
         return components
     normalized = {}
     for identifier, item in id_to_obj.items():
@@ -376,8 +380,19 @@ def parse_scene_document(value, *, uint32=True):
     for identifier, item in normalized.items():
         if identifier in invalid_ids:
             continue
-        components = [SceneComponent.model_construct(component_type=c["component_type"], properties=c["properties"])
-                      for c in item["components"]]
+        # Validate known property keys while retaining unknown properties in
+        # the lossless raw/view bridge.  A model_construct without this check
+        # would silently accept malformed Transform, Camera, or RobotDriver
+        # values; validating the complete strict model would instead discard
+        # legitimate forward-compatible renderer fields.
+        components = []
+        for component in item["components"]:
+            name, properties = component["component_type"], component["properties"]
+            model = COMPONENT_PROPERTIES.get(name)
+            if model is not None:
+                model.model_validate({key: value for key, value in properties.items()
+                                      if key in model.model_fields})
+            components.append(SceneComponent.model_construct(component_type=name, properties=properties))
         accepted.append(SceneObject.model_construct(object_id_in_scene=identifier,
             object_name_in_scene=item["object_name_in_scene"], components=components))
     scene = SceneConfig.model_construct(

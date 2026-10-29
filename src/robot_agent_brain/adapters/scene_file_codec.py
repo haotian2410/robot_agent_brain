@@ -23,6 +23,9 @@ class SceneFileCodec:
             raise BrainError("scene_schema_unsupported", "scene_import", "Expected shared component Scene version 1")
         try:
             document = parse_scene_document(data, uint32=False)
+            if document.rejected_objects:
+                reasons = ",".join(sorted({str(item.get("reason", "unknown")) for item in document.rejected_objects}))
+                raise ValueError("scene_object_rejected:" + reasons)
             scene = document.view
         except (ValidationError, LookupError, ValueError) as exc:
             raise BrainError("scene_file_invalid", "scene_import", str(exc)) from exc

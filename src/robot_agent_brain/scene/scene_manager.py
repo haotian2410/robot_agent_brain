@@ -12,7 +12,11 @@ class SceneManager:
         if hasattr(scene, "model_dump"):
             source = dict(source)
             source["objects"] = scene.model_dump(mode="json").get("objects", [])
-        self.scene = parse_scene_document(source, uint32=False).view
+        document = parse_scene_document(source, uint32=False)
+        if document.rejected_objects:
+            reasons = ",".join(sorted({str(item.get("reason", "unknown")) for item in document.rejected_objects}))
+            raise ValueError("scene_object_rejected:" + reasons)
+        self.scene = document.view
         current = {o.object_id_in_scene for o in self.scene.objects}
         history = set(seen_scene_object_ids or ())
         if any(type(value) is not int or not 0 <= value < 2**53 for value in history):
@@ -100,7 +104,11 @@ class SceneManager:
         # absent key -- the browser drops it in toJSON().  Materialising "scene_sub_version": 0 here
         # would make the committed digest disagree with the world read back after the commit.
         payload.pop("scene_sub_version", None)
-        candidate = parse_scene_document(payload, uint32=False).view
+        document = parse_scene_document(payload, uint32=False)
+        if document.rejected_objects:
+            reasons = ",".join(sorted({str(item.get("reason", "unknown")) for item in document.rejected_objects}))
+            raise ValueError("scene_object_rejected:" + reasons)
+        candidate = document.view
         self.scene = candidate
         self.seen_scene_object_ids = seen
         self.next_scene_object_id = max(self.next_scene_object_id, max(seen, default=-1) + 1)

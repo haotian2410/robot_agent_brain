@@ -47,20 +47,44 @@ class TaskStore:
 
     def activate(self, browser, session=None, *, allow_active_task=False):
         with self.lock, self.db:
-            if self.busy() and not allow_active_task:
-                raise ValueError("task_busy")
             if session is not None:
                 row = self.db.execute("SELECT * FROM sessions WHERE id=?", (session,)).fetchone()
                 if row is None:
                     raise ValueError("session_not_found")
                 if row["uncertain"]:
                     raise ValueError("session_reconciliation_required")
+                # A session is bound to the browser that created it.  Switching
+                # sessions in the same browser is allowed, but a different
+                # browser must not silently take over an existing conversation.
+                if row["browser"] != browser:
+                    raise ValueError("session_browser_not_active")
+                if (not allow_active_task and self.db.execute(
+                        "SELECT 1 FROM tasks WHERE terminal=0 AND session=? LIMIT 1", (session,)
+                    ).fetchone() is not None):
+                    raise ValueError("task_busy")
             else:
                 session = uuid.uuid4().hex
                 self.db.execute("INSERT INTO sessions(id,browser) VALUES (?,?)", (session,browser))
             self.db.execute("UPDATE sessions SET active=0")
             self.db.execute("UPDATE sessions SET active=1,browser=? WHERE id=?", (browser, session))
         return session
+
+    def rollback_activation(self, session, previous_active, *, remove_new=False):
+        """Restore the active binding after a post-activation validation failure.
+
+        Activation normally runs under the AgentService mutex, but `_bind` and
+        checkpoint persistence can still fail after the database transaction.
+        Keeping this small compensating transaction here prevents an invalid
+        session request from stranding the browser on a half-created session.
+        """
+        with self.lock, self.db:
+            self.db.execute("UPDATE sessions SET active=0 WHERE active=1")
+            for row in previous_active:
+                self.db.execute("UPDATE sessions SET active=1,browser=? WHERE id=?",
+                                (row["browser"], row["id"]))
+            if remove_new:
+                self.db.execute("DELETE FROM sessions WHERE id=? AND NOT EXISTS "
+                                "(SELECT 1 FROM tasks WHERE session=?)", (session, session))
 
     def binding(self, session):
         with self.lock:

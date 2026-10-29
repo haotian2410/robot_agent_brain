@@ -64,6 +64,60 @@ def test_loaded_empty_robot_never_generates_objects(tmp_path):
     assert "commands" not in report.artifacts
 
 
+def test_uploaded_true_empty_scene_edit_explains_missing_default_surface(tmp_path):
+    """An uploaded empty document is not silently given a guessed table."""
+    path = tmp_path / "empty-edit.json"
+    path.write_text(SceneConfig(scene_schema_version=1, scene_version=1,
+                                scene_id=0, scene_name="empty", objects=[]).model_dump_json(),
+                    encoding="utf-8")
+    provider = Provider(BrainTurn(
+        status="accepted", turn_kind="scene_edit", instruction="增加苹果",
+        scene_edit=SceneEditPlan(
+            entities=[dict(entity_id="apple", semantic_name="apple", category="fruit")],
+            operations=[SceneEditIntent(operation="add", target="apple")],
+        ),
+    ))
+    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path / "out")),
+                           provider=provider)
+    report = app.handle("增加苹果", scene_path=path)
+    assert report.run_status == "blocked"
+    assert report.error.code == "scene_edit_default_surface_missing"
+    assert "默认支撑面" in report.reply
+    assert report.scene_version == 1
+    assert report.scene_commit_status == "committed"
+    assert path.read_bytes() == SceneConfig(scene_schema_version=1, scene_version=1,
+                                            scene_id=0, scene_name="empty", objects=[]).model_dump_json().encode()
+    assert "commands" not in report.artifacts
+
+
+def test_first_turn_empty_scene_edit_bootstraps_three_unrelated_objects(tmp_path):
+    """Null relation/reference means Python bootstraps the platform, then adds all three objects."""
+    provider = Provider(BrainTurn(
+        status="accepted", turn_kind="scene_edit",
+        instruction="同时在空场景放篮子、苹果、香蕉",
+        scene_edit=SceneEditPlan(
+            entities=[
+                dict(entity_id="basket", semantic_name="basket", category="container"),
+                dict(entity_id="apple", semantic_name="apple", category="fruit"),
+                dict(entity_id="banana", semantic_name="banana", category="fruit"),
+            ],
+            operations=[
+                SceneEditIntent(operation="add", target="basket"),
+                SceneEditIntent(operation="add", target="apple"),
+                SceneEditIntent(operation="add", target="banana"),
+            ],
+        ),
+    ))
+    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path / "out")),
+                           provider=provider)
+    report = app.handle("同时在空场景放篮子、苹果、香蕉")
+    assert report.run_status == "success", report.reply
+    scene = SceneConfig.model_validate_json(Path(report.artifacts["scene_config"]).read_text(encoding="utf-8"))
+    names = [obj.object_name_in_scene for obj in scene.objects]
+    assert names.count("basket") == names.count("apple") == names.count("banana") == 1
+    assert {"table", "ur5e"}.issubset(names)
+
+
 def test_platform_commit_survives_publication_failure(tmp_path, monkeypatch):
     provider = Provider(BrainTurn(status="accepted", turn_kind="scene_edit", instruction="add",
                                   scene_edit=SceneEditPlan(entities=[dict(entity_id="target", semantic_name='apple', category='fruit', count=1, quantity_mode='single')], operations=[SceneEditIntent(operation='add', target="target")])))

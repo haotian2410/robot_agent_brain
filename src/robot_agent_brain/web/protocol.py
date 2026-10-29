@@ -68,6 +68,10 @@ def validate_web_scene(scene, joint_inventory=None, reference_registry=None):
         scene = document.view
         if document.rejected_objects:
             scene._rejected_objects = document.rejected_objects
+    rejected = getattr(scene, "_rejected_objects", [])
+    if rejected:
+        reasons = ",".join(sorted({str(item.get("reason", "unknown")) for item in rejected}))
+        raise ValueError("scene_object_rejected:" + reasons)
     if any(x > 2**32-1 for x in [scene.scene_id, scene.scene_version, scene.scene_sub_version,
                                   *[o.object_id_in_scene for o in scene.objects]]):
         raise ValueError("web_uint32_required")
