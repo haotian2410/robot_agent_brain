@@ -2,7 +2,7 @@ import json
 import uuid
 from pathlib import Path
 from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from .adapters.artifact_writer import ArtifactWriter
 
 
@@ -31,6 +31,13 @@ class BatchSession(BaseModel):
     name: str | None = None
     scene: str | None = None
     instructions: list[str] = Field(min_length=1)
+
+    @field_validator("instructions")
+    @classmethod
+    def instructions_must_be_nonempty(cls, value):
+        if any(not isinstance(item, str) or not item.strip() for item in value):
+            raise ValueError("batch_instruction_required")
+        return value
 
 
 def load_batch_input(path):

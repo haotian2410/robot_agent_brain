@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import struct
 import time
 import uuid
 from pathlib import Path
@@ -173,7 +174,10 @@ class ServiceBatchRunner:
     def _capture(self, browser_id, world, destination, camera_id):
         kind = "rgb"
         for obj in world.get("objects", []):
-            if obj.get("object_id_in_scene") != camera_id:
+            # Session responses and browser JSON may represent the same uint32 id
+            # as either a number or a string.  Compare by its canonical text form
+            # so an rgbd camera is not accidentally requested as rgb.
+            if str(obj.get("object_id_in_scene")) != str(camera_id):
                 continue
             for component in obj.get("components", []):
                 if component.get("component_type") == "Camera":
@@ -183,16 +187,34 @@ class ServiceBatchRunner:
         params = {"id": camera_id, "type": kind, "browser_id": browser_id}
         response = self._request("GET", self.gateway_url + "/captureScene", params=params)
         value = response.json()
-        if value.get("sceneDigest") != digest(world):
+        expected_identity = self._identity(world)
+        if (value.get("scene_id") != expected_identity["scene_id"]
+                or value.get("scene_version") != expected_identity["scene_version"]
+                or value.get("scene_sub_version", 0) != expected_identity["scene_sub_version"]
+                or value.get("sceneDigest") != expected_identity["sceneDigest"]):
             raise RuntimeError("batch_screenshot_scene_digest_mismatch")
+        # The browser frame names the camera as ``id`` (the Gateway request uses
+        # ``?id=``); the Agent-facing session records call the same value
+        # ``camera_id``.  Accept the wire spelling only, rather than requiring
+        # a field the capture contract does not promise.
+        if str(value.get("id")) != str(camera_id):
+            raise RuntimeError("batch_screenshot_camera_mismatch")
+        if value.get("image_encoding") != "png":
+            raise RuntimeError("batch_screenshot_invalid_encoding")
         encoded = value.get("image_base64")
         if not isinstance(encoded, str):
             raise RuntimeError("batch_screenshot_missing_png")
         raw = base64.b64decode(encoded, validate=True)
-        if not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        if (not raw.startswith(b"\x89PNG\r\n\x1a\n") or len(raw) < 24
+                or raw[12:16] != b"IHDR"):
             raise RuntimeError("batch_screenshot_invalid_png")
+        width, height = struct.unpack(">II", raw[16:24])
+        if (value.get("width"), value.get("height")) != (width, height):
+            raise RuntimeError("batch_screenshot_dimensions_mismatch")
         destination.write_bytes(raw)
         return {"status": "captured", "camera_id": camera_id, "type": kind,
+                "scene_id": value.get("scene_id"), "scene_version": value.get("scene_version"),
+                "scene_sub_version": value.get("scene_sub_version", 0),
                 "sceneDigest": value.get("sceneDigest"), "width": value.get("width"),
                 "height": value.get("height"), "encoding": value.get("image_encoding")}
 
@@ -224,28 +246,62 @@ class ServiceBatchRunner:
         root.mkdir(parents=True, exist_ok=False)
         (root / "input.json").write_text(Path(input_path).resolve().read_text(encoding="utf-8"), encoding="utf-8")
         results, session_summaries = [], []
+        output_names = set()
         for index, session_spec in enumerate(loaded["sessions"], 1):
             name = session_spec.name or f"session-{index:03d}"
             session_id = "batch-" + _safe(name, f"session-{index:03d}") + "-" + uuid.uuid4().hex[:12]
-            session_root = root / "sessions" / _safe(name, f"session-{index:03d}")
+            output_name = _safe(name, f"session-{index:03d}")
+            # Different user-facing names can sanitize to the same directory (for
+            # example ``a/b`` and ``a-b``). Keep every session's artifacts isolated
+            # instead of allowing the second run to overwrite the first one.
+            if output_name in output_names:
+                suffix = f"-{index:03d}"
+                output_name = (output_name[:80 - len(suffix)] + suffix).strip("-")
+            output_names.add(output_name)
+            session_root = root / "sessions" / output_name
             turns_root = session_root / "turns"
             turns_root.mkdir(parents=True, exist_ok=True)
             failed = False
-            session_record = {"name": name, "sessionID": session_id, "scene": session_spec.scene,
+            session_record = {"name": name, "outputName": output_name, "sessionID": session_id, "scene": session_spec.scene,
                               "browserID": browser_id, "turns": len(session_spec.instructions)}
             (session_root / "session.json").write_text(json.dumps(session_record, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            def write_session_summary(status, error=None):
+                rows = [item for item in results if item.get("session") == name]
+                value = {"name": name, "outputName": output_name,
+                         "sessionID": session_record.get("sessionID"),
+                         "browserID": browser_id, "status": status, "turns": rows}
+                if error is not None:
+                    value["error"] = error
+                (session_root / "session_summary.json").write_text(
+                    json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+                return value
+
             try:
+                # Establish the Gateway/Brain session before touching the browser world.  The
+                # browser is a shared live surface, while a batch session owns its own frozen
+                # original and conversation.  Loading the next session's scene first would
+                # mutate the previous session's setup snapshot and, on a real Gateway, could be
+                # rejected as a scene switch belonging to the old conversation.  Passing the
+                # intended document to /sessions lets the Gateway perform the transition while
+                # the current session is still in setup; the subsequent updateWorld is then
+                # scoped to the newly activated session.
                 if session_spec.scene:
                     scene_path = (Path(input_path).resolve().parent / session_spec.scene).resolve()
                     if not scene_path.is_file():
                         raise FileNotFoundError(str(scene_path))
-                    world = self._load_preset(scene_path, browser_id)
+                    requested_world = json.loads(scene_path.read_text(encoding="utf-8"))
                 else:
-                    world = self._load_empty(browser_id)
-                activation = self._activate(browser_id, world)
+                    requested_world = {"scene_schema_version": 1, "scene_version": 1,
+                                       "scene_id": 0, "scene_name": "empty", "objects": []}
+                activation = self._activate(browser_id, requested_world)
                 session_id = activation["sessionID"]
                 session_record["sessionID"] = session_id
                 (session_root / "session.json").write_text(json.dumps(session_record, ensure_ascii=False, indent=2), encoding="utf-8")
+                # Only after activation may the shared browser be changed.  This is also the
+                # point at which the Gateway assigns its authoritative scene version/digest.
+                world = (self._load_preset(scene_path, browser_id)
+                         if session_spec.scene else self._load_empty(browser_id))
                 camera_id = activation.get("camera_id")
                 (session_root / "original_scene.json").write_text(json.dumps(world, ensure_ascii=False, indent=2), encoding="utf-8")
                 for turn_index, instruction in enumerate(session_spec.instructions, 1):
@@ -254,7 +310,29 @@ class ServiceBatchRunner:
                     (turn_root / "instruction.txt").write_text(instruction, encoding="utf-8")
                     if failed:
                         result = {"status": "skipped", "reason": "session dependency failed"}
+                        # A skipped turn is still a turn in the user-authored sequence.  Keep the
+                        # same scene/screenshot evidence shape as executed turns so a report can
+                        # distinguish "not attempted because the session failed" from "no
+                        # evidence was collected" and never imply that the scene was changed.
                         (turn_root / "task_result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+                        (turn_root / "reply.txt").write_text("", encoding="utf-8")
+                        try:
+                            current = self._world(browser_id)
+                            identity = self._identity(current)
+                            (turn_root / "scene.json").write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
+                            (turn_root / "scene_identity.json").write_text(json.dumps(identity, ensure_ascii=False, indent=2), encoding="utf-8")
+                            screenshot = {"status": "blocked", "reason": "session_dependency_failed"}
+                            if camera_id is not None:
+                                try:
+                                    screenshot = self._capture(browser_id, current, turn_root / "screenshot.png", camera_id)
+                                except Exception as exc:
+                                    screenshot = {"status": "blocked", "reason": str(exc)}
+                            (turn_root / "screenshot_metadata.json").write_text(
+                                json.dumps(screenshot, ensure_ascii=False, indent=2), encoding="utf-8")
+                        except Exception as exc:
+                            (turn_root / "scene_identity.json").write_text(
+                                json.dumps({"status": "blocked", "reason": str(exc)}, ensure_ascii=False, indent=2),
+                                encoding="utf-8")
                         results.append({"session": name, "turn": turn_index, **result})
                         continue
                     try:
@@ -313,10 +391,15 @@ class ServiceBatchRunner:
                         results.append(row)
             except Exception as exc:
                 failed = True
-                session_summaries.append({"session": name, "status": "failed", "error": str(exc)})
                 results.append({"session": name, "turn": 0, "status": "failed", "error": str(exc)})
+                write_session_summary("failed", str(exc))
+                session_summaries.append({"session": name, "sessionID": session_record.get("sessionID"),
+                                          "status": "failed", "error": str(exc)})
                 continue
-            session_summaries.append({"session": name, "status": "failed" if failed else "passed"})
+            session_status = "failed" if failed else "passed"
+            write_session_summary(session_status)
+            session_summaries.append({"session": name, "sessionID": session_record.get("sessionID"),
+                                      "status": session_status})
         summary = {"transport": "service", "browserID": browser_id, "health": health,
                    "sessions": session_summaries, "turns": results,
                    "totals": {status: sum(item.get("status") == status for item in results)

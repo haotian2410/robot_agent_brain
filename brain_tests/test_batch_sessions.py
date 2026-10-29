@@ -42,3 +42,14 @@ def test_simple_sessions_auto_names_and_duplicate_names(tmp_path):
         assert str(exc) == "batch_duplicate_session_name"
     else:
         raise AssertionError("duplicate session names must be rejected")
+
+
+def test_simple_sessions_reject_blank_instruction(tmp_path):
+    cases = tmp_path / "sessions.json"
+    cases.write_text(json.dumps({"sessions": [{"instructions": ["  "]}]}), encoding="utf-8")
+    try:
+        load_batch_input(cases)
+    except ValueError as exc:
+        assert "batch_instruction_required" in str(exc)
+    else:
+        raise AssertionError("blank instructions must be rejected")
