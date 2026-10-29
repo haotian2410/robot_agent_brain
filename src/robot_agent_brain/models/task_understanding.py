@@ -16,6 +16,10 @@ from ..semantics.scene_references import CanonicalReference, RefScope, SceneRefe
 def task_understanding_wire_schema():
     """Require explicit new semantic choices from live models, not old Replay."""
     schema = TaskParseOutput.model_json_schema()
+    # Keep the historical v2 provider envelope unchanged.  The adapter field
+    # is internal metadata for the canonical turn and is carried only by the
+    # v3 wire schema; Python still defaults legacy responses to v2.
+    schema["properties"].pop("protocol_version", None)
     # A live constrained decoder must explicitly choose each payload/null. If
     # optional, it can finish a scene_query without ever emitting scene_query.
     # Replay/Python defaults remain backward compatible; runtime validation stays strict.
