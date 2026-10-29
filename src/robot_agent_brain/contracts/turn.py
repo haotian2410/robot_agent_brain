@@ -77,6 +77,7 @@ class SceneEditIntent(BaseModel):
         "left_front", "right_front", "left_back", "right_back",
     ] | None = None
     target: str = Field(min_length=1)
+    placement_goal: PlacementGoal | None = None
     relation: SceneLayoutRelation | None = None
     reference: str | None = None
     properties: dict[str, str | float | bool] = Field(default_factory=dict)
@@ -112,6 +113,38 @@ class SceneEditIntent(BaseModel):
             new_props = dict(props)
             new_props.pop("position_hint", None)
             values["properties"] = new_props
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_placement_goal(cls, values):
+        """Flatten the canonical placement goal into the legacy edit fields.
+
+        The public v3 shape keeps selection relations and placement goals
+        separate, while the existing editor continues to consume the stable
+        ``relation/reference`` fields.  Both representations are accepted,
+        but conflicting values are rejected deterministically.
+        """
+        if not isinstance(values, dict) or values.get("placement_goal") is None:
+            return values
+        goal = values["placement_goal"]
+        if isinstance(goal, PlacementGoal):
+            goal = goal.model_dump(mode="json")
+        if not isinstance(goal, dict):
+            return values
+        values = dict(values)
+        relation = values.get("relation")
+        reference = values.get("reference")
+        if relation is not None and relation != goal.get("relation"):
+            raise ValueError("scene_edit_placement_goal_conflict")
+        if reference is not None and reference != goal.get("reference"):
+            raise ValueError("scene_edit_placement_goal_conflict")
+        values["relation"] = goal.get("relation")
+        values["reference"] = goal.get("reference")
+        if goal.get("region") is not None:
+            if values.get("placement_region") not in (None, goal["region"]):
+                raise ValueError("scene_edit_placement_goal_conflict")
+            values["placement_region"] = goal["region"]
         return values
 
     @field_validator("relation", mode="before")

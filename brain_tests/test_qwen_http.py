@@ -23,7 +23,7 @@ def test_injected_client_success_and_single_record():
         turn = provider.understand_turn(TaskUnderstandingRequest(instruction="pause"))
         assert turn.turn_kind == "session_control"
         assert requests[0]["response_format"]["type"] == "json_schema"
-        assert {"arm_usage", "hold_constraints"} <= set(requests[0]["response_format"]["json_schema"]["schema"]["required"])
+        assert requests[0]["response_format"]["json_schema"]["schema"]["required"] == ["turn_kind"]
         assert len(provider.calls) == 1
         call = provider.calls[0]
         assert call["status"] == "succeeded" and call["usage"]["total_tokens"] == 15

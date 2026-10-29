@@ -17,7 +17,8 @@ from ..contracts.task_intent import TaskIntent
 from ..errors import BrainError
 from .prompts import TASK_UNDERSTANDING_PROMPT, VISION_GROUNDING_PROMPT, SKILL_PLANNING_PROMPT, prompt_payload
 from .skill_planning import SkillPlanningRequest, SkillPlanLLMOutput
-from .task_understanding import TaskParseOutput, TaskUnderstandingRequest, parse_qwen_turn
+from .task_understanding import (TaskParseOutput, TaskUnderstandingRequest, parse_qwen_turn,
+                                  task_understanding_v3_wire_schema)
 from .vision_grounding import VisionEntity, VisionGroundingOutput
 
 
@@ -154,11 +155,10 @@ class QwenHTTPProvider:
         )
 
     def understand_turn(self, request: TaskUnderstandingRequest):
-        from .task_understanding import task_understanding_wire_schema
         def parse(value):
             return parse_qwen_turn(value, request.instruction)
         return self._call("task_understanding", TASK_UNDERSTANDING_PROMPT,
-                          prompt_payload({"instruction": request.instruction}), task_understanding_wire_schema(), parse)
+                          prompt_payload({"instruction": request.instruction}), task_understanding_v3_wire_schema(), parse)
 
     def plan(self, request: SkillPlanningRequest) -> SkillPlanLLMOutput:
         content = {**request.context.model_dump(mode="json"), "skills": request.skill_catalog}

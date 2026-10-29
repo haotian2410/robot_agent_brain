@@ -3,7 +3,7 @@ import json
 import pytest
 
 from robot_agent_brain.config import BrainConfig
-from robot_agent_brain.contracts.turn import SceneEditIntent, SceneEditPlan
+from robot_agent_brain.contracts.turn import PlacementGoal, SceneEditIntent, SceneEditPlan
 from robot_agent_brain.semantics.domain_policy_registry import DomainPolicyRegistry
 
 
@@ -25,6 +25,14 @@ def test_same_turn_dependencies_are_stable_and_prior_only():
         ],
     )
     assert [op.operation_id for op in plan.operations] == ["op-1", "op-2"]
+
+
+def test_v3_placement_goal_is_distinct_from_selection_relations_but_editor_compatible():
+    operation = SceneEditIntent(operation="add", target="apple",
+                                placement_goal=PlacementGoal(relation="on", reference="table"))
+    assert operation.relation.value == "on"
+    assert operation.reference == "table"
+    assert operation.placement_goal.reference == "table"
 
 
 def test_forward_dependency_is_rejected():
