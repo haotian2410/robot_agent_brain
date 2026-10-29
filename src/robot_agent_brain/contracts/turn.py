@@ -189,6 +189,24 @@ class SceneEditPlan(BaseModel):
                 raise ValueError("scene_edit_unknown_reference_selector")
         return self
 
+    def validate_semantics(self, *, allow_unresolved_references=False):
+        """Validate cross-field selectors after wire normalization.
+
+        Direct callers retain the historical strict model validation above.  The
+        live Qwen adapter uses ``model_construct`` for a canonical plan and then
+        calls this method, so an environment reference such as ``table`` can be
+        resolved by the scene resolver instead of being mistaken for an entity.
+        """
+        ids = {entity.entity_id for entity in self.entities}
+        for op in self.operations:
+            if op.target not in ids:
+                raise ValueError("scene_edit_unknown_selector: " + op.target)
+            if op.replacement_entity is not None and op.replacement_entity not in ids:
+                raise ValueError("scene_replace_unknown_entity: " + op.replacement_entity)
+            if op.reference and op.reference not in ids and not allow_unresolved_references:
+                raise ValueError("scene_edit_unknown_reference_selector: " + op.reference)
+        return self
+
 class SceneQueryIntent(BaseModel):
     model_config = ConfigDict(extra="forbid")
     query_type: Literal["count", "existence", "position", "state", "neighbors", "relation", "selection"]

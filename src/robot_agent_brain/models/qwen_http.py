@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from ..contracts.camera import CameraFrame
 from ..contracts.task_intent import TaskIntent
+from ..errors import BrainError
 from .prompts import TASK_UNDERSTANDING_PROMPT, VISION_GROUNDING_PROMPT, SKILL_PLANNING_PROMPT, prompt_payload
 from .skill_planning import SkillPlanningRequest, SkillPlanLLMOutput
 from .task_understanding import TaskParseOutput, TaskUnderstandingRequest, parse_qwen_turn
@@ -114,6 +115,14 @@ class QwenHTTPProvider:
             result = parse(value) if parse else value
             record["status"] = "succeeded"
             return result
+        except BrainError as exc:
+            # The model response reached the endpoint and parsed as JSON, but
+            # the Brain rejected its semantic contract. Preserve the precise
+            # stage/code instead of wrapping it as a provider transport error.
+            record["status"] = "rejected"
+            record["error"] = self._redact(f"{type(exc).__name__}: {exc}")
+            record["error_code"] = exc.issue.code
+            raise
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, QwenProviderError) as exc:
             record["error"] = self._redact(f"{type(exc).__name__}: {exc}")
             code = str(exc) if str(exc) in {"motion_distance_evidence_missing", "motion_clause_binding_ambiguous"} else "provider_error"

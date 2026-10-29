@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from ..semantics.motion_evidence import _extract_motion_spans, resolve_motion_evidence
-from typing import Protocol, Literal
+from typing import Any, Protocol, Literal
 from ..contracts.robot_setup import RobotSetupRequest
 from ..contracts.task_intent import TaskHoldConstraint
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
-from ..contracts.turn import BrainTurn, SceneEditPlan, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
+from ..contracts.turn import BrainTurn, SceneEditIntent, SceneEditPlan, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
 
 from ..contracts.spatial import RelationScope, SpatialRelation, SpatialRelationType
 from ..contracts.task_intent import Direction, MotionScale, Operation, PlacementTarget, QuantityMode, TaskEntity, TaskIntent, TaskType
+from ..errors import BrainError
 
 
 def task_understanding_wire_schema():
@@ -189,6 +190,96 @@ class TaskParseOutput(BaseModel):
                          session_control=self.session_control, robot_setup_request=self.robot_setup_request)
 
 
+class TaskParseWireOutput(BaseModel):
+    """Lightweight provider envelope used before semantic normalization.
+
+    The legacy ``TaskParseOutput`` intentionally remains strict for replay and
+    direct callers.  Live Qwen scene edits use this wire model because
+    ``reference`` may name an existing environment object (for example
+    ``table``) that is not a task entity.
+    """
+    model_config = ConfigDict(extra="ignore")
+    protocol_version: str = "task_understanding.v2"
+    arm_usage: Literal["unspecified", "both_required"] = "unspecified"
+    hold_constraints: list[dict[str, Any]] = Field(default_factory=list)
+    status: TurnStatus = TurnStatus.ACCEPTED
+    turn_kind: TurnKind = TurnKind.ROBOT_TASK
+    clarification_question: str | None = None
+    scene_edit: dict[str, Any] | None = None
+    scene_query: dict[str, Any] | None = None
+    session_control: dict[str, Any] | None = None
+    robot_setup_request: dict[str, Any] | None = None
+    entities: list[dict[str, Any]] = Field(default_factory=list)
+    operations: list[dict[str, Any]] = Field(default_factory=list)
+    relations: list[dict[str, Any]] = Field(default_factory=list)
+
+
+def _wire_entity(value: dict[str, Any]) -> TaskEntity:
+    if not isinstance(value, dict):
+        raise BrainError("provider_output_schema_invalid", "wire_parse", "scene entity must be an object",
+                         category="provider_schema", path="scene_edit.entities")
+    value = dict(value)
+    if "entity_id" not in value and "id" in value:
+        value["entity_id"] = value.pop("id")
+    if "semantic_name" not in value and "name" in value:
+        value["semantic_name"] = value.pop("name")
+    try:
+        return TaskEntity.model_validate(value)
+    except ValidationError as exc:
+        raise BrainError("provider_output_schema_invalid", "wire_parse",
+                         "scene entity does not match the task entity shape",
+                         category="provider_schema", path="scene_edit.entities",
+                         details={"errors": exc.errors()}) from exc
+
+
+def _wire_scene_edit(value: dict[str, Any]) -> SceneEditPlan:
+    if not isinstance(value, dict):
+        raise BrainError("provider_output_schema_invalid", "wire_parse", "scene_edit must be an object",
+                         category="provider_schema", path="scene_edit")
+    try:
+        entities = [_wire_entity(item) for item in value.get("entities", [])]
+        relations = [SpatialRelation.model_validate(item) for item in value.get("relations", [])]
+        operations = [SceneEditIntent.model_validate(item) for item in value.get("operations", [])]
+    except BrainError:
+        raise
+    except ValidationError as exc:
+        raise BrainError("provider_output_schema_invalid", "wire_parse",
+                         "scene_edit payload has invalid field types",
+                         category="provider_schema", path="scene_edit",
+                         details={"errors": exc.errors()}) from exc
+    if not entities or not operations:
+        raise BrainError("semantic_protocol_error", "semantic_validation",
+                         "scene_edit requires entities and operations", category="semantic_protocol")
+    # Bypass only SceneEditPlan's historical entity/reference cross-field check;
+    # operation/field validators have already run and are retained.
+    plan = SceneEditPlan.model_construct(
+        scene_basis=value.get("scene_basis", "current"), entities=entities,
+        relations=relations, operations=operations,
+    )
+    try:
+        plan.validate_semantics(allow_unresolved_references=True)
+    except ValueError as exc:
+        raise BrainError("semantic_protocol_error", "semantic_validation", str(exc),
+                         category="semantic_protocol") from exc
+    return plan
+
+
+def _parse_scene_edit_wire(value: dict[str, Any], instruction: str) -> BrainTurn:
+    try:
+        wire = TaskParseWireOutput.model_validate(value)
+    except ValidationError as exc:
+        raise BrainError("provider_output_schema_invalid", "wire_parse",
+                         "task output envelope has invalid field types",
+                         category="provider_schema", details={"errors": exc.errors()}) from exc
+    plan = _wire_scene_edit(wire.scene_edit or {})
+    # BrainTurn's historical nested validation delegates back to the strict
+    # SceneEditPlan model.  The wire path has already run the staged semantic
+    # checks above, so construct the canonical turn without re-running the
+    # legacy entity-only reference rule.
+    return BrainTurn.model_construct(status=TurnStatus.ACCEPTED, turn_kind=TurnKind.SCENE_EDIT,
+                                     instruction=instruction, scene_edit=plan)
+
+
 def _open_close_reference_missing(value, error):
     """Only classify this narrow Qwen omission as clarification.
 
@@ -232,6 +323,12 @@ def parse_qwen_turn(value, instruction: str) -> BrainTurn:
                               else "请补充任务所需的对象、数量、参照物或执行条件。"))
         return BrainTurn(status=status, turn_kind=turn_kind, instruction=instruction,
                          clarification_question=question.strip())
+    # Scene edits use the staged wire -> normalize path.  In particular,
+    # references such as ``table`` are allowed to remain unresolved here and
+    # are bound against the current/original scene by SceneReferenceResolver.
+    if isinstance(value, dict) and value.get("status", TurnStatus.ACCEPTED.value) == TurnStatus.ACCEPTED.value \
+            and value.get("turn_kind") == TurnKind.SCENE_EDIT.value:
+        return _parse_scene_edit_wire(value, instruction)
     try:
         parsed = TaskParseOutput.model_validate(value)
         return parsed.to_brain_turn(instruction)
