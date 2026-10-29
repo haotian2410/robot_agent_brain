@@ -1,0 +1,53 @@
+[
+  {
+    "name": "desktop_reference",
+    "instruction": "在桌面上增加一个苹果",
+    "payload": {
+      "protocol_version": "task_understanding.v3",
+      "status": "accepted",
+      "turn_kind": "scene_edit",
+      "scene_edit": {
+        "scene_basis": "current",
+        "entities": [{"id": "apple", "name": "apple", "category": "fruit"}],
+        "relations": [],
+        "operations": [{"operation": "add", "target": "apple", "relation": "on", "reference": "table"}]
+      }
+    },
+    "expect": {"turn_kind": "scene_edit", "canonical_reference": "table"}
+  },
+  {
+    "name": "ordinary_entity_reference",
+    "instruction": "在篮子右边增加一个香蕉",
+    "payload": {
+      "protocol_version": "task_understanding.v2",
+      "status": "accepted",
+      "turn_kind": "scene_edit",
+      "scene_edit": {
+        "scene_basis": "current",
+        "entities": [
+          {"id": "banana", "name": "banana", "category": "fruit"},
+          {"id": "basket", "name": "basket", "category": "container"}
+        ],
+        "relations": [],
+        "operations": [{"operation": "add", "target": "banana", "relation": "right_of", "reference": "basket"}]
+      }
+    },
+    "expect": {"turn_kind": "scene_edit", "entity_reference": "basket"}
+  },
+  {
+    "name": "unknown_reference",
+    "instruction": "在窗口上增加一个苹果",
+    "payload": {
+      "protocol_version": "task_understanding.v3",
+      "status": "accepted",
+      "turn_kind": "scene_edit",
+      "scene_edit": {
+        "scene_basis": "current",
+        "entities": [{"id": "apple", "name": "apple", "category": "fruit"}],
+        "relations": [],
+        "operations": [{"operation": "add", "target": "apple", "relation": "on", "reference": "window"}]
+      }
+    },
+    "expect": {"turn_kind": "scene_edit", "error": "scene_reference_unresolved"}
+  }
+]

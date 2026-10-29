@@ -44,6 +44,7 @@ class BrainApplication:
         aliases = (self.config.load_semantic_aliases() if self.config.semantic_aliases is not None
                    else getattr(getattr(self.assets, "metadata", None), "aliases", {}))
         category_aliases = getattr(getattr(self.assets, "metadata", None), "category_aliases", {})
+        scene_reference_catalog = self.config.load_scene_reference_catalog()
         layout_interiors = SceneLayoutGeometryRegistry.from_path(self.config.scene_layout_interiors)
         editor = SceneEditor(self.assets, SceneLayoutPolicy(clearance_m=self.config.scene_layout_near_clearance_m,
                                                             grid_size=self.config.scene_layout_grid_size), seed=self.config.seed,
@@ -51,7 +52,8 @@ class BrainApplication:
                              default_scene_edit_assets=self.config.default_scene_edit_assets,
                              scale_policy=self.config.scale_policy(), scale_defaults=self.defaults,
                              table_metadata_ref=self.config.bootstrap_settings().get("default_table_metadata_ref"),
-                             layout_interiors=layout_interiors)
+                             layout_interiors=layout_interiors,
+                             scene_reference_catalog=scene_reference_catalog)
         self.pipeline = BrainPipeline(provider, self.assets, scene_editor=editor,
                                       vision_provider=provider if self.config.vision else None,
                                       skill_planning_provider=provider if hasattr(provider, "plan") else None,
@@ -431,7 +433,10 @@ class BrainApplication:
                           "planner_used":planning_trace.used_planner if planning_trace else None,
                           "vision_calls":sum(call.get("stage") == "vision_grounding" for call in current_calls),
                           "elapsed_seconds":time.monotonic()-started,
-                          "model_calls":current_calls}
+                          "model_calls":current_calls,
+                          "protocol_version": getattr(turn, "protocol_version", "task_understanding.v2"),
+                          "parser_stage": ("canonical_v3" if turn is not None and getattr(turn, "protocol_version", "").endswith(".v3")
+                                           else "legacy_v2_adapter")}
         previous_config = getattr(session, "restored_config_fingerprint", None)
         if previous_config and previous_config != self.config_fingerprint:
             report.assumptions.append("configuration_changed_since_restore: confirmed scene retained; review deployment metadata")
@@ -464,6 +469,12 @@ class BrainApplication:
                 debug["raw_model_response"] = json.dumps(getattr(self.provider, "last_raw_text", {}), ensure_ascii=False)
             if turn is not None:
                 debug["brain_turn"] = turn.model_dump(mode="json")
+                debug["semantic_protocol"] = {
+                    "protocol_version": getattr(turn, "protocol_version", "task_understanding.v2"),
+                    "turn_kind": turn.turn_kind,
+                    "scene_basis": turn.scene_edit.scene_basis if turn.scene_edit is not None else None,
+                    "scene_references": [ref.model_dump(mode="json") for ref in (turn.scene_edit.scene_refs if turn.scene_edit is not None else [])],
+                }
                 if turn.task_intent is not None:
                     debug["task_intent"] = turn.task_intent.model_dump(mode="json")
             if result is not None:
