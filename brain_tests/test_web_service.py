@@ -218,3 +218,20 @@ def test_editor_freezes_even_empty_platform_before_first_edit(tmp_path):
     service.app.accept_browser_scene(sid,browser.scene)
     assert json.loads((tmp_path/sid/'original_scene.json').read_text(encoding="utf-8"))==frozen
     service.tasks.close()
+
+
+def test_empty_scene_bootstrap_is_only_allowed_before_session_initialization(tmp_path):
+    service, browser = configured(tmp_path)
+    sid = service.activate(SessionRequest(browserID="b"))["sessionID"]
+    session = service._bind(sid)
+    empty = browser.scene.model_copy(deep=True)
+    empty.scene_id = 0
+    empty.scene_version = 0
+    empty.objects = []
+    # A brand-new session may use the protocol's empty document to request a
+    # Brain bootstrap.
+    assert service.validate_scene(empty, session) == empty
+    service.app.accept_browser_scene(sid, browser.scene)
+    with pytest.raises(ValueError, match="browser_scene_identity_invalid"):
+        service.validate_scene(empty, session)
+    service.tasks.close()

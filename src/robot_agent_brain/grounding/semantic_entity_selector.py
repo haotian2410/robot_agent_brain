@@ -71,11 +71,15 @@ def discover_candidates(entity, scene: SceneConfig, category_aliases=None, *, al
 
 
 class SemanticEntitySelector:
-    def __init__(self, relation_resolver=None, *, aliases=None, category_aliases=None, assets=None):
+    def __init__(self, relation_resolver=None, *, aliases=None, category_aliases=None, assets=None,
+                 scene_reference_catalog=None, table_metadata_ref=None):
         self.assets = assets
         self.relations = relation_resolver or SceneRelationResolver()
         self.aliases = aliases or {}
         self.category_aliases = category_aliases or {}
+        from .scene_reference_resolver import SceneReferenceResolver
+        self.reference_resolver = SceneReferenceResolver(scene_reference_catalog,
+                                                         table_metadata_ref=table_metadata_ref)
 
     def select(self, entity_id, entities, relations, scene, *, bindings_override=None):
         overrides = bindings_override or {}
@@ -88,7 +92,15 @@ class SemanticEntitySelector:
             if identifier in visiting:
                 raise ValueError("scene_relation_reference_cycle")
             if identifier not in by_entity:
-                raise ValueError("scene_relation_reference_missing: " + identifier)
+                # Environment references (table/桌面 and configured aliases)
+                # are resolved to a concrete scene object rather than being
+                # fabricated as task entities.
+                bound = self.reference_resolver.resolve(identifier, entities=entities, scene=scene)
+                if bound.object_id is None or bound.object_id not in by_object:
+                    raise ValueError("scene_reference_unresolved: " + identifier)
+                resolved_object = by_object[bound.object_id]
+                resolved[identifier] = [resolved_object]
+                return resolved[identifier]
             visiting.add(identifier)
             entity = by_entity[identifier]
             eligible = discover_candidates(entity, scene, self.category_aliases, aliases=self.aliases, assets=self.assets)

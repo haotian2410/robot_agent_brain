@@ -120,10 +120,18 @@ class QwenHTTPProvider:
             # The model response reached the endpoint and parsed as JSON, but
             # the Brain rejected its semantic contract. Preserve the precise
             # stage/code instead of wrapping it as a provider transport error.
-            record["status"] = "rejected"
+            # A provider call itself completed with an unusable model output;
+            # keep the call record in the historical ``failed`` bucket while
+            # exposing the precise semantic code separately.
+            record["status"] = "failed"
             record["error"] = self._redact(f"{type(exc).__name__}: {exc}")
             record["error_code"] = exc.issue.code
-            raise
+            # Keep the provider boundary exception stable for callers while
+            # preserving the semantic/protocol code for AgentApplication and
+            # the task result.  Transport failures remain provider_error;
+            # model JSON that parses but violates a contract is not silently
+            # relabeled as a network/provider failure.
+            raise QwenProviderError(f"{stage}: {record['error']}", code=exc.issue.code) from exc
         except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError, QwenProviderError) as exc:
             record["error"] = self._redact(f"{type(exc).__name__}: {exc}")
             text = str(exc)

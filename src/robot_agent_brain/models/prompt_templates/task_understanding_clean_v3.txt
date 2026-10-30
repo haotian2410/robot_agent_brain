@@ -75,14 +75,21 @@
 
 ### `robot_task`
 
-用户要求机器人或机械臂执行动作，或者明确表达抓取、拿起、放置、释放、按压、推拉、打开、关闭时，使用 `robot_task`。
+只有用户明确要求机器人/机械臂作为行为主体执行动作时，才使用
+`robot_task`。抓取、拿起、释放、按压、推拉、打开/关闭等词在明确指向
+机器人执行时属于此路由；单独出现“放、放置、移动”不能决定路由。
 
 例如：
 
-- “把苹果放进篮子”是 `robot_task`；
-- “在篮子里增加一个苹果”是 `scene_edit`；
+- “把苹果放进篮子”是 `robot_task`（对已有物体提出机器人搬运目标）；
 - “让机械臂把苹果移到香蕉右边”是 `robot_task`；
-- “把苹果移到香蕉右边”是 `scene_edit`。
+- “在篮子里增加一个苹果”是 `scene_edit`（直接改变场景陈设）；
+- “在桌面上放置一个篮子还有苹果和香蕉”是 `scene_edit`；
+- “把苹果移到香蕉右边”是 `scene_edit`（直接修改场景位置）。
+
+如果同一句同时要求创建/修改场景和机器人执行（例如“增加香蕉然后让机械臂
+把它放进盒子”），或无法确定行为主体，返回 `clarification_required`，不得
+只依据“放置/移动”两个字猜测。
 
 ### `scene_query`
 
@@ -150,6 +157,24 @@
 ```
 
 不要把颜色拼进名称，例如不要使用 `blue_basket` 或 `蓝色篮子` 作为 `semantic_name`。
+
+机器人任务也必须使用同一组 v3 字段。顶层 `entities` 使用
+`entity_id`/`semantic_name`/`category`，顶层 `operations` 使用
+`operation`（不要使用旧的 `id`/`name`/`type` 字段），例如：
+
+```json
+{
+  "turn_kind": "robot_task",
+  "entities": [
+    {"entity_id": "apple", "semantic_name": "apple", "category": "fruit"},
+    {"entity_id": "basket", "semantic_name": "basket", "category": "container"}
+  ],
+  "operations": [{
+    "operation": "pick_and_place", "source": "apple", "destination": "basket",
+    "placement_target": {"kind": "container_interior", "reference": "basket", "relation": "inside"}
+  }]
+}
+```
 
 ## 4. Scene Edit 的唯一结构
 

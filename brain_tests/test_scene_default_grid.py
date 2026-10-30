@@ -43,6 +43,19 @@ def test_legacy_position_hint_normalizes_to_center_and_unknown_props_reject():
                         properties={"position_hint": "somewhere"})
 
 
+def test_model_default_any_placement_hint_is_ignored_for_non_placement_ops():
+    """Qwen's placement default must not invalidate move/property edits."""
+    moved = SceneEditIntent(operation="translate", target="apple", direction="left",
+                            distance_m=.05, placement_hint="any")
+    assert moved.placement_hint is None
+    rotated = SceneEditIntent(operation="rotate", target="apple", axis="z", angle_deg=90,
+                              placement_hint="any")
+    assert rotated.placement_hint is None
+    with pytest.raises(ValueError, match="scene_edit_fields_forbidden: translate"):
+        SceneEditIntent(operation="translate", target="apple", direction="left",
+                        distance_m=.05, placement_hint="center")
+
+
 def test_default_asset_is_only_used_for_ambiguous_scene_add():
     entity = TaskEntity(entity_id="basket", semantic_name="basket", category="container")
     binding = AssetResolver(AmbiguousAssets(), default_refs={"basket": "$LIBRARY_SERVER/4"}).resolve(

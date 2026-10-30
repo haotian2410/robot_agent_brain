@@ -31,6 +31,11 @@ class BatchSession(BaseModel):
     name: str | None = None
     scene: str | None = None
     instructions: list[str] = Field(min_length=1)
+    # Optional matrix metadata is authored by the test designer, not needed
+    # to execute a session.  Keeping it outside the required input contract
+    # preserves the small ``name/scene/instructions`` format.
+    difficulty: Literal["L1", "L2", "L3", "L4"] | None = None
+    capabilities: list[str] = Field(default_factory=list)
 
     @field_validator("instructions")
     @classmethod

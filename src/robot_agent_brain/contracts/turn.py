@@ -117,6 +117,30 @@ class SceneEditIntent(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
+    def normalize_non_placement_default_hint(cls, values):
+        """Drop the model's harmless ``any`` default outside placement ops.
+
+        The v3 prompt uses ``placement_hint=any`` as the default for placement
+        operations.  Some Qwen responses repeat that default on translate,
+        rotate, scale, remove, or property updates even though it has no
+        meaning for those operations.  Treat only this exact no-op value as a
+        transport normalisation; explicit ``center`` or a placement region is
+        still rejected by the semantic validator instead of being guessed.
+        """
+        if not isinstance(values, dict):
+            return values
+        operation = values.get("operation", values.get("type"))
+        if operation in {"translate", "rotate", "remove", "replace", "update_properties", "scale"}:
+            hint = values.get("placement_hint")
+            region = values.get("placement_region")
+            if hint == "any" and region is None:
+                values = dict(values)
+                values["placement_hint"] = None
+                return values
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
     def normalize_placement_goal(cls, values):
         """Flatten the canonical placement goal into the legacy edit fields.
 
@@ -227,9 +251,21 @@ class SceneEditPlan(BaseModel):
 
     @model_validator(mode="after")
     def validate_selectors(self):
-        TaskIntent(instruction="scene selection", entities=self.entities,
-                   operations=[], spatial_relations=self.relations)
+        from ..semantics.scene_references import SceneReferenceCatalog
+        catalog = SceneReferenceCatalog()
         ids = {entity.entity_id for entity in self.entities}
+        declared_scene_refs = {ref.raw_value for ref in self.scene_refs}
+        # Validate selectors declared in this payload immediately.  External
+        # references (registered table aliases or an as-yet-unbound scene
+        # object such as ``window``) are resolved against the concrete scene
+        # later; rejecting them here would lose the useful
+        # ``scene_reference_unresolved`` diagnostic.
+        internal_relations = [relation for relation in self.relations
+                              if relation.reference is None or relation.reference in ids
+                              or catalog.lookup(relation.reference) is not None
+                              or relation.reference in declared_scene_refs]
+        TaskIntent(instruction="scene selection", entities=self.entities,
+                   operations=[], spatial_relations=internal_relations)
         for identifier in ids:
             selectors = [r for r in self.relations if r.subject == identifier and r.scope == "selection"]
             for reference in {r.reference for r in selectors}:
@@ -242,7 +278,13 @@ class SceneEditPlan(BaseModel):
                 raise ValueError("scene_edit_unknown_selector")
             if op.replacement_entity is not None and op.replacement_entity not in ids:
                 raise ValueError("scene_replace_unknown_entity")
-            if op.reference and op.reference not in ids:
+            # ``op.reference`` may be an environment/scene reference.  The
+            # resolver, not the wire model, determines whether it exists in
+            # the active scene.  A wire parser declares such references in
+            # ``scene_refs``; direct callers remain strict by default.
+            if (op.reference and op.reference not in ids
+                    and catalog.lookup(op.reference) is None
+                    and op.reference not in declared_scene_refs):
                 raise ValueError("scene_edit_unknown_reference_selector")
         operation_ids = [op.operation_id for op in self.operations if op.operation_id is not None]
         if len(operation_ids) != len(set(operation_ids)):
@@ -258,27 +300,33 @@ class SceneEditPlan(BaseModel):
     def validate_semantics(self, *, allow_unresolved_references=False):
         """Validate cross-field selectors after wire normalization.
 
-        Direct callers retain the historical strict model validation above.  The
-        live Qwen adapter uses ``model_construct`` for a canonical plan and then
-        calls this method, so an environment reference such as ``table`` can be
-        resolved by the scene resolver instead of being mistaken for an entity.
+        The live Qwen adapter calls this after formal model validation.  Known
+        environment aliases and unresolved scene-object names are retained so
+        the scene resolver can produce a precise unresolved/ambiguous error.
         """
+        from ..semantics.scene_references import SceneReferenceCatalog
+        catalog = SceneReferenceCatalog()
         if self.scene_basis not in {"current", "original"}:
             raise ValueError("scene_basis_unavailable: " + str(self.scene_basis))
         ids = {entity.entity_id for entity in self.entities}
+        declared_scene_refs = {ref.raw_value for ref in self.scene_refs}
         if len(ids) != len(self.entities):
             raise ValueError("scene_edit_duplicate_entity_id")
         for relation in self.relations:
             if relation.subject not in ids:
                 raise ValueError("scene_edit_unknown_selector: " + relation.subject)
-            if relation.reference and relation.reference not in ids and not allow_unresolved_references:
+            is_catalog_reference = relation.reference and catalog.lookup(relation.reference) is not None
+            if (relation.reference and relation.reference not in ids and not is_catalog_reference
+                    and relation.reference not in declared_scene_refs and not allow_unresolved_references):
                 raise ValueError("scene_edit_unknown_reference_selector: " + relation.reference)
         for op in self.operations:
             if op.target not in ids:
                 raise ValueError("scene_edit_unknown_selector: " + op.target)
             if op.replacement_entity is not None and op.replacement_entity not in ids:
                 raise ValueError("scene_replace_unknown_entity: " + op.replacement_entity)
-            if op.reference and op.reference not in ids and not allow_unresolved_references:
+            is_catalog_reference = op.reference and catalog.lookup(op.reference) is not None
+            if (op.reference and op.reference not in ids and not is_catalog_reference
+                    and op.reference not in declared_scene_refs and not allow_unresolved_references):
                 raise ValueError("scene_edit_unknown_reference_selector: " + op.reference)
         operation_ids = [op.operation_id for op in self.operations if op.operation_id is not None]
         if len(operation_ids) != len(set(operation_ids)):
@@ -303,8 +351,19 @@ class SceneQueryIntent(BaseModel):
 
     @model_validator(mode="after")
     def query_selectors(self):
-        TaskIntent(instruction="query", entities=self.entities, operations=[], spatial_relations=self.relations)
-        if self.target not in {e.entity_id for e in self.entities}:
+        entity_ids = {e.entity_id for e in self.entities}
+        from ..semantics.scene_references import SceneReferenceCatalog
+        catalog = SceneReferenceCatalog()
+        internal_relations = [relation for relation in self.relations
+                              if relation.reference is None or relation.reference in entity_ids]
+        for relation in self.relations:
+            if relation.reference is not None and relation.reference not in entity_ids \
+                    and catalog.lookup(relation.reference) is None:
+                raise ValueError("query_reference_missing")
+        # Validate entity-to-entity selectors with the shared TaskIntent rules;
+        # environment references are resolved later against the scene.
+        TaskIntent(instruction="query", entities=self.entities, operations=[], spatial_relations=internal_relations)
+        if self.target not in entity_ids:
             raise ValueError("query_target_missing")
         if any(r.scope != "selection" for r in self.relations):
             raise ValueError("query_requires_selection_relations")
@@ -314,7 +373,7 @@ class SceneQueryIntent(BaseModel):
             if self.reference is None or self.predicate is None:
                 raise ValueError("query_relation_requires_reference_and_predicate")
             SpatialRelation(scope="selection", subject=self.target, reference=self.reference, relation=self.predicate)
-            if self.reference not in {e.entity_id for e in self.entities}:
+            if self.reference not in entity_ids and catalog.lookup(self.reference) is None:
                 raise ValueError("query_reference_missing")
         elif self.reference is not None or self.predicate is not None:
             raise ValueError("query_predicate_requires_relation_query")

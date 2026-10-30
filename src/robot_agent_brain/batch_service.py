@@ -263,6 +263,8 @@ class ServiceBatchRunner:
             turns_root.mkdir(parents=True, exist_ok=True)
             failed = False
             session_record = {"name": name, "outputName": output_name, "sessionID": session_id, "scene": session_spec.scene,
+                              "difficulty": session_spec.difficulty,
+                              "capabilities": list(session_spec.capabilities),
                               "browserID": browser_id, "turns": len(session_spec.instructions)}
             (session_root / "session.json").write_text(json.dumps(session_record, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -270,6 +272,8 @@ class ServiceBatchRunner:
                 rows = [item for item in results if item.get("session") == name]
                 value = {"name": name, "outputName": output_name,
                          "sessionID": session_record.get("sessionID"),
+                         "difficulty": session_spec.difficulty,
+                         "capabilities": list(session_spec.capabilities),
                          "browserID": browser_id, "status": status, "turns": rows}
                 if error is not None:
                     value["error"] = error
@@ -363,7 +367,9 @@ class ServiceBatchRunner:
                         if result.get("executed", False) is not False:
                             ok = False
                         row_status = "passed" if ok else ("blocked" if screenshot.get("status") != "captured" and self.screenshot_required else "failed")
-                        row = {"session": name, "turn": turn_index, "instruction": instruction,
+                        row = {"session": name, "difficulty": session_spec.difficulty,
+                               "capabilities": list(session_spec.capabilities),
+                               "turn": turn_index, "instruction": instruction,
                                "taskID": started["taskID"], "status": row_status,
                                "outcome": outcome, "scene": identity, "screenshot": screenshot,
                                "artifacts": saved_artifacts}

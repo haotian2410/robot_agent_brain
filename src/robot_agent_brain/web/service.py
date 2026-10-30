@@ -80,13 +80,13 @@ class AgentService:
 
     def validate_scene(self, scene, session=None):
         scene = validate_web_scene(scene, self.joints, self.references)
-        # A browser may intentionally start a fresh conversation on the protocol's empty
-        # document (scene_id=0, no objects).  This is a bootstrap request, not an imported
-        # platform scene: Brain will create the configured UR5e/table template in app.handle and
-        # commit it through the held Gateway lease.  Do not reject it as an unsupported profile.
-        if scene.scene_id == 0 and not scene.objects:
-            return scene
         if session is not None and session.scene is not None:
+            # The protocol's empty document is only a bootstrap input for an
+            # uninitialized session.  Once a session owns a scene, accepting
+            # scene_id=0 here would bypass the scene identity/CAS checks and
+            # let a stale browser reset the session after the real snapshot.
+            if scene.scene_id == 0 and not scene.objects:
+                raise ValueError("browser_scene_identity_invalid: initialized session cannot submit empty scene")
             previous = session.scene
             if scene.scene_id != previous.scene_id:
                 raise ValueError("browser_new_session_required")
@@ -104,6 +104,11 @@ class AgentService:
                     unchanged = False
                 if not unchanged:
                     raise ValueError("web_platform_profile_unsupported")
+            return scene
+        # A browser may intentionally start a fresh conversation on the
+        # protocol's empty document.  Brain will bootstrap the configured
+        # platform scene when the first command is processed.
+        if scene.scene_id == 0 and not scene.objects:
             return scene
         # This release imports UR5e only. Dual scenes remain display-only.
         if self.app.bootstrapper.template_scene is not None:

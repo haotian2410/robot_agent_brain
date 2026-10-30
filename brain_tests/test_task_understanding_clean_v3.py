@@ -77,6 +77,54 @@ def test_scene_payloads_are_structured_wire_models():
     assert query_wire.scene_query.target == "basket"
 
 
+def test_robot_payload_uses_canonical_v3_entity_and_operation_fields():
+    payload = envelope(
+        turn_kind="robot_task", scene_edit=None,
+        entities=[
+            {"entity_id": "apple", "semantic_name": "apple", "category": "fruit"},
+            {"entity_id": "basket", "semantic_name": "basket", "category": "container"},
+        ],
+        operations=[{
+            "operation": "pick_and_place", "source": "apple", "destination": "basket",
+            "placement_target": {"kind": "container_interior", "reference": "basket", "relation": "inside"},
+        }],
+    )
+    turn = parse_qwen_turn(payload, "把苹果放进篮子")
+    assert turn.task_intent is not None
+    assert turn.task_intent.entities[0].entity_id == "apple"
+    assert turn.task_intent.operations[0].task_type.value == "pick_and_place"
+    schema = task_understanding_v3_wire_schema()
+    operation = schema["$defs"]["RobotOperationWire"]
+    assert "operation" in operation["required"] and "type" not in operation["properties"]
+
+
+def test_robot_semantic_validation_error_keeps_actual_operation_path():
+    payload = envelope(
+        turn_kind="robot_task", scene_edit=None,
+        entities=[{"entity_id": "apple", "semantic_name": "apple", "category": "fruit"}],
+        operations=[{"operation": "grasp"}],
+    )
+    with pytest.raises(BrainError) as error:
+        parse_qwen_turn(payload, "抓取苹果")
+    assert error.value.issue.code == "semantic_protocol_error"
+    assert error.value.issue.path == "operations.0"
+
+
+def test_query_registered_table_reference_is_allowed_but_unknown_is_not():
+    query = {
+        "query_type": "relation",
+        "entities": [{"entity_id": "apple", "semantic_name": "apple", "category": "fruit"}],
+        "relations": [], "target": "apple", "reference": "table", "predicate": "left_of",
+        "evidence_source": "scene",
+    }
+    turn = parse_qwen_turn(envelope(turn_kind="scene_query", scene_edit=None, scene_query=query),
+                           "苹果在桌子左边吗？")
+    assert turn.scene_query.reference == "table"
+    with pytest.raises(BrainError, match="query_reference_missing"):
+        parse_qwen_turn(envelope(turn_kind="scene_query", scene_edit=None,
+                                 scene_query={**query, "reference": "window"}), "苹果在窗户左边吗？")
+
+
 def test_scene_edit_table_reference_is_resolved_later_not_declared_entity():
     turn = parse_qwen_turn(envelope(scene_edit={
         "scene_basis": "current",

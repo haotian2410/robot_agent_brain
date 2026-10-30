@@ -1,0 +1,735 @@
+{
+  "sessions": [
+    {
+      "name": "empty-L1-01",
+      "difficulty": "L1",
+      "capabilities": [
+        "add"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个苹果"
+      ]
+    },
+    {
+      "name": "empty-L1-02",
+      "difficulty": "L1",
+      "capabilities": [
+        "add"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个蓝色篮子"
+      ]
+    },
+    {
+      "name": "empty-L1-03",
+      "difficulty": "L1",
+      "capabilities": [
+        "add"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个香蕉"
+      ]
+    },
+    {
+      "name": "empty-L1-04",
+      "difficulty": "L1",
+      "capabilities": [
+        "add"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个托盘"
+      ]
+    },
+    {
+      "name": "empty-L1-05",
+      "difficulty": "L1",
+      "capabilities": [
+        "add"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个苹果"
+      ]
+    },
+    {
+      "name": "empty-L1-06",
+      "difficulty": "L1",
+      "capabilities": [
+        "add",
+        "color"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个苹果",
+        "把苹果改成蓝色"
+      ]
+    },
+    {
+      "name": "empty-L1-07",
+      "difficulty": "L1",
+      "capabilities": [
+        "add",
+        "move"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个香蕉",
+        "把香蕉向右移动一点"
+      ]
+    },
+    {
+      "name": "empty-L1-08",
+      "difficulty": "L1",
+      "capabilities": [
+        "add",
+        "delete"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个篮子",
+        "删除篮子"
+      ]
+    },
+    {
+      "name": "empty-L1-09",
+      "difficulty": "L1",
+      "capabilities": [
+        "add",
+        "color"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个苹果",
+        "把苹果改成绿色"
+      ]
+    },
+    {
+      "name": "empty-L1-10",
+      "difficulty": "L1",
+      "capabilities": [
+        "add",
+        "move"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个苹果",
+        "把苹果向左移动五厘米"
+      ]
+    },
+    {
+      "name": "empty-L2-01",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "color",
+        "delete"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个苹果",
+        "把苹果改成蓝色",
+        "删除苹果"
+      ]
+    },
+    {
+      "name": "empty-L2-02",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "move",
+        "color"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个香蕉",
+        "把香蕉向右移动一些",
+        "把香蕉改成黄色"
+      ]
+    },
+    {
+      "name": "empty-L2-03",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "add",
+        "move"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个苹果和一个香蕉",
+        "把苹果向左移动五厘米",
+        "把香蕉向右移动五厘米"
+      ]
+    },
+    {
+      "name": "empty-L2-04",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "scale",
+        "delete"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个篮子",
+        "把篮子放大一点",
+        "删除篮子"
+      ]
+    },
+    {
+      "name": "empty-L2-05",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "rotate",
+        "color"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个托盘",
+        "把托盘绕世界Z轴旋转九十度",
+        "把托盘改成绿色"
+      ]
+    },
+    {
+      "name": "empty-L2-06",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "add",
+        "delete",
+        "add"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加两个苹果",
+        "删除最左边的苹果",
+        "再增加一个香蕉"
+      ]
+    },
+    {
+      "name": "empty-L2-07",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "relation",
+        "move"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个苹果和一个篮子",
+        "把苹果移到篮子旁边",
+        "把苹果向左移动一些"
+      ]
+    },
+    {
+      "name": "empty-L2-08",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "scale",
+        "color",
+        "delete"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个蓝色篮子",
+        "把篮子缩小一点",
+        "把篮子改成绿色",
+        "删除篮子"
+      ]
+    },
+    {
+      "name": "empty-L2-09",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "move",
+        "delete"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加两个香蕉",
+        "把右边的香蕉向左移动五厘米",
+        "删除左边的香蕉"
+      ]
+    },
+    {
+      "name": "empty-L2-10",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "add",
+        "color",
+        "move"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个苹果和一个香蕉",
+        "把苹果改成红色",
+        "把香蕉移到苹果旁边",
+        "把香蕉向右移动一点"
+      ]
+    },
+    {
+      "name": "empty-L3-01",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "add",
+        "color",
+        "move",
+        "delete"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加两个苹果和一个篮子",
+        "把靠近篮子的苹果改成蓝色",
+        "把蓝色苹果向左移动五厘米",
+        "有几个苹果",
+        "删除蓝色苹果"
+      ]
+    },
+    {
+      "name": "empty-L3-02",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "add",
+        "relation",
+        "color",
+        "move"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加三个苹果和一个香蕉",
+        "把最左边的苹果移到香蕉旁边",
+        "把苹果改成绿色",
+        "把最右边的苹果向左移动一些",
+        "有几个苹果"
+      ]
+    },
+    {
+      "name": "empty-L3-03",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "add",
+        "scale",
+        "color",
+        "move",
+        "delete"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个篮子和两个香蕉",
+        "把篮子放大一点",
+        "把离篮子最远的香蕉改成蓝色",
+        "把蓝色香蕉向右移动五厘米",
+        "删除一个香蕉",
+        "有几个香蕉"
+      ]
+    },
+    {
+      "name": "empty-L3-04",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "add",
+        "rotate",
+        "relation",
+        "move",
+        "color"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加两个苹果和一个托盘",
+        "把托盘绕世界Z轴旋转九十度",
+        "把左边的苹果放到托盘旁边",
+        "把右边的苹果向右移动一点",
+        "把托盘改成绿色",
+        "有几个苹果"
+      ]
+    },
+    {
+      "name": "empty-L3-05",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "add",
+        "on",
+        "move",
+        "delete"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个篮子和三个苹果",
+        "在桌面上增加一个香蕉",
+        "把最右边的苹果向左移动五厘米",
+        "删除最左边的苹果",
+        "篮子旁边有什么"
+      ]
+    },
+    {
+      "name": "empty-L3-06",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "add",
+        "color",
+        "scale",
+        "move",
+        "original"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加两个香蕉和一个篮子",
+        "把香蕉改成蓝色",
+        "把篮子放大一点",
+        "把蓝色香蕉移到篮子右边",
+        "有几个香蕉",
+        "在原始场景中增加一个苹果"
+      ]
+    },
+    {
+      "name": "empty-L3-07",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "add",
+        "relation",
+        "delete",
+        "add",
+        "query"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加三个苹果和一个篮子",
+        "把离篮子最近的苹果移到篮子旁边",
+        "删除最右边的苹果",
+        "增加一个香蕉",
+        "把香蕉改成绿色",
+        "有几个物体"
+      ]
+    },
+  {
+      "name": "empty-L3-08",
+      "difficulty": "L3",
+      "capabilities": ["add", "relation", "move", "color", "delete"],
+      "scene": null,
+      "instructions": [
+        "增加两个苹果和一个篮子",
+        "把左边的苹果移到篮子旁边",
+        "把右边的苹果改成蓝色",
+        "把蓝色苹果向右移动一些",
+        "删除篮子",
+        "增加一个香蕉",
+        "有几个苹果"
+      ]
+    },
+    {
+      "name": "empty-L3-09",
+      "difficulty": "L3",
+      "capabilities": ["add", "on", "scale", "move", "delete"],
+      "scene": null,
+      "instructions": [
+        "增加一个篮子和两个香蕉",
+        "在桌面上增加一个苹果",
+        "把篮子放大一点",
+        "把最远的香蕉向左移动五厘米",
+        "把苹果移到篮子右边",
+        "删除一个香蕉",
+        "有几个物体"
+      ]
+    },
+    {
+      "name": "empty-L3-10",
+      "difficulty": "L3",
+      "capabilities": ["add", "replace", "rotate", "color", "original"],
+      "scene": null,
+      "instructions": [
+        "增加一个苹果和一个香蕉",
+        "把苹果替换成篮子",
+        "把篮子绕世界Z轴旋转九十度",
+        "把篮子改成绿色",
+        "在原始场景中增加一个托盘",
+        "把原始托盘放到桌面上",
+        "有几个篮子"
+      ]
+    },
+  {
+      "name": "empty-L4-01",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "add",
+        "color",
+        "scale",
+        "rotate",
+        "move",
+        "delete",
+        "query"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加四个苹果和两个香蕉",
+        "把最左边的苹果改成蓝色",
+        "把篮子放大一点",
+        "把托盘绕世界Z轴旋转九十度",
+        "把蓝色苹果向右移动五厘米",
+        "删除一个香蕉",
+        "有几个苹果",
+        "在原始场景中增加一个篮子"
+      ]
+    },
+    {
+      "name": "empty-L4-02",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "add",
+        "relation",
+        "move",
+        "color",
+        "delete",
+        "original",
+        "add",
+        "query"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加三个苹果和两个篮子",
+        "把两个苹果分别放到两个篮子旁边",
+        "把靠近左边篮子的苹果改成绿色",
+        "把最远的苹果向右移动一些",
+        "删除绿色苹果",
+        "在原始场景中增加一个香蕉",
+        "在原始场景中增加一个托盘",
+        "有几个苹果"
+      ]
+    },
+    {
+      "name": "empty-L4-03",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "on",
+        "add",
+        "inside",
+        "move",
+        "scale",
+        "color",
+        "delete",
+        "original",
+        "query"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个篮子",
+        "在桌面上增加三个苹果",
+        "把一个苹果放进篮子",
+        "把最右边的苹果向左移动五厘米",
+        "把篮子放大一点",
+        "把剩余苹果改成蓝色",
+        "删除蓝色苹果",
+        "在原始场景中增加一个香蕉",
+        "在原始场景中增加一个苹果",
+        "有几个苹果"
+      ]
+    },
+    {
+      "name": "empty-L4-04",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "add",
+        "region",
+        "move",
+        "rotate",
+        "color",
+        "delete",
+        "original",
+        "query"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加两个托盘和四个苹果",
+        "在桌面右侧增加两个香蕉",
+        "把右侧最左边的香蕉向右移动一点",
+        "把左边的托盘绕世界Z轴旋转九十度",
+        "把最右边的苹果改成绿色",
+        "删除一个香蕉",
+        "在原始场景中增加一个篮子",
+        "把原始场景中的篮子改成蓝色",
+        "有几个篮子"
+      ]
+    },
+    {
+      "name": "empty-L4-05",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "add",
+        "near",
+        "move",
+        "scale",
+        "color",
+        "delete",
+        "original",
+        "add",
+        "query"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个篮子和三个苹果",
+        "在篮子旁边增加一个香蕉",
+        "把离篮子最远的苹果移到香蕉旁边",
+        "把篮子放大一点",
+        "把香蕉改成蓝色",
+        "删除最左边的苹果",
+        "在原始场景中增加一个托盘",
+        "在原始场景中增加一个苹果",
+        "有几个苹果"
+      ]
+    },
+    {
+      "name": "empty-L4-06",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "add",
+        "ambiguity",
+        "move",
+        "color",
+        "delete",
+        "original",
+        "add",
+        "query"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加三个苹果和两个香蕉",
+        "把两个苹果中靠近香蕉的苹果向右移动五厘米",
+        "把另一个苹果改成绿色",
+        "删除所有香蕉",
+        "把剩下的苹果移到桌面右侧",
+        "在原始场景中增加一个篮子",
+        "把原始篮子放到桌子中间",
+        "有几个物体"
+      ]
+    },
+    {
+      "name": "empty-L4-07",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "replace",
+        "color",
+        "scale",
+        "move",
+        "delete",
+        "original",
+        "add",
+        "query"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个苹果和一个篮子",
+        "把苹果替换成香蕉",
+        "把香蕉改成蓝色",
+        "把篮子缩小一点",
+        "把蓝色香蕉移到篮子右边",
+        "删除篮子",
+        "在原始场景中增加一个托盘",
+        "把原始托盘放到桌面上",
+        "有几个香蕉"
+      ]
+    },
+    {
+      "name": "empty-L4-08",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "add",
+        "on",
+        "center",
+        "collision",
+        "delete",
+        "original",
+        "add",
+        "query"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个篮子",
+        "在桌子中间增加两个托盘",
+        "把最左边的托盘向右移动五厘米",
+        "把篮子改成绿色",
+        "删除一个托盘",
+        "在原始场景中增加一个苹果",
+        "把原始苹果放到桌面右侧",
+        "有几个托盘"
+      ]
+    },
+    {
+      "name": "empty-L4-09",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "add",
+        "inside",
+        "near",
+        "move",
+        "rotate",
+        "color",
+        "delete",
+        "original",
+        "query"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加一个篮子和两个苹果",
+        "把一个苹果放进篮子",
+        "在篮子旁边增加一个香蕉",
+        "把香蕉向右移动一些",
+        "把篮子绕世界Z轴旋转九十度",
+        "把苹果改成蓝色",
+        "删除香蕉",
+        "在原始场景中增加一个托盘",
+        "有几个苹果"
+      ]
+    },
+    {
+      "name": "empty-L4-10",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "add",
+        "query",
+        "relation",
+        "move",
+        "scale",
+        "color",
+        "delete",
+        "original",
+        "query"
+      ],
+      "scene": null,
+      "instructions": [
+        "增加四个苹果和一个篮子",
+        "有几个苹果",
+        "哪个苹果离篮子最近",
+        "把最近的苹果移到篮子旁边",
+        "把篮子放大一点",
+        "把最右边的苹果改成绿色",
+        "删除绿色苹果",
+        "在原始场景中增加一个香蕉",
+        "现在还有几个苹果"
+      ]
+    }
+  ]
+}

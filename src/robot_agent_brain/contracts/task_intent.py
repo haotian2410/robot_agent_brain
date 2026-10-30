@@ -133,6 +133,14 @@ class TaskIntent(StrictModel):
     @model_validator(mode="after")
     def validate_references(self):
         entity_ids = {item.entity_id for item in self.entities}
+        # A reference may be a declared task entity or a registered
+        # environment reference (for example ``table``/``桌面``).  The latter
+        # is resolved against the concrete scene by the grounding layer; it is
+        # never silently converted into a synthetic TaskEntity.
+        from ..semantics.scene_references import SceneReferenceCatalog
+        catalog = SceneReferenceCatalog()
+        def known_reference(value):
+            return value in entity_ids or catalog.lookup(value) is not None
         if len(entity_ids) != len(self.entities):
             raise ValueError("task_semantic_invalid: entity_id must be unique")
         operation_ids = {item.operation_id for item in self.operations}
@@ -160,14 +168,16 @@ class TaskIntent(StrictModel):
                     raise ValueError("task_semantic_invalid: parallel dependency conflict")
                 peers.add(operation.operation_id)
             refs = {value for value in (operation.source, operation.destination, operation.target, operation.reference) if value}
-            if not refs <= entity_ids:
-                raise ValueError(f"task_semantic_invalid: operation references unknown entities: {sorted(refs - entity_ids)}")
+            unknown = {value for value in refs if not known_reference(value)}
+            if unknown:
+                raise ValueError(f"task_semantic_invalid: operation references unknown entities: {sorted(unknown)}")
             if not set(operation.depends_on) <= previous:
                 raise ValueError("task_semantic_invalid: invalid operation depends_on")
             previous.add(operation.operation_id)
-            if operation.placement_target and operation.placement_target.reference and operation.placement_target.reference not in entity_ids:
+            if (operation.placement_target and operation.placement_target.reference
+                    and not known_reference(operation.placement_target.reference)):
                 raise ValueError("task_semantic_invalid: unknown placement reference")
         for relation in self.spatial_relations:
-            if relation.subject not in entity_ids or (relation.reference and relation.reference not in entity_ids):
+            if relation.subject not in entity_ids or (relation.reference and not known_reference(relation.reference)):
                 raise ValueError("task_semantic_invalid: spatial relation references unknown entities")
         return self

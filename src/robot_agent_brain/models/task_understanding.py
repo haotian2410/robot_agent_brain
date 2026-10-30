@@ -124,6 +124,46 @@ class TaskEntityWire(TaskEntity):
         return value
 
 
+class RobotOperationWire(BaseModel):
+    """Canonical v3 operation emitted for ``robot_task`` turns.
+
+    The public wire name is ``operation``.  ``type`` is accepted only at this
+    parser boundary for recorded v2/replay responses; it is deliberately not
+    present in the generated JSON schema.  Keeping that compatibility here
+    prevents old fixtures from changing the live protocol again.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    operation: TaskType
+    source: str | None = None
+    destination: str | None = None
+    target: str | None = None
+    reference: str | None = None
+    motion_direction: Direction | None = None
+    distance_m: float | None = Field(default=None, gt=0, le=2)
+    motion_scale: MotionScale | None = None
+    placement_target: PlacementTarget | None = None
+    depends_on: list[str] = Field(default_factory=list)
+    arm: Literal["left", "right", "single"] | None = None
+    parallel_group: str | None = Field(default=None, min_length=1)
+    parallel_required: bool = False
+    assignment_mode: str = Field(default="broadcast", pattern=r"^(broadcast|pairwise|repeat_all|relation_matched)$")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_legacy_operation(cls, value):
+        if not isinstance(value, dict):
+            return value
+        value = dict(value)
+        if "operation" not in value and "type" in value:
+            value["operation"] = value.pop("type")
+        return value
+
+    def to_operation(self, operation_id: str) -> Operation:
+        values = self.model_dump(mode="python", exclude={"operation"})
+        return Operation(operation_id=operation_id, task_type=self.operation, **values)
+
+
 class SceneEditWire(BaseModel):
     """Typed scene-edit payload before scene-reference binding.
 
@@ -315,8 +355,10 @@ class TaskParseWireOutput(BaseModel):
     scene_query: SceneQueryWire | None = None
     session_control: SessionControlIntent | None = None
     robot_setup_request: RobotSetupRequest | None = None
-    entities: list[ParseEntity] = Field(default_factory=list)
-    operations: list[ParseOperation] = Field(default_factory=list)
+    # All live v3 routes use the same canonical entity/operation vocabulary.
+    # ``TaskParseOutput`` above remains the explicit legacy replay adapter.
+    entities: list[TaskEntityWire] = Field(default_factory=list)
+    operations: list[RobotOperationWire] = Field(default_factory=list)
     relations: list[ParseRelation] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -354,11 +396,65 @@ class TaskParseWireOutput(BaseModel):
             raise ValueError("task_semantic_invalid: unsupported turn cannot be accepted")
         else:
             raise ValueError("task_semantic_invalid: unknown turn kind")
-        entity_ids = {entity.id for entity in self.entities}
-        if any(relation.subject not in entity_ids or (relation.reference and relation.reference not in entity_ids)
+        entity_ids = {entity.entity_id for entity in self.entities}
+        catalog = SceneReferenceCatalog()
+        if any(relation.subject not in entity_ids or
+               (relation.reference and relation.reference not in entity_ids and catalog.lookup(relation.reference) is None)
                for relation in self.relations):
             raise ValueError("task_semantic_invalid: relation references unknown entities")
         return self
+
+    def to_task_intent(self, instruction: str) -> TaskIntent:
+        if self.status != TurnStatus.ACCEPTED or self.turn_kind != TurnKind.ROBOT_TASK:
+            raise ValueError("task_semantic_invalid: no robot task payload")
+        text = instruction.casefold()
+        both = any(token in text for token in ("两只手各", "两臂分别", "用双臂分别", "both hands", "both arms must"))
+        if both and self.arm_usage != "both_required" and {op.arm for op in self.operations} != {"left", "right"}:
+            raise ValueError("task_semantic_invalid: arm_usage_required")
+        stable = (any(token in instruction for token in ("左臂保持", "右臂保持", "先不要松手", "hold position"))
+                  and any(token in instruction for token in ("左臂", "右臂", "left arm", "right arm")))
+        if stable and not self.hold_constraints:
+            raise ValueError("task_semantic_invalid: hold_constraint_required")
+        moves = [o for o in self.operations if o.operation == TaskType.MOVE]
+        spans = resolve_motion_evidence(instruction, len(moves)) if moves else []
+        operation_values = []
+        span_index = 0
+        entity_counts = {entity.entity_id: entity.count for entity in self.entities}
+        pairwise_clause = ("分别" in instruction or "一一对应" in instruction)
+        for item in self.operations:
+            values = item.model_dump(mode="python", exclude={"operation"})
+            role_counts = [entity_counts.get(role, 1) for role in
+                           (item.source, item.target, item.destination, item.reference) if role]
+            if values.get("assignment_mode") == "broadcast" and pairwise_clause and sum(count > 1 for count in role_counts) >= 2:
+                values["assignment_mode"] = "pairwise"
+            if item.operation == TaskType.MOVE and spans:
+                span = spans[span_index]
+                span_index += 1
+                values.update(motion_direction=span.direction, distance_m=span.distance_m,
+                              motion_scale=span.motion_scale)
+            operation_index = len(operation_values)
+            try:
+                operation_values.append(Operation(operation_id=f"op-{operation_index+1}",
+                                                  task_type=item.operation, **values))
+            except ValidationError as exc:
+                message = str(exc.errors()[0].get("msg", "operation is invalid"))
+                raise ValueError(f"task_semantic_invalid: operations.{operation_index}: {message}") from exc
+        entities = [TaskEntity.model_validate(item.model_dump(mode="json")) for item in self.entities]
+        relations = [SpatialRelation(scope=item.scope, subject=item.subject,
+                                     relation=item.relation, reference=item.reference)
+                     for item in self.relations]
+        return TaskIntent(instruction=instruction, arm_usage=self.arm_usage,
+                          hold_constraints=self.hold_constraints, entities=entities,
+                          operations=operation_values, spatial_relations=relations)
+
+    def to_brain_turn(self, instruction: str) -> BrainTurn:
+        task = self.to_task_intent(instruction) if self.status == TurnStatus.ACCEPTED and self.turn_kind == TurnKind.ROBOT_TASK else None
+        return BrainTurn(protocol_version=self.protocol_version, status=self.status,
+                         turn_kind=self.turn_kind, instruction=instruction,
+                         clarification_question=self.clarification_question,
+                         task_intent=task, scene_edit=None, scene_query=None,
+                         session_control=self.session_control,
+                         robot_setup_request=self.robot_setup_request)
 
 
 def _wire_entity(value: dict[str, Any]) -> TaskEntity:
@@ -379,6 +475,79 @@ def _wire_entity(value: dict[str, Any]) -> TaskEntity:
                          details={"errors": exc.errors()}) from exc
 
 
+def _error_path(errors, prefix=()):
+    """Return a stable dotted path from the first Pydantic error."""
+    if not errors:
+        return ".".join(str(part) for part in prefix) or None
+    loc = tuple(prefix) + tuple(errors[0].get("loc", ()))
+    return ".".join(str(part) for part in loc) or None
+
+
+def _is_semantic_validation(errors):
+    semantic_tokens = (
+        "task_semantic_invalid", "scene_edit_", "scene_replace_", "query_",
+        "scene_relation_", "dual_", "motion_", "requires reference",
+    )
+    return any(any(token in str(error.get("msg", "")) for token in semantic_tokens)
+               or error.get("type") == "value_error" for error in errors)
+
+
+def _parse_robot_task_wire(value: dict[str, Any], instruction: str) -> BrainTurn:
+    try:
+        wire = TaskParseWireOutput.model_validate(value)
+        if wire.turn_kind != TurnKind.ROBOT_TASK:
+            raise ValueError("task_semantic_invalid: robot wire route mismatch")
+        return wire.to_brain_turn(instruction)
+    except ValidationError as exc:
+        errors = exc.errors()
+        semantic = _is_semantic_validation(errors)
+        missing = any(error.get("type") == "missing" for error in errors)
+        legacy_payload = isinstance(value, dict) and any(
+            isinstance(item, dict) and "type" in item and "operation" not in item
+            for item in (value.get("operations") or [])
+        )
+        # Keep recorded v2 malformed payloads in the historical provider
+        # bucket.  Real v3 payloads (which use ``operation``) are classified
+        # as semantic protocol failures, so the migration cannot hide live
+        # contract errors behind provider_error.
+        if legacy_payload and semantic and not any(
+                isinstance(item, dict) and item.get("type") in {TaskType.OPEN.value, TaskType.CLOSE.value}
+                for item in (value.get("operations") or [])):
+            semantic = False
+            missing = False
+        if legacy_payload:
+            code = "provider_error"
+            category = "provider_schema"
+        elif semantic:
+            code = "semantic_protocol_error"
+            category = "semantic_protocol"
+        elif missing:
+            code = "qwen_json_incomplete"
+            category = "provider_schema"
+        else:
+            code = "provider_output_schema_invalid"
+            category = "provider_schema"
+        raise BrainError(code, "wire_parse",
+                         "robot_task payload is incomplete or violates the v3 semantic contract",
+                         category=category, path=_error_path(errors),
+                         details={"errors": errors}) from exc
+    except (ValueError, TypeError) as exc:
+        text = str(exc)
+        if text.startswith(("task_semantic_invalid", "scene_", "query_", "dual_", "motion_")):
+            import re
+            match = re.search(r"operations\.\d+", text)
+            legacy_payload = isinstance(value, dict) and any(
+                isinstance(item, dict) and "type" in item and "operation" not in item
+                for item in (value.get("operations") or []))
+            if legacy_payload and not text.startswith("motion_"):
+                raise BrainError("provider_error", "wire_parse", text,
+                                 category="provider_schema", path=match.group(0) if match else None) from exc
+            code = text.split(":", 1)[0] if text.startswith("motion_") else "semantic_protocol_error"
+            raise BrainError(code, "semantic_validation", text,
+                             category="semantic_protocol", path=match.group(0) if match else None) from exc
+        raise
+
+
 def _wire_scene_edit(value: SceneEditWire | dict[str, Any]) -> SceneEditPlan:
     if isinstance(value, dict):
         try:
@@ -386,7 +555,7 @@ def _wire_scene_edit(value: SceneEditWire | dict[str, Any]) -> SceneEditPlan:
         except ValidationError as exc:
             raise BrainError("provider_output_schema_invalid", "wire_parse",
                              "scene_edit payload has invalid field types",
-                             category="provider_schema", path="scene_edit",
+                             category="provider_schema", path=_error_path(exc.errors(), ("scene_edit",)),
                              details={"errors": exc.errors()}) from exc
     elif isinstance(value, SceneEditWire):
         wire = value
@@ -402,8 +571,9 @@ def _wire_scene_edit(value: SceneEditWire | dict[str, Any]) -> SceneEditPlan:
         values = item.model_dump(mode="json")
         values["operation_id"] = item.operation_id or f"op-{index}"
         operations.append(SceneEditIntent.model_validate(values))
-    # Bypass only SceneEditPlan's historical entity/reference cross-field check;
-    # operation/field validators have already run and are retained.
+    # The formal SceneEditPlan validator now understands registered
+    # environment references, so the live wire path no longer needs
+    # ``model_construct`` to bypass entity-only checks.
     entity_ids = {entity.entity_id for entity in entities}
     catalog = SceneReferenceCatalog()
     scene_refs = []
@@ -412,14 +582,23 @@ def _wire_scene_edit(value: SceneEditWire | dict[str, Any]) -> SceneEditPlan:
     for raw_reference in raw_references:
         if raw_reference and raw_reference not in entity_ids:
             spec = catalog.lookup(raw_reference)
-            if spec is not None and all(ref.raw_value != raw_reference for ref in scene_refs):
-                scene_refs.append(CanonicalReference(raw_value=raw_reference,
-                    canonical_value=spec.canonical_id, scope=RefScope.SCENE_REF,
-                    kind=spec.kind))
-    plan = SceneEditPlan.model_construct(
-        scene_basis=wire.scene_basis, entities=entities,
-        relations=relations, operations=operations, scene_refs=scene_refs,
-    )
+            if all(ref.raw_value != raw_reference for ref in scene_refs):
+                scene_refs.append(CanonicalReference(
+                    raw_value=raw_reference,
+                    canonical_value=spec.canonical_id if spec is not None else raw_reference.strip().casefold(),
+                    scope=RefScope.SCENE_REF,
+                    kind=spec.kind if spec is not None else None))
+    try:
+        plan = SceneEditPlan.model_validate({
+            "scene_basis": wire.scene_basis, "entities": entities,
+            "relations": relations, "operations": operations, "scene_refs": scene_refs,
+        })
+    except ValidationError as exc:
+        errors = exc.errors()
+        raise BrainError("semantic_protocol_error", "semantic_validation",
+                         str(errors[0].get("msg", "scene edit semantic validation failed")),
+                         category="semantic_protocol", path=_error_path(errors, ("scene_edit",)),
+                         details={"errors": errors}) from exc
     try:
         plan.validate_semantics(allow_unresolved_references=True)
     except ValueError as exc:
@@ -449,8 +628,8 @@ def _parse_scene_edit_wire(value: dict[str, Any], instruction: str) -> BrainTurn
                          if isinstance(value, dict) else None)
             raise BrainError("semantic_protocol_error", "semantic_validation",
                              str(errors[0].get("msg", "scene edit semantic validation failed")),
-                             category="semantic_protocol", path="scene_edit.scene_basis",
-                             value=raw_basis) from exc
+                             category="semantic_protocol", path=_error_path(errors),
+                             value=raw_basis, details={"errors": errors}) from exc
         raise BrainError("provider_output_schema_invalid", "wire_parse",
                          "task output envelope has invalid field types",
                          category="provider_schema", details={"errors": exc.errors()}) from exc
@@ -475,7 +654,7 @@ def _parse_scene_query_wire(value: dict[str, Any], instruction: str) -> BrainTur
         if any(error.get("type") == "value_error" for error in errors):
             raise BrainError("semantic_protocol_error", "semantic_validation",
                              str(errors[0].get("msg", "scene query semantic validation failed")),
-                             category="semantic_protocol", path="scene_query",
+                             category="semantic_protocol", path=_error_path(errors),
                              details={"errors": errors}) from exc
         raise BrainError("provider_output_schema_invalid", "wire_parse",
                          "task output envelope has invalid field types",
@@ -487,9 +666,11 @@ def _parse_scene_query_wire(value: dict[str, Any], instruction: str) -> BrainTur
     try:
         query = SceneQueryIntent.model_validate(values)
     except ValidationError as exc:
+        errors = exc.errors()
         raise BrainError("semantic_protocol_error", "semantic_validation",
-                         "scene_query payload violates canonical query rules",
-                         category="semantic_protocol", details={"errors": exc.errors()}) from exc
+                         str(errors[0].get("msg", "scene_query payload violates canonical query rules")),
+                         category="semantic_protocol", path=_error_path(errors, ("scene_query",)),
+                         details={"errors": errors}) from exc
     return BrainTurn.model_construct(protocol_version=wire.protocol_version,
                                      status=TurnStatus.ACCEPTED, turn_kind=TurnKind.SCENE_QUERY,
                                      instruction=instruction, scene_query=query)
@@ -559,6 +740,25 @@ def parse_qwen_turn(value, instruction: str) -> BrainTurn:
                              turn_kind=TurnKind.SCENE_QUERY,
                              instruction=instruction,
                              clarification_question="请明确参照物名称，才能判断哪个对象在它旁边、最近或最远。")
+
+    # Robot tasks use the canonical v3 wire -> normalize path.  In particular,
+    # entity_id/semantic_name and operation are the live vocabulary; legacy
+    # id/name/type are accepted only by RobotOperationWire's narrow adapter.
+    if isinstance(value, dict) and value.get("status", TurnStatus.ACCEPTED.value) == TurnStatus.ACCEPTED.value \
+            and value.get("turn_kind") == TurnKind.ROBOT_TASK.value:
+        # This is a deliberately narrow Qwen recovery: an open/close action
+        # without the user's explicitly named handle/reference is a
+        # clarification, never an inferred door or handle.  Replay/direct
+        # TaskParseOutput callers retain strict validation.
+        operations = value.get("operations")
+        if isinstance(operations, list) and any(
+                isinstance(item, dict)
+                and item.get("operation", item.get("type")) in {TaskType.OPEN.value, TaskType.CLOSE.value}
+                and not item.get("reference") for item in operations):
+            return BrainTurn(status=TurnStatus.CLARIFICATION_REQUIRED,
+                             turn_kind=TurnKind.ROBOT_TASK, instruction=instruction,
+                             clarification_question="请说明对应的门/抽屉把手或明确参照物，不能仅指定要打开的门。")
+        return _parse_robot_task_wire(value, instruction)
 
     # Scene edits use the staged wire -> normalize path.  In particular,
     # references such as ``table`` are allowed to remain unresolved here and

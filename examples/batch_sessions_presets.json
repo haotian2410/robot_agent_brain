@@ -1,0 +1,1586 @@
+{
+  "sessions": [
+    {
+      "name": "ur5e_table_empty-L1-01",
+      "difficulty": "L1",
+      "capabilities": [
+        "count",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/1/ur5e_table_empty.json",
+      "instructions": [
+        "有几个苹果？"
+      ]
+    },
+    {
+      "name": "ur5e_table_empty-L1-02",
+      "difficulty": "L1",
+      "capabilities": [
+        "add",
+        "color"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/1/ur5e_table_empty.json",
+      "instructions": [
+        "增加一个苹果",
+        "把苹果改成蓝色"
+      ]
+    },
+    {
+      "name": "ur5e_table_empty-L1-03",
+      "difficulty": "L1",
+      "capabilities": [
+        "relation",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/1/ur5e_table_empty.json",
+      "instructions": [
+        "篮子旁边有什么",
+        "有几个物体"
+      ]
+    },
+    {
+      "name": "ur5e_table_empty-L2-01",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "move",
+        "delete"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/1/ur5e_table_empty.json",
+      "instructions": [
+        "增加一个苹果",
+        "把苹果向右移动五厘米",
+        "删除苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_empty-L2-02",
+      "difficulty": "L2",
+      "capabilities": [
+        "color",
+        "scale",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/1/ur5e_table_empty.json",
+      "instructions": [
+        "把苹果改成蓝色",
+        "把篮子放大一点",
+        "有没有蓝色苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_empty-L2-03",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "relation",
+        "move",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/1/ur5e_table_empty.json",
+      "instructions": [
+        "在桌面上增加一个香蕉",
+        "把离篮子最近的苹果移到香蕉旁边",
+        "把香蕉向左移动一些",
+        "有几个香蕉"
+      ]
+    },
+    {
+      "name": "ur5e_table_empty-L3-01",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "add",
+        "color",
+        "move",
+        "delete",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/1/ur5e_table_empty.json",
+      "instructions": [
+        "增加两个苹果和一个香蕉",
+        "把靠近篮子的苹果改成绿色",
+        "把绿色苹果向左移动五厘米",
+        "删除一个香蕉",
+        "有几个苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_empty-L3-02",
+      "difficulty": "L3",
+      "capabilities": [
+        "relation",
+        "move",
+        "scale",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/1/ur5e_table_empty.json",
+      "instructions": [
+        "把离篮子最远的苹果移到篮子旁边",
+        "把篮子放大一点",
+        "把托盘绕世界Z轴旋转九十度",
+        "把最右边的香蕉改成蓝色",
+        "篮子旁边有什么",
+        "有几个篮子"
+      ]
+    },
+    {
+      "name": "ur5e_table_empty-L3-03",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "on",
+        "inside",
+        "delete",
+        "original"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/1/ur5e_table_empty.json",
+      "instructions": [
+        "在桌面上增加一个苹果",
+        "在篮子旁边增加一个香蕉",
+        "把苹果放进篮子",
+        "删除香蕉",
+        "在原始场景中增加一个托盘"
+      ]
+    },
+    {
+      "name": "ur5e_table_empty-L4-01",
+      "difficulty": "L4",
+      "capabilities": [
+        "query",
+        "add",
+        "move",
+        "color",
+        "scale",
+        "delete",
+        "original",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/1/ur5e_table_empty.json",
+      "instructions": [
+        "有几个苹果",
+        "在桌面右侧增加两个苹果",
+        "把离篮子最近的苹果移到篮子右边",
+        "把最左边的苹果改成蓝色",
+        "把篮子放大一点",
+        "删除一个香蕉",
+        "在原始场景中增加一个托盘",
+        "现在有几个苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_empty-L4-02",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "relation",
+        "move",
+        "rotate",
+        "color",
+        "delete",
+        "original",
+        "query",
+        "add"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/1/ur5e_table_empty.json",
+      "instructions": [
+        "增加两个苹果和一个香蕉",
+        "把两个苹果分别放到两个目标旁边",
+        "把最远的苹果向右移动五厘米",
+        "把托盘绕世界Z轴旋转九十度",
+        "把香蕉改成绿色",
+        "删除绿色香蕉",
+        "在原始场景中增加一个篮子",
+        "有几个篮子",
+        "在原始场景中增加一个苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_empty-L4-03",
+      "difficulty": "L4",
+      "capabilities": [
+        "query",
+        "add",
+        "inside",
+        "move",
+        "scale",
+        "color",
+        "delete",
+        "original",
+        "query",
+        "relation"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/1/ur5e_table_empty.json",
+      "instructions": [
+        "有几个物体",
+        "在桌面上增加一个苹果",
+        "把苹果放进篮子",
+        "把苹果向右移动五厘米",
+        "把篮子放大一点",
+        "把苹果改成蓝色",
+        "删除蓝色苹果",
+        "在原始场景中增加一个托盘",
+        "有几个苹果",
+        "篮子旁边有什么"
+      ]
+    },
+    {
+      "name": "ur5e_table_apple-L1-01",
+      "difficulty": "L1",
+      "capabilities": [
+        "count",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/2/ur5e_table_apple.json",
+      "instructions": [
+        "有几个苹果？"
+      ]
+    },
+    {
+      "name": "ur5e_table_apple-L1-02",
+      "difficulty": "L1",
+      "capabilities": [
+        "add",
+        "color"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/2/ur5e_table_apple.json",
+      "instructions": [
+        "增加一个苹果",
+        "把苹果改成蓝色"
+      ]
+    },
+    {
+      "name": "ur5e_table_apple-L1-03",
+      "difficulty": "L1",
+      "capabilities": [
+        "relation",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/2/ur5e_table_apple.json",
+      "instructions": [
+        "篮子旁边有什么",
+        "有几个物体"
+      ]
+    },
+    {
+      "name": "ur5e_table_apple-L2-01",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "move",
+        "delete"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/2/ur5e_table_apple.json",
+      "instructions": [
+        "增加一个苹果",
+        "把苹果向右移动五厘米",
+        "删除苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_apple-L2-02",
+      "difficulty": "L2",
+      "capabilities": [
+        "color",
+        "scale",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/2/ur5e_table_apple.json",
+      "instructions": [
+        "把苹果改成蓝色",
+        "把篮子放大一点",
+        "有没有蓝色苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_apple-L2-03",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "relation",
+        "move",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/2/ur5e_table_apple.json",
+      "instructions": [
+        "在桌面上增加一个香蕉",
+        "把离篮子最近的苹果移到香蕉旁边",
+        "把香蕉向左移动一些",
+        "有几个香蕉"
+      ]
+    },
+    {
+      "name": "ur5e_table_apple-L3-01",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "add",
+        "color",
+        "move",
+        "delete",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/2/ur5e_table_apple.json",
+      "instructions": [
+        "增加两个苹果和一个香蕉",
+        "把靠近篮子的苹果改成绿色",
+        "把绿色苹果向左移动五厘米",
+        "删除一个香蕉",
+        "有几个苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_apple-L3-02",
+      "difficulty": "L3",
+      "capabilities": [
+        "relation",
+        "move",
+        "scale",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/2/ur5e_table_apple.json",
+      "instructions": [
+        "把离篮子最远的苹果移到篮子旁边",
+        "把篮子放大一点",
+        "把托盘绕世界Z轴旋转九十度",
+        "把最右边的香蕉改成蓝色",
+        "篮子旁边有什么",
+        "有几个篮子"
+      ]
+    },
+    {
+      "name": "ur5e_table_apple-L3-03",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "on",
+        "inside",
+        "delete",
+        "original"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/2/ur5e_table_apple.json",
+      "instructions": [
+        "在桌面上增加一个苹果",
+        "在篮子旁边增加一个香蕉",
+        "把苹果放进篮子",
+        "删除香蕉",
+        "在原始场景中增加一个托盘"
+      ]
+    },
+    {
+      "name": "ur5e_table_apple-L4-01",
+      "difficulty": "L4",
+      "capabilities": [
+        "query",
+        "add",
+        "move",
+        "color",
+        "scale",
+        "delete",
+        "original",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/2/ur5e_table_apple.json",
+      "instructions": [
+        "有几个苹果",
+        "在桌面右侧增加两个苹果",
+        "把离篮子最近的苹果移到篮子右边",
+        "把最左边的苹果改成蓝色",
+        "把篮子放大一点",
+        "删除一个香蕉",
+        "在原始场景中增加一个托盘",
+        "现在有几个苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_apple-L4-02",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "relation",
+        "move",
+        "rotate",
+        "color",
+        "delete",
+        "original",
+        "query",
+        "add"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/2/ur5e_table_apple.json",
+      "instructions": [
+        "增加两个苹果和一个香蕉",
+        "把两个苹果分别放到两个目标旁边",
+        "把最远的苹果向右移动五厘米",
+        "把托盘绕世界Z轴旋转九十度",
+        "把香蕉改成绿色",
+        "删除绿色香蕉",
+        "在原始场景中增加一个篮子",
+        "有几个篮子",
+        "在原始场景中增加一个苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_apple-L4-03",
+      "difficulty": "L4",
+      "capabilities": [
+        "query",
+        "add",
+        "inside",
+        "move",
+        "scale",
+        "color",
+        "delete",
+        "original",
+        "query",
+        "relation"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/2/ur5e_table_apple.json",
+      "instructions": [
+        "有几个物体",
+        "在桌面上增加一个苹果",
+        "把苹果放进篮子",
+        "把苹果向右移动五厘米",
+        "把篮子放大一点",
+        "把苹果改成蓝色",
+        "删除蓝色苹果",
+        "在原始场景中增加一个托盘",
+        "有几个苹果",
+        "篮子旁边有什么"
+      ]
+    },
+    {
+      "name": "ur5e_table_sorting-L1-01",
+      "difficulty": "L1",
+      "capabilities": [
+        "count",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/3/ur5e_table_sorting.json",
+      "instructions": [
+        "有几个苹果？"
+      ]
+    },
+    {
+      "name": "ur5e_table_sorting-L1-02",
+      "difficulty": "L1",
+      "capabilities": [
+        "add",
+        "color"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/3/ur5e_table_sorting.json",
+      "instructions": [
+        "增加一个苹果",
+        "把苹果改成蓝色"
+      ]
+    },
+    {
+      "name": "ur5e_table_sorting-L1-03",
+      "difficulty": "L1",
+      "capabilities": [
+        "relation",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/3/ur5e_table_sorting.json",
+      "instructions": [
+        "篮子旁边有什么",
+        "有几个物体"
+      ]
+    },
+    {
+      "name": "ur5e_table_sorting-L2-01",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "move",
+        "delete"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/3/ur5e_table_sorting.json",
+      "instructions": [
+        "增加一个苹果",
+        "把苹果向右移动五厘米",
+        "删除苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_sorting-L2-02",
+      "difficulty": "L2",
+      "capabilities": [
+        "color",
+        "scale",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/3/ur5e_table_sorting.json",
+      "instructions": [
+        "把苹果改成蓝色",
+        "把篮子放大一点",
+        "有没有蓝色苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_sorting-L2-03",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "relation",
+        "move",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/3/ur5e_table_sorting.json",
+      "instructions": [
+        "在桌面上增加一个香蕉",
+        "把离篮子最近的苹果移到香蕉旁边",
+        "把香蕉向左移动一些",
+        "有几个香蕉"
+      ]
+    },
+    {
+      "name": "ur5e_table_sorting-L3-01",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "add",
+        "color",
+        "move",
+        "delete",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/3/ur5e_table_sorting.json",
+      "instructions": [
+        "增加两个苹果和一个香蕉",
+        "把靠近篮子的苹果改成绿色",
+        "把绿色苹果向左移动五厘米",
+        "删除一个香蕉",
+        "有几个苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_sorting-L3-02",
+      "difficulty": "L3",
+      "capabilities": [
+        "relation",
+        "move",
+        "scale",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/3/ur5e_table_sorting.json",
+      "instructions": [
+        "把离篮子最远的苹果移到篮子旁边",
+        "把篮子放大一点",
+        "把托盘绕世界Z轴旋转九十度",
+        "把最右边的香蕉改成蓝色",
+        "篮子旁边有什么",
+        "有几个篮子"
+      ]
+    },
+    {
+      "name": "ur5e_table_sorting-L3-03",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "on",
+        "inside",
+        "delete",
+        "original"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/3/ur5e_table_sorting.json",
+      "instructions": [
+        "在桌面上增加一个苹果",
+        "在篮子旁边增加一个香蕉",
+        "把苹果放进篮子",
+        "删除香蕉",
+        "在原始场景中增加一个托盘"
+      ]
+    },
+    {
+      "name": "ur5e_table_sorting-L4-01",
+      "difficulty": "L4",
+      "capabilities": [
+        "query",
+        "add",
+        "move",
+        "color",
+        "scale",
+        "delete",
+        "original",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/3/ur5e_table_sorting.json",
+      "instructions": [
+        "有几个苹果",
+        "在桌面右侧增加两个苹果",
+        "把离篮子最近的苹果移到篮子右边",
+        "把最左边的苹果改成蓝色",
+        "把篮子放大一点",
+        "删除一个香蕉",
+        "在原始场景中增加一个托盘",
+        "现在有几个苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_sorting-L4-02",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "relation",
+        "move",
+        "rotate",
+        "color",
+        "delete",
+        "original",
+        "query",
+        "add"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/3/ur5e_table_sorting.json",
+      "instructions": [
+        "增加两个苹果和一个香蕉",
+        "把两个苹果分别放到两个目标旁边",
+        "把最远的苹果向右移动五厘米",
+        "把托盘绕世界Z轴旋转九十度",
+        "把香蕉改成绿色",
+        "删除绿色香蕉",
+        "在原始场景中增加一个篮子",
+        "有几个篮子",
+        "在原始场景中增加一个苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_sorting-L4-03",
+      "difficulty": "L4",
+      "capabilities": [
+        "query",
+        "add",
+        "inside",
+        "move",
+        "scale",
+        "color",
+        "delete",
+        "original",
+        "query",
+        "relation"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/3/ur5e_table_sorting.json",
+      "instructions": [
+        "有几个物体",
+        "在桌面上增加一个苹果",
+        "把苹果放进篮子",
+        "把苹果向右移动五厘米",
+        "把篮子放大一点",
+        "把苹果改成蓝色",
+        "删除蓝色苹果",
+        "在原始场景中增加一个托盘",
+        "有几个苹果",
+        "篮子旁边有什么"
+      ]
+    },
+    {
+      "name": "ur5e_table_cabinet-L1-01",
+      "difficulty": "L1",
+      "capabilities": [
+        "count",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/4/ur5e_table_cabinet.json",
+      "instructions": [
+        "有几个苹果？"
+      ]
+    },
+    {
+      "name": "ur5e_table_cabinet-L1-02",
+      "difficulty": "L1",
+      "capabilities": [
+        "add",
+        "color"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/4/ur5e_table_cabinet.json",
+      "instructions": [
+        "增加一个苹果",
+        "把苹果改成蓝色"
+      ]
+    },
+    {
+      "name": "ur5e_table_cabinet-L1-03",
+      "difficulty": "L1",
+      "capabilities": [
+        "relation",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/4/ur5e_table_cabinet.json",
+      "instructions": [
+        "篮子旁边有什么",
+        "有几个物体"
+      ]
+    },
+    {
+      "name": "ur5e_table_cabinet-L2-01",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "move",
+        "delete"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/4/ur5e_table_cabinet.json",
+      "instructions": [
+        "增加一个苹果",
+        "把苹果向右移动五厘米",
+        "删除苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_cabinet-L2-02",
+      "difficulty": "L2",
+      "capabilities": [
+        "color",
+        "scale",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/4/ur5e_table_cabinet.json",
+      "instructions": [
+        "把苹果改成蓝色",
+        "把篮子放大一点",
+        "有没有蓝色苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_cabinet-L2-03",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "relation",
+        "move",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/4/ur5e_table_cabinet.json",
+      "instructions": [
+        "在桌面上增加一个香蕉",
+        "把离篮子最近的苹果移到香蕉旁边",
+        "把香蕉向左移动一些",
+        "有几个香蕉"
+      ]
+    },
+    {
+      "name": "ur5e_table_cabinet-L3-01",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "add",
+        "color",
+        "move",
+        "delete",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/4/ur5e_table_cabinet.json",
+      "instructions": [
+        "增加两个苹果和一个香蕉",
+        "把靠近篮子的苹果改成绿色",
+        "把绿色苹果向左移动五厘米",
+        "删除一个香蕉",
+        "有几个苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_cabinet-L3-02",
+      "difficulty": "L3",
+      "capabilities": [
+        "relation",
+        "move",
+        "scale",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/4/ur5e_table_cabinet.json",
+      "instructions": [
+        "把离篮子最远的苹果移到篮子旁边",
+        "把篮子放大一点",
+        "把托盘绕世界Z轴旋转九十度",
+        "把最右边的香蕉改成蓝色",
+        "篮子旁边有什么",
+        "有几个篮子"
+      ]
+    },
+    {
+      "name": "ur5e_table_cabinet-L3-03",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "on",
+        "inside",
+        "delete",
+        "original"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/4/ur5e_table_cabinet.json",
+      "instructions": [
+        "在桌面上增加一个苹果",
+        "在篮子旁边增加一个香蕉",
+        "把苹果放进篮子",
+        "删除香蕉",
+        "在原始场景中增加一个托盘"
+      ]
+    },
+    {
+      "name": "ur5e_table_cabinet-L4-01",
+      "difficulty": "L4",
+      "capabilities": [
+        "query",
+        "add",
+        "move",
+        "color",
+        "scale",
+        "delete",
+        "original",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/4/ur5e_table_cabinet.json",
+      "instructions": [
+        "有几个苹果",
+        "在桌面右侧增加两个苹果",
+        "把离篮子最近的苹果移到篮子右边",
+        "把最左边的苹果改成蓝色",
+        "把篮子放大一点",
+        "删除一个香蕉",
+        "在原始场景中增加一个托盘",
+        "现在有几个苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_cabinet-L4-02",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "relation",
+        "move",
+        "rotate",
+        "color",
+        "delete",
+        "original",
+        "query",
+        "add"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/4/ur5e_table_cabinet.json",
+      "instructions": [
+        "增加两个苹果和一个香蕉",
+        "把两个苹果分别放到两个目标旁边",
+        "把最远的苹果向右移动五厘米",
+        "把托盘绕世界Z轴旋转九十度",
+        "把香蕉改成绿色",
+        "删除绿色香蕉",
+        "在原始场景中增加一个篮子",
+        "有几个篮子",
+        "在原始场景中增加一个苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_cabinet-L4-03",
+      "difficulty": "L4",
+      "capabilities": [
+        "query",
+        "add",
+        "inside",
+        "move",
+        "scale",
+        "color",
+        "delete",
+        "original",
+        "query",
+        "relation"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/4/ur5e_table_cabinet.json",
+      "instructions": [
+        "有几个物体",
+        "在桌面上增加一个苹果",
+        "把苹果放进篮子",
+        "把苹果向右移动五厘米",
+        "把篮子放大一点",
+        "把苹果改成蓝色",
+        "删除蓝色苹果",
+        "在原始场景中增加一个托盘",
+        "有几个苹果",
+        "篮子旁边有什么"
+      ]
+    },
+    {
+      "name": "cobotmagic_table_grasp-L1-01",
+      "difficulty": "L1",
+      "capabilities": [
+        "count",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/5/cobotmagic_table_grasp.json",
+      "instructions": [
+        "有几个苹果？"
+      ]
+    },
+    {
+      "name": "cobotmagic_table_grasp-L1-02",
+      "difficulty": "L1",
+      "capabilities": [
+        "add",
+        "color"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/5/cobotmagic_table_grasp.json",
+      "instructions": [
+        "增加一个苹果",
+        "把苹果改成蓝色"
+      ]
+    },
+    {
+      "name": "cobotmagic_table_grasp-L1-03",
+      "difficulty": "L1",
+      "capabilities": [
+        "relation",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/5/cobotmagic_table_grasp.json",
+      "instructions": [
+        "篮子旁边有什么",
+        "有几个物体"
+      ]
+    },
+    {
+      "name": "cobotmagic_table_grasp-L2-01",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "move",
+        "delete"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/5/cobotmagic_table_grasp.json",
+      "instructions": [
+        "增加一个苹果",
+        "把苹果向右移动五厘米",
+        "删除苹果"
+      ]
+    },
+    {
+      "name": "cobotmagic_table_grasp-L2-02",
+      "difficulty": "L2",
+      "capabilities": [
+        "color",
+        "scale",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/5/cobotmagic_table_grasp.json",
+      "instructions": [
+        "把苹果改成蓝色",
+        "把篮子放大一点",
+        "有没有蓝色苹果"
+      ]
+    },
+    {
+      "name": "cobotmagic_table_grasp-L2-03",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "relation",
+        "move",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/5/cobotmagic_table_grasp.json",
+      "instructions": [
+        "在桌面上增加一个香蕉",
+        "把离篮子最近的苹果移到香蕉旁边",
+        "把香蕉向左移动一些",
+        "有几个香蕉"
+      ]
+    },
+    {
+      "name": "cobotmagic_table_grasp-L3-01",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "add",
+        "color",
+        "move",
+        "delete",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/5/cobotmagic_table_grasp.json",
+      "instructions": [
+        "增加两个苹果和一个香蕉",
+        "把靠近篮子的苹果改成绿色",
+        "把绿色苹果向左移动五厘米",
+        "删除一个香蕉",
+        "有几个苹果"
+      ]
+    },
+    {
+      "name": "cobotmagic_table_grasp-L3-02",
+      "difficulty": "L3",
+      "capabilities": [
+        "relation",
+        "move",
+        "scale",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/5/cobotmagic_table_grasp.json",
+      "instructions": [
+        "把离篮子最远的苹果移到篮子旁边",
+        "把篮子放大一点",
+        "把托盘绕世界Z轴旋转九十度",
+        "把最右边的香蕉改成蓝色",
+        "篮子旁边有什么",
+        "有几个篮子"
+      ]
+    },
+    {
+      "name": "cobotmagic_table_grasp-L3-03",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "on",
+        "inside",
+        "delete",
+        "original"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/5/cobotmagic_table_grasp.json",
+      "instructions": [
+        "在桌面上增加一个苹果",
+        "在篮子旁边增加一个香蕉",
+        "把苹果放进篮子",
+        "删除香蕉",
+        "在原始场景中增加一个托盘"
+      ]
+    },
+    {
+      "name": "cobotmagic_table_grasp-L4-01",
+      "difficulty": "L4",
+      "capabilities": [
+        "query",
+        "add",
+        "move",
+        "color",
+        "scale",
+        "delete",
+        "original",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/5/cobotmagic_table_grasp.json",
+      "instructions": [
+        "有几个苹果",
+        "在桌面右侧增加两个苹果",
+        "把离篮子最近的苹果移到篮子右边",
+        "把最左边的苹果改成蓝色",
+        "把篮子放大一点",
+        "删除一个香蕉",
+        "在原始场景中增加一个托盘",
+        "现在有几个苹果"
+      ]
+    },
+    {
+      "name": "cobotmagic_table_grasp-L4-02",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "relation",
+        "move",
+        "rotate",
+        "color",
+        "delete",
+        "original",
+        "query",
+        "add"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/5/cobotmagic_table_grasp.json",
+      "instructions": [
+        "增加两个苹果和一个香蕉",
+        "把两个苹果分别放到两个目标旁边",
+        "把最远的苹果向右移动五厘米",
+        "把托盘绕世界Z轴旋转九十度",
+        "把香蕉改成绿色",
+        "删除绿色香蕉",
+        "在原始场景中增加一个篮子",
+        "有几个篮子",
+        "在原始场景中增加一个苹果"
+      ]
+    },
+    {
+      "name": "cobotmagic_table_grasp-L4-03",
+      "difficulty": "L4",
+      "capabilities": [
+        "query",
+        "add",
+        "inside",
+        "move",
+        "scale",
+        "color",
+        "delete",
+        "original",
+        "query",
+        "relation"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/5/cobotmagic_table_grasp.json",
+      "instructions": [
+        "有几个物体",
+        "在桌面上增加一个苹果",
+        "把苹果放进篮子",
+        "把苹果向右移动五厘米",
+        "把篮子放大一点",
+        "把苹果改成蓝色",
+        "删除蓝色苹果",
+        "在原始场景中增加一个托盘",
+        "有几个苹果",
+        "篮子旁边有什么"
+      ]
+    },
+    {
+      "name": "piper_r_table_twist-L1-01",
+      "difficulty": "L1",
+      "capabilities": [
+        "count",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/6/piper_r_table_twist.json",
+      "instructions": [
+        "有几个苹果？"
+      ]
+    },
+    {
+      "name": "piper_r_table_twist-L1-02",
+      "difficulty": "L1",
+      "capabilities": [
+        "add",
+        "color"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/6/piper_r_table_twist.json",
+      "instructions": [
+        "增加一个苹果",
+        "把苹果改成蓝色"
+      ]
+    },
+    {
+      "name": "piper_r_table_twist-L1-03",
+      "difficulty": "L1",
+      "capabilities": [
+        "relation",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/6/piper_r_table_twist.json",
+      "instructions": [
+        "篮子旁边有什么",
+        "有几个物体"
+      ]
+    },
+    {
+      "name": "piper_r_table_twist-L2-01",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "move",
+        "delete"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/6/piper_r_table_twist.json",
+      "instructions": [
+        "增加一个苹果",
+        "把苹果向右移动五厘米",
+        "删除苹果"
+      ]
+    },
+    {
+      "name": "piper_r_table_twist-L2-02",
+      "difficulty": "L2",
+      "capabilities": [
+        "color",
+        "scale",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/6/piper_r_table_twist.json",
+      "instructions": [
+        "把苹果改成蓝色",
+        "把篮子放大一点",
+        "有没有蓝色苹果"
+      ]
+    },
+    {
+      "name": "piper_r_table_twist-L2-03",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "relation",
+        "move",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/6/piper_r_table_twist.json",
+      "instructions": [
+        "在桌面上增加一个香蕉",
+        "把离篮子最近的苹果移到香蕉旁边",
+        "把香蕉向左移动一些",
+        "有几个香蕉"
+      ]
+    },
+    {
+      "name": "piper_r_table_twist-L3-01",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "add",
+        "color",
+        "move",
+        "delete",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/6/piper_r_table_twist.json",
+      "instructions": [
+        "增加两个苹果和一个香蕉",
+        "把靠近篮子的苹果改成绿色",
+        "把绿色苹果向左移动五厘米",
+        "删除一个香蕉",
+        "有几个苹果"
+      ]
+    },
+    {
+      "name": "piper_r_table_twist-L3-02",
+      "difficulty": "L3",
+      "capabilities": [
+        "relation",
+        "move",
+        "scale",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/6/piper_r_table_twist.json",
+      "instructions": [
+        "把离篮子最远的苹果移到篮子旁边",
+        "把篮子放大一点",
+        "把托盘绕世界Z轴旋转九十度",
+        "把最右边的香蕉改成蓝色",
+        "篮子旁边有什么",
+        "有几个篮子"
+      ]
+    },
+    {
+      "name": "piper_r_table_twist-L3-03",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "on",
+        "inside",
+        "delete",
+        "original"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/6/piper_r_table_twist.json",
+      "instructions": [
+        "在桌面上增加一个苹果",
+        "在篮子旁边增加一个香蕉",
+        "把苹果放进篮子",
+        "删除香蕉",
+        "在原始场景中增加一个托盘"
+      ]
+    },
+    {
+      "name": "piper_r_table_twist-L4-01",
+      "difficulty": "L4",
+      "capabilities": [
+        "query",
+        "add",
+        "move",
+        "color",
+        "scale",
+        "delete",
+        "original",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/6/piper_r_table_twist.json",
+      "instructions": [
+        "有几个苹果",
+        "在桌面右侧增加两个苹果",
+        "把离篮子最近的苹果移到篮子右边",
+        "把最左边的苹果改成蓝色",
+        "把篮子放大一点",
+        "删除一个香蕉",
+        "在原始场景中增加一个托盘",
+        "现在有几个苹果"
+      ]
+    },
+    {
+      "name": "piper_r_table_twist-L4-02",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "relation",
+        "move",
+        "rotate",
+        "color",
+        "delete",
+        "original",
+        "query",
+        "add"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/6/piper_r_table_twist.json",
+      "instructions": [
+        "增加两个苹果和一个香蕉",
+        "把两个苹果分别放到两个目标旁边",
+        "把最远的苹果向右移动五厘米",
+        "把托盘绕世界Z轴旋转九十度",
+        "把香蕉改成绿色",
+        "删除绿色香蕉",
+        "在原始场景中增加一个篮子",
+        "有几个篮子",
+        "在原始场景中增加一个苹果"
+      ]
+    },
+    {
+      "name": "piper_r_table_twist-L4-03",
+      "difficulty": "L4",
+      "capabilities": [
+        "query",
+        "add",
+        "inside",
+        "move",
+        "scale",
+        "color",
+        "delete",
+        "original",
+        "query",
+        "relation"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/6/piper_r_table_twist.json",
+      "instructions": [
+        "有几个物体",
+        "在桌面上增加一个苹果",
+        "把苹果放进篮子",
+        "把苹果向右移动五厘米",
+        "把篮子放大一点",
+        "把苹果改成蓝色",
+        "删除蓝色苹果",
+        "在原始场景中增加一个托盘",
+        "有几个苹果",
+        "篮子旁边有什么"
+      ]
+    },
+    {
+      "name": "ur5e_table_push_pull-L1-01",
+      "difficulty": "L1",
+      "capabilities": [
+        "count",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/7/ur5e_table_push_pull.json",
+      "instructions": [
+        "有几个苹果？"
+      ]
+    },
+    {
+      "name": "ur5e_table_push_pull-L1-02",
+      "difficulty": "L1",
+      "capabilities": [
+        "add",
+        "color"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/7/ur5e_table_push_pull.json",
+      "instructions": [
+        "增加一个苹果",
+        "把苹果改成蓝色"
+      ]
+    },
+    {
+      "name": "ur5e_table_push_pull-L1-03",
+      "difficulty": "L1",
+      "capabilities": [
+        "relation",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/7/ur5e_table_push_pull.json",
+      "instructions": [
+        "篮子旁边有什么",
+        "有几个物体"
+      ]
+    },
+    {
+      "name": "ur5e_table_push_pull-L2-01",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "move",
+        "delete"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/7/ur5e_table_push_pull.json",
+      "instructions": [
+        "增加一个苹果",
+        "把苹果向右移动五厘米",
+        "删除苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_push_pull-L2-02",
+      "difficulty": "L2",
+      "capabilities": [
+        "color",
+        "scale",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/7/ur5e_table_push_pull.json",
+      "instructions": [
+        "把苹果改成蓝色",
+        "把篮子放大一点",
+        "有没有蓝色苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_push_pull-L2-03",
+      "difficulty": "L2",
+      "capabilities": [
+        "add",
+        "relation",
+        "move",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/7/ur5e_table_push_pull.json",
+      "instructions": [
+        "在桌面上增加一个香蕉",
+        "把离篮子最近的苹果移到香蕉旁边",
+        "把香蕉向左移动一些",
+        "有几个香蕉"
+      ]
+    },
+    {
+      "name": "ur5e_table_push_pull-L3-01",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "add",
+        "color",
+        "move",
+        "delete",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/7/ur5e_table_push_pull.json",
+      "instructions": [
+        "增加两个苹果和一个香蕉",
+        "把靠近篮子的苹果改成绿色",
+        "把绿色苹果向左移动五厘米",
+        "删除一个香蕉",
+        "有几个苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_push_pull-L3-02",
+      "difficulty": "L3",
+      "capabilities": [
+        "relation",
+        "move",
+        "scale",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/7/ur5e_table_push_pull.json",
+      "instructions": [
+        "把离篮子最远的苹果移到篮子旁边",
+        "把篮子放大一点",
+        "把托盘绕世界Z轴旋转九十度",
+        "把最右边的香蕉改成蓝色",
+        "篮子旁边有什么",
+        "有几个篮子"
+      ]
+    },
+    {
+      "name": "ur5e_table_push_pull-L3-03",
+      "difficulty": "L3",
+      "capabilities": [
+        "add",
+        "on",
+        "inside",
+        "delete",
+        "original"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/7/ur5e_table_push_pull.json",
+      "instructions": [
+        "在桌面上增加一个苹果",
+        "在篮子旁边增加一个香蕉",
+        "把苹果放进篮子",
+        "删除香蕉",
+        "在原始场景中增加一个托盘"
+      ]
+    },
+    {
+      "name": "ur5e_table_push_pull-L4-01",
+      "difficulty": "L4",
+      "capabilities": [
+        "query",
+        "add",
+        "move",
+        "color",
+        "scale",
+        "delete",
+        "original",
+        "query"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/7/ur5e_table_push_pull.json",
+      "instructions": [
+        "有几个苹果",
+        "在桌面右侧增加两个苹果",
+        "把离篮子最近的苹果移到篮子右边",
+        "把最左边的苹果改成蓝色",
+        "把篮子放大一点",
+        "删除一个香蕉",
+        "在原始场景中增加一个托盘",
+        "现在有几个苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_push_pull-L4-02",
+      "difficulty": "L4",
+      "capabilities": [
+        "add",
+        "relation",
+        "move",
+        "rotate",
+        "color",
+        "delete",
+        "original",
+        "query",
+        "add"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/7/ur5e_table_push_pull.json",
+      "instructions": [
+        "增加两个苹果和一个香蕉",
+        "把两个苹果分别放到两个目标旁边",
+        "把最远的苹果向右移动五厘米",
+        "把托盘绕世界Z轴旋转九十度",
+        "把香蕉改成绿色",
+        "删除绿色香蕉",
+        "在原始场景中增加一个篮子",
+        "有几个篮子",
+        "在原始场景中增加一个苹果"
+      ]
+    },
+    {
+      "name": "ur5e_table_push_pull-L4-03",
+      "difficulty": "L4",
+      "capabilities": [
+        "query",
+        "add",
+        "inside",
+        "move",
+        "scale",
+        "color",
+        "delete",
+        "original",
+        "query",
+        "relation"
+      ],
+      "scene": "../../webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/7/ur5e_table_push_pull.json",
+      "instructions": [
+        "有几个物体",
+        "在桌面上增加一个苹果",
+        "把苹果放进篮子",
+        "把苹果向右移动五厘米",
+        "把篮子放大一点",
+        "把苹果改成蓝色",
+        "删除蓝色苹果",
+        "在原始场景中增加一个托盘",
+        "有几个苹果",
+        "篮子旁边有什么"
+      ]
+    }
+  ]
+}
