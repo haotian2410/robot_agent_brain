@@ -176,3 +176,79 @@ def test_invalid_query_target_is_semantic_error_and_missing_near_is_clarificatio
     assert turn.status.value == "clarification_required"
     with pytest.raises(BrainError, match="semantic_protocol_error"):
         parse_qwen_turn(envelope(turn_kind="scene_query", scene_edit=None, scene_query={**query, "relations": [], "target": "missing"}), "查询不存在")
+
+
+def test_selection_root_relation_is_canonicalized_into_scene_query():
+    """Constrained decoders sometimes put the selector on the envelope."""
+    query = {
+        "query_type": "selection",
+        "entities": [
+            {"entity_id": "apple", "semantic_name": "apple", "category": "fruit"},
+            {"entity_id": "basket", "semantic_name": "basket", "category": "container"},
+        ],
+        "relations": [], "target": "apple", "reference": None,
+        "predicate": None, "evidence_source": "scene",
+    }
+    value = envelope(turn_kind="scene_query", scene_edit=None, scene_query=query,
+                     relations=[{"subject": "apple", "relation": "nearest", "reference": "basket"}])
+    turn = parse_qwen_turn(value, "哪个苹果离篮子最近")
+    assert turn.scene_query is not None
+    assert turn.scene_query.relations[0].relation.value == "nearest"
+    assert turn.scene_query.relations[0].reference == "basket"
+
+
+def test_selection_root_entities_are_canonicalized_into_scene_query():
+    query = {
+        "query_type": "selection", "entities": [], "relations": [], "target": "apple",
+        "reference": None, "predicate": None, "evidence_source": "scene",
+    }
+    value = envelope(turn_kind="scene_query", scene_edit=None, scene_query=query,
+                     entities=[
+                         {"entity_id": "apple", "semantic_name": "apple", "category": "fruit"},
+                         {"entity_id": "basket", "semantic_name": "basket", "category": "container"},
+                     ], relations=[{"subject": "apple", "relation": "nearest", "reference": "basket"}])
+    turn = parse_qwen_turn(value, "哪个苹果离篮子最近")
+    assert [item.entity_id for item in turn.scene_query.entities] == ["apple", "basket"]
+
+
+def test_missing_farthest_reference_is_a_clarification_for_scene_edit():
+    value = envelope(scene_edit={
+        "scene_basis": "current",
+        "entities": [{"entity_id": "banana", "semantic_name": "banana", "category": "fruit"}],
+        "relations": [{"scope": "selection", "subject": "banana", "relation": "farthest", "reference": None}],
+        "operations": [{"operation": "translate", "target": "banana", "direction": "left",
+                         "distance_m": 0.05, "relation": None, "reference": None}],
+    })
+    turn = parse_qwen_turn(value, "把最远的香蕉向左移动五厘米")
+    assert turn.status.value == "clarification_required"
+    assert "参照物" in (turn.clarification_question or "")
+
+
+def test_replace_schema_error_points_at_replacement_entity():
+    value = envelope(scene_edit={
+        "scene_basis": "current",
+        "entities": [{"entity_id": "apple", "semantic_name": "apple", "category": "fruit"}],
+        "relations": [],
+        "operations": [{"operation": "replace", "target": "apple", "relation": None, "reference": None}],
+    })
+    with pytest.raises(BrainError) as error:
+        parse_qwen_turn(value, "把苹果替换成香蕉")
+    assert error.value.issue.code == "provider_output_schema_invalid"
+    assert error.value.issue.category == "provider_schema"
+    assert error.value.issue.path.endswith("replacement_entity")
+
+
+def test_replace_wire_preserves_declared_replacement_entity():
+    value = envelope(scene_edit={
+        "scene_basis": "current",
+        "entities": [
+            {"entity_id": "apple", "semantic_name": "apple", "category": "fruit"},
+            {"entity_id": "banana", "semantic_name": "banana", "category": "fruit"},
+        ],
+        "relations": [],
+        "operations": [{"operation": "replace", "target": "apple",
+                         "replacement_entity": "banana", "relation": None, "reference": None}],
+    })
+    turn = parse_qwen_turn(value, "把苹果替换成香蕉")
+    assert turn.scene_edit is not None
+    assert turn.scene_edit.operations[0].replacement_entity == "banana"

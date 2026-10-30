@@ -141,7 +141,13 @@ class SceneLayoutPolicy:
         for candidate in base:
             result.append(candidate)
             for dx, dy in ((self.clearance_m, 0), (-self.clearance_m, 0), (0, self.clearance_m), (0, -self.clearance_m)):
-                result.append(WorldTransform((candidate.position[0] + dx, candidate.position[1] + dy), candidate.linear))
+                # Keep the candidate's original world height.  Near placement
+                # searches only in the horizontal plane; dropping Z here
+                # creates a malformed 2-D Transform and used to surface as a
+                # provider/validation error instead of a safe layout result.
+                result.append(WorldTransform((candidate.position[0] + dx,
+                                               candidate.position[1] + dy,
+                                               candidate.position[2]), candidate.linear))
         return result
 
     @staticmethod

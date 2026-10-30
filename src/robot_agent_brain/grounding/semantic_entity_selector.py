@@ -113,8 +113,6 @@ class SemanticEntitySelector:
                 candidates = [by_object[value] for value in ids]
             else:
                 candidates = eligible
-            if entity.quantity_mode == QuantityMode.CANDIDATE_POOL and len(candidates) != entity.count:
-                raise ValueError("grounding_candidate_pool_count_mismatch: " + identifier)
             selected_relations = []
             for relation in relations:
                 if relation.scope != "selection" or relation.subject != identifier:
@@ -127,6 +125,19 @@ class SemanticEntitySelector:
                     reference = references[0].object_id_in_scene
                 selected_relations.append(ResolvedSelectionRelation(
                     relation=relation.relation, reference_object_id=reference))
+            # A single extremum/nearest/farthest phrase describes the result
+            # cardinality, not the size of the candidate pool.  Older Qwen
+            # payloads occasionally encoded it as candidate_pool/count=1;
+            # rejecting before applying the selector made ordinary phrases
+            # such as “最左边的苹果” fail with an internal pool mismatch.
+            selector_relations = {"leftmost", "rightmost", "frontmost", "backmost",
+                                  "highest", "lowest", "nearest", "farthest", "near"}
+            result_selector = any(item.relation.value in selector_relations
+                                  for item in selected_relations)
+            if (entity.quantity_mode == QuantityMode.CANDIDATE_POOL
+                    and not (entity.count == 1 and result_selector)
+                    and len(candidates) != entity.count):
+                raise ValueError("grounding_candidate_pool_count_mismatch: " + identifier)
             candidates = self.relations.resolve(candidates, selected_relations, scene, identifier)
             resolved[identifier] = candidates
             visiting.remove(identifier)

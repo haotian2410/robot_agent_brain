@@ -453,6 +453,18 @@ class BrainApplication:
                     "reference_scope": canonical.scope.value if canonical else "entity_or_scene_object",
                     "kind": canonical.kind if canonical else None,
                 })
+        # A failed live v3 parse has no BrainTurn from which to infer the
+        # parser stage.  Do not mislabel it as the legacy adapter: that made
+        # current Qwen contract failures look like an old-format request.
+        if turn is not None and getattr(turn, "protocol_version", "").endswith(".v3"):
+            parser_stage = "canonical_v3"
+            protocol_version = "task_understanding.v3"
+        elif stage == "understanding" and understanding_calls:
+            parser_stage = "canonical_v3_rejected"
+            protocol_version = "task_understanding.v3"
+        else:
+            parser_stage = "legacy_v2_adapter"
+            protocol_version = getattr(turn, "protocol_version", "task_understanding.v2")
         report.metrics = {"understanding_calls":understanding_calls,
                           "skill_planning_calls":planning_trace.model_calls if planning_trace else 0,
                           "planner_requested":self.config.planner,
@@ -460,13 +472,11 @@ class BrainApplication:
                           "vision_calls":sum(call.get("stage") == "vision_grounding" for call in current_calls),
                           "elapsed_seconds":time.monotonic()-started,
                           "model_calls":current_calls,
-                          "protocol_version": getattr(turn, "protocol_version", "task_understanding.v2"),
-                          "parser_stage": ("canonical_v3" if turn is not None and getattr(turn, "protocol_version", "").endswith(".v3")
-                                           else "legacy_v2_adapter"),
+                          "protocol_version": protocol_version,
+                          "parser_stage": parser_stage,
                           "semantic_protocol": {
-                              "protocol_version": getattr(turn, "protocol_version", "task_understanding.v2"),
-                              "parser_stage": ("canonical_v3" if turn is not None and getattr(turn, "protocol_version", "").endswith(".v3")
-                                                else "legacy_v2_adapter"),
+                              "protocol_version": protocol_version,
+                              "parser_stage": parser_stage,
                               "turn_kind": turn.turn_kind if turn is not None else None,
                               "scene_basis": scene_edit.scene_basis if scene_edit is not None else None,
                               "references": protocol_references,

@@ -150,6 +150,112 @@ def test_qwen_valid_open_close_reference_remains_accepted():
     assert turn.task_intent.operations[0].reference == "handle"
 
 
+def test_qwen_explicit_replace_phrase_repairs_omitted_replacement_role():
+    """The live adapter may recover one explicit role Qwen omitted.
+
+    The canonical parser remains strict for replay/direct callers; only an
+    explicit Chinese replacement phrase at the HTTP boundary is used to add
+    the missing entity/role.  This mirrors the malformed response observed in
+    the empty-scene retest without allowing an implicit replacement guess.
+    """
+    raw = {
+        "protocol_version": "task_understanding.v3",
+        "status": "accepted",
+        "turn_kind": "scene_edit",
+        "scene_edit": {
+            "scene_basis": "current",
+            "entities": [
+                {"entity_id": "apple", "semantic_name": "apple", "category": "fruit"},
+            ],
+            "relations": [],
+            "operations": [
+                {"operation": "replace", "target": "apple"},
+            ],
+        },
+        "scene_query": None,
+        "session_control": None,
+        "robot_setup_request": None,
+        "entities": [],
+        "operations": [],
+        "relations": [],
+    }
+    provider = QwenHTTPProvider(
+        "http://example/v1", "qwen-test",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))
+        ),
+    )
+    turn = provider.understand_turn(
+        TaskUnderstandingRequest(instruction="把苹果替换成香蕉")
+    )
+    assert turn.scene_edit is not None
+    operation = turn.scene_edit.operations[0]
+    assert operation.operation == "replace"
+    assert operation.replacement_entity == "banana"
+    assert {entity.entity_id for entity in turn.scene_edit.entities} == {"apple", "banana"}
+
+
+def test_qwen_explicit_farthest_colour_clarification_is_recovered():
+    raw = {
+        "protocol_version": "task_understanding.v3",
+        "status": "clarification_required",
+        "turn_kind": "robot_task",
+        "clarification_question": "请说明参照物",
+        "scene_edit": None, "scene_query": None, "session_control": None,
+        "robot_setup_request": None, "entities": [], "operations": [], "relations": [],
+    }
+    provider = QwenHTTPProvider(
+        "http://example/v1", "qwen-test",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))
+        ),
+    )
+    turn = provider.understand_turn(
+        TaskUnderstandingRequest(instruction="把离篮子最远的香蕉改成蓝色")
+    )
+    assert turn.turn_kind.value == "scene_edit"
+    assert turn.scene_edit is not None
+    assert turn.scene_edit.relations[0].relation.value == "farthest"
+    assert turn.scene_edit.relations[0].reference == "basket"
+    assert turn.scene_edit.operations[0].properties == {"color": "blue"}
+
+
+def test_qwen_multi_replace_without_roles_is_not_broadcast_repaired():
+    raw = {
+        "protocol_version": "task_understanding.v3",
+        "status": "accepted",
+        "turn_kind": "scene_edit",
+        "scene_edit": {
+            "scene_basis": "current",
+            "entities": [
+                {"entity_id": "apple", "semantic_name": "apple", "category": "fruit"},
+                {"entity_id": "basket", "semantic_name": "basket", "category": "container"},
+            ],
+            "relations": [],
+            "operations": [
+                {"operation": "replace", "target": "apple"},
+                {"operation": "replace", "target": "basket"},
+            ],
+        },
+        "scene_query": None,
+        "session_control": None,
+        "robot_setup_request": None,
+        "entities": [],
+        "operations": [],
+        "relations": [],
+    }
+    provider = QwenHTTPProvider(
+        "http://example/v1", "qwen-test",
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))
+        ),
+    )
+    with pytest.raises(QwenProviderError):
+        provider.understand_turn(
+            TaskUnderstandingRequest(instruction="把苹果替换成香蕉，把篮子替换成托盘")
+        )
+
+
 def test_qwen_unrelated_accepted_invalid_output_stays_provider_error():
     raw = _task_payload(operations=[{"type": "grasp"}])
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
@@ -181,3 +287,21 @@ def test_application_reports_clarification_without_scene_or_commands(tmp_path):
     assert report.clarification_question == "请明确双臂分工"
     assert report.reply == "请明确双臂分工"
     assert report.scene_version is None and "commands" not in report.artifacts
+
+
+def test_vision_invalid_bbox_is_classified_as_output_schema_error():
+    from robot_agent_brain.contracts.camera import CameraFrame
+    from robot_agent_brain.models.vision_grounding import VisionEntity
+    # Reversed y coordinates reproduce the cabinet grounding failure seen in
+    # the old batch report.  It is a model-output contract error, not a
+    # transport/provider outage.
+    raw = json.dumps({"detections": [{"entity": "door", "bbox": [550, 480, 520, 520]}]})
+    provider = QwenHTTPProvider("http://example/v1", "qwen-test",
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=raw))))
+    frame = CameraFrame(scene_id=1, scene_version=1, scene_sub_version=0,
+                        camera_id="5", width=1, height=1,
+                        rgb=b"png")
+    with pytest.raises(QwenProviderError) as error:
+        provider.detect(frame, [VisionEntity(entity_id="door", semantic_name="door")])
+    assert error.value.code == "vision_output_schema_invalid"
+    assert provider.calls[0]["error_code"] == "vision_output_schema_invalid"

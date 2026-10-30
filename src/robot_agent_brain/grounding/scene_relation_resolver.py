@@ -54,9 +54,14 @@ class SceneRelationResolver:
                     raise ValueError("scene_relation_evidence_missing: inside")
                 if not selected:
                     return []
-                if kind in {"nearest", "farthest"}:
+                if kind in {"nearest", "farthest", "near"}:
                     scores = {obj.object_id_in_scene: math.dist(position(obj)[:2], position(reference)[:2]) for obj in selected}
-                    value = (min if kind == "nearest" else max)(scores.values())
+                    # In a selection relation, “near/靠近” means choose the
+                    # closest member of the candidate set.  The query route's
+                    # ``neighbors`` relation remains the AABB-boundary
+                    # threshold query; this branch is only for selecting one
+                    # subject for an edit/task.
+                    value = min(scores.values()) if kind in {"nearest", "near"} else max(scores.values())
                     selected = [obj for obj in selected if math.isclose(scores[obj.object_id_in_scene], value, rel_tol=0, abs_tol=1e-9)]
                 elif kind == "on":
                     semantics = [(obj, index.semantic(obj.object_id_in_scene)) for obj in selected]

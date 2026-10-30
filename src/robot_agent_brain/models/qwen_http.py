@@ -139,7 +139,14 @@ class QwenHTTPProvider:
                 "task_semantic_invalid", "scene_edit_", "scene_replace_", "query_",
                 "dialogue_", "motion_distance_evidence_missing", "motion_clause_binding_ambiguous",
             )
-            code = "semantic_protocol_error" if text.startswith(semantic_prefixes) else "provider_error"
+            # A VLM response can be valid JSON but still violate the strict
+            # detection contract (for example, a reversed bbox).  This is a
+            # model-output schema problem, not transport failure, and must be
+            # distinguishable in the task report/UI.
+            if stage == "vision_grounding" and isinstance(exc, ValidationError):
+                code = "vision_output_schema_invalid"
+            else:
+                code = "semantic_protocol_error" if text.startswith(semantic_prefixes) else "provider_error"
             if text in {"motion_distance_evidence_missing", "motion_clause_binding_ambiguous"}:
                 code = text
             if code == "semantic_protocol_error":
@@ -171,6 +178,8 @@ class QwenHTTPProvider:
 
     def understand_turn(self, request: TaskUnderstandingRequest):
         def parse(value):
+            value = _repair_explicit_replace(value, request.instruction)
+            value = _repair_explicit_selector_clarification(value, request.instruction)
             return parse_qwen_turn(value, request.instruction)
         return self._call("task_understanding", TASK_UNDERSTANDING_PROMPT,
                           prompt_payload({"instruction": request.instruction}), task_understanding_v3_wire_schema(), parse)
@@ -224,6 +233,115 @@ def _task_intent_from_v3(value: dict[str, Any], instruction: str) -> TaskIntent:
     if turn.task_intent is None:
         raise ValueError("task_semantic_invalid: task understanding did not return robot_task")
     return turn.task_intent
+
+
+def _repair_explicit_replace(value: dict[str, Any], instruction: str) -> dict[str, Any]:
+    """Fill a narrowly recoverable replace role omitted by Qwen.
+
+    The user phrase is authoritative here: ``替换成/替换为/换成 X`` names the
+    replacement explicitly.  This is performed only at the live Qwen adapter
+    boundary; direct/replay ``parse_qwen_turn`` remains strict and reports a
+    missing ``replacement_entity``.  We never invent a model from an implicit
+    ``replace`` operation or overwrite a non-empty model value.
+    """
+    if not isinstance(value, dict) or value.get("status", "accepted") != "accepted":
+        return value
+    if value.get("turn_kind") != "scene_edit" or not isinstance(value.get("scene_edit"), dict):
+        return value
+    scene_edit = value["scene_edit"]
+    operations = scene_edit.get("operations")
+    if not isinstance(operations, list):
+        return value
+    replace_ops = [item for item in operations
+                   if isinstance(item, dict) and item.get("operation") == "replace"]
+    # Do not broadcast one phrase to multiple replacement operations.  A
+    # multi-object instruction may name different replacements, and guessing
+    # that they all use the same target would turn a recoverable schema error
+    # into a wrong scene edit.  Such payloads remain strict failures until the
+    # model emits each replacement role explicitly.
+    if len(replace_ops) != 1 or any(item.get("replacement_entity") for item in replace_ops):
+        return value
+    match = re.search(r"(?:替换成|替换为|换成|replace(?:d)?\s+(?:with|by))\s*([\w一-龥 -]+)", instruction, re.IGNORECASE)
+    if not match:
+        return value
+    raw_name = match.group(1).strip(" ，,。.!！?？\t\n")
+    if not raw_name:
+        return value
+    aliases = {"苹果": "apple", "香蕉": "banana", "篮子": "basket", "托盘": "tray",
+               "apple": "apple", "banana": "banana", "basket": "basket", "tray": "tray"}
+    semantic_name = aliases.get(raw_name.casefold(), aliases.get(raw_name, raw_name))
+    entities = list(scene_edit.get("entities") or [])
+    replacement_id = None
+    for entity in entities:
+        if isinstance(entity, dict) and (entity.get("entity_id") == semantic_name or
+                                         str(entity.get("semantic_name", "")).casefold() == raw_name.casefold()):
+            replacement_id = entity.get("entity_id")
+            break
+    if replacement_id is None:
+        replacement_id = semantic_name.replace(" ", "_")
+        category = "fruit" if semantic_name in {"apple", "banana"} else (
+            "container" if semantic_name in {"basket", "tray"} else "object")
+        entities.append({"entity_id": replacement_id, "semantic_name": semantic_name,
+                         "category": category, "count": 1, "quantity_mode": "single"})
+    scene_edit = {**scene_edit, "entities": entities,
+                  "operations": [({**item, "replacement_entity": replacement_id}
+                                   if isinstance(item, dict) and item.get("operation") == "replace" and not item.get("replacement_entity")
+                                   else item) for item in operations]}
+    return {**value, "scene_edit": scene_edit}
+
+
+def _repair_explicit_selector_clarification(value: dict[str, Any], instruction: str) -> dict[str, Any]:
+    """Recover one explicit selector edit that Qwen incorrectly clarifies.
+
+    This is intentionally narrower than a general semantic parser.  When the
+    user names the subject, reference, extremum and a concrete colour in the
+    same sentence, there is enough evidence to build the v3 scene-edit wire
+    payload without asking the model to invent a scene object or a position.
+    Other clarification responses remain untouched.
+    """
+    if not isinstance(value, dict) or value.get("status") != "clarification_required":
+        return value
+    text = instruction.strip()
+    match = re.search(
+        r"(?:离|距|距离)\s*([\w一-龥]+)\s*(最近|最远)\s*的\s*([\w一-龥]+)\s*"
+        r"(?:改成|改为|变成)\s*([#\w一-龥-]+)", text,
+    )
+    if not match:
+        return value
+    reference_raw, relation_raw, subject_raw, color_raw = (part.strip() for part in match.groups())
+    aliases = {
+        "苹果": "apple", "香蕉": "banana", "篮子": "basket", "托盘": "tray",
+        "apple": "apple", "banana": "banana", "basket": "basket", "tray": "tray",
+    }
+    colors = {
+        "蓝": "blue", "蓝色": "blue", "红": "red", "红色": "red",
+        "绿": "green", "绿色": "green", "黄": "yellow", "黄色": "yellow",
+        "白": "white", "白色": "white", "黑": "black", "黑色": "black",
+    }
+    reference = aliases.get(reference_raw.casefold())
+    subject = aliases.get(subject_raw.casefold())
+    color = colors.get(color_raw.casefold(), color_raw)
+    if reference is None or subject is None or not color:
+        return value
+    entities = [
+        {"entity_id": subject, "semantic_name": subject, "category": "fruit" if subject in {"apple", "banana"} else "object"},
+        {"entity_id": reference, "semantic_name": reference, "category": "container" if reference in {"basket", "tray"} else "object"},
+    ]
+    scene_edit = {
+        "scene_basis": "current",
+        "entities": entities,
+        "relations": [{"scope": "selection", "subject": subject,
+                       "relation": "nearest" if relation_raw == "最近" else "farthest",
+                       "reference": reference}],
+        "operations": [{"operation": "update_properties", "target": subject,
+                        "properties": {"color": color}}],
+    }
+    return {
+        "protocol_version": "task_understanding.v3", "status": "accepted",
+        "turn_kind": "scene_edit", "scene_edit": scene_edit,
+        "scene_query": None, "session_control": None,
+        "robot_setup_request": None, "entities": [], "operations": [], "relations": [],
+    }
 
 
 def _extract_json(content: str) -> dict[str, Any]:

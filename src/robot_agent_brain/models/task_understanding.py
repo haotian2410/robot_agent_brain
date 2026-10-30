@@ -553,10 +553,23 @@ def _wire_scene_edit(value: SceneEditWire | dict[str, Any]) -> SceneEditPlan:
         try:
             wire = SceneEditWire.model_validate(value)
         except ValidationError as exc:
+            errors = exc.errors()
+            # A replace operation has a deliberately narrow schema: the
+            # replacement role is required and must be a declared entity.
+            # Keep this in the provider-schema bucket (rather than exposing
+            # a generic semantic_protocol_error), but point at the actual
+            # missing role so callers can repair the model response.
+            first_message = str(errors[0].get("msg", "")) if errors else ""
+            path = _error_path(errors, ("scene_edit",))
+            if "scene_replace_entity_required_or_forbidden" in first_message:
+                path = (path or "scene_edit") + ".replacement_entity"
+            elif "scene_replace_unknown_entity" in first_message:
+                path = (path or "scene_edit") + ".replacement_entity"
             raise BrainError("provider_output_schema_invalid", "wire_parse",
                              "scene_edit payload has invalid field types",
-                             category="provider_schema", path=_error_path(exc.errors(), ("scene_edit",)),
-                             details={"errors": exc.errors()}) from exc
+                             category="provider_schema", path=path,
+                             details={"errors": errors,
+                                      "error_class": "provider_schema_invalid" if "scene_replace_" in first_message else None}) from exc
     elif isinstance(value, SceneEditWire):
         wire = value
     else:
@@ -615,6 +628,20 @@ def _parse_scene_edit_wire(value: dict[str, Any], instruction: str) -> BrainTurn
         # Keep the diagnostic category stable for callers and logs even though
         # Pydantic enforces the enum at the wire boundary.
         errors = exc.errors()
+        replace_error = next((error for error in errors
+                              if "scene_replace_" in str(error.get("msg", ""))), None)
+        if replace_error is not None:
+            # ``replacement_entity`` is an operation role, so expose that
+            # role rather than the enclosing operation index.  This makes a
+            # malformed replace payload actionable for the provider and for
+            # Web clients without leaking the full validation traceback.
+            path = _error_path(errors)
+            if path and not path.endswith("replacement_entity"):
+                path += ".replacement_entity"
+            raise BrainError("provider_output_schema_invalid", "wire_parse",
+                             "scene_edit replacement operation is missing or has an invalid replacement_entity",
+                             category="provider_schema", path=path,
+                             details={"errors": errors, "error_class": "provider_schema_invalid"}) from exc
         semantic_error = any(
             error.get("type") == "value_error"
             and any(token in str(error.get("msg", "")) for token in (
@@ -663,6 +690,21 @@ def _parse_scene_query_wire(value: dict[str, Any], instruction: str) -> BrainTur
         raise BrainError("semantic_protocol_error", "semantic_validation",
                          "scene_query payload is required", category="semantic_protocol")
     values = wire.scene_query.model_dump(mode="json")
+    # Selection queries carry their spatial selector in ``relations``.  Some
+    # constrained responses repeat the same reference in the legacy top-level
+    # slots (and occasionally leave a stale predicate there).  When there is
+    # exactly one relation and its reference agrees, the nested relation is
+    # the canonical source; clear the redundant top-level fields.  Conflicting
+    # references remain a schema error instead of being guessed away.
+    if values.get("query_type") == "selection" and values.get("relations"):
+        relations = values["relations"]
+        if len(relations) == 1 and values.get("reference") == relations[0].get("reference"):
+            values["reference"] = None
+            values["predicate"] = None
+        elif values.get("reference") is not None or values.get("predicate") is not None:
+            raise BrainError("query_schema_invalid", "semantic_validation",
+                             "selection query must keep reference and predicate inside relations",
+                             category="semantic_protocol", path="scene_query.relations")
     try:
         query = SceneQueryIntent.model_validate(values)
     except ValidationError as exc:
@@ -696,15 +738,54 @@ def _open_close_reference_missing(value, error):
 
 def parse_qwen_turn(value, instruction: str) -> BrainTurn:
     """Parse live model output with narrow, fail-closed clarification recovery."""
-    # Some constrained decoders put a query's explicit selector in the robot root
-    # relations slot. Move it only when there is exactly one unambiguous owner;
-    # never invent a reference, predicate, entity, or operation.
-    if (isinstance(value, dict) and value.get("status") == "accepted"
-            and value.get("turn_kind") == "scene_query" and not value.get("entities")
-            and not value.get("operations") and isinstance(value.get("scene_query"), dict)
-            and value.get("relations") and not value["scene_query"].get("relations")
-            and value["scene_query"].get("query_type") == "selection"):
+    # Some constrained decoders put a query's explicit selector in the robot
+    # root ``relations`` slot.  Canonicalize that one narrow shape into the
+    # typed scene_query payload before Pydantic validation.  We do not invent
+    # a reference/predicate or move relations for any other query kind.
+    if (isinstance(value, dict) and value.get("status", "accepted") == "accepted"
+            and value.get("turn_kind") == "scene_query"
+            and isinstance(value.get("scene_query"), dict)
+            and value["scene_query"].get("query_type") == "selection"
+            and value.get("relations")
+            and not value["scene_query"].get("relations")):
         value = {**value, "scene_query": {**value["scene_query"], "relations": value["relations"]}, "relations": []}
+    if (isinstance(value, dict) and value.get("status", "accepted") == "accepted"
+            and value.get("turn_kind") == "scene_query"
+            and isinstance(value.get("scene_query"), dict)
+            and value.get("entities")
+            and not value["scene_query"].get("entities")):
+        # A few constrained decoders still place canonical query entities on
+        # the envelope.  Moving them into the typed route is safe only when
+        # the route has no entities yet; never merge two competing payloads.
+        value = {**value, "scene_query": {**value["scene_query"], "entities": value["entities"]}, "entities": []}
+
+    # nearest/farthest is a selector relation, not a unary adjective.  A
+    # missing reference is recoverable for live Qwen output, but must never be
+    # guessed (and direct Pydantic callers still receive strict validation).
+    if isinstance(value, dict) and value.get("status", "accepted") == "accepted":
+        relation_values = []
+        query_payload = value.get("scene_query")
+        if isinstance(query_payload, dict):
+            relation_values.extend(query_payload.get("relations") or [])
+        scene_edit_payload = value.get("scene_edit")
+        if isinstance(scene_edit_payload, dict):
+            relation_values.extend(scene_edit_payload.get("relations") or [])
+            # Prompt-canonical scene edits put selectors in ``relations``,
+            # but tolerate a constrained decoder placing the same selector
+            # on an operation so we can return a useful clarification rather
+            # than an opaque enum/schema failure.
+            relation_values.extend(
+                item for item in (scene_edit_payload.get("operations") or [])
+                if isinstance(item, dict) and item.get("relation") in {"nearest", "farthest"}
+            )
+        relation_values.extend(value.get("relations") or [])
+        if any(isinstance(item, dict)
+               and item.get("relation") in {"nearest", "farthest"}
+               and not item.get("reference") for item in relation_values):
+            return BrainTurn(status=TurnStatus.CLARIFICATION_REQUIRED,
+                             turn_kind=TurnKind.SCENE_QUERY if value.get("turn_kind") == "scene_query" else TurnKind.SCENE_EDIT,
+                             instruction=instruction,
+                             clarification_question="请说明相对于哪个物体或位置判断最近/最远，不能猜测缺失的参照物。")
     if isinstance(value, dict) and value.get("status") in {
         TurnStatus.CLARIFICATION_REQUIRED.value, TurnStatus.UNSUPPORTED_TASK.value,
     }:

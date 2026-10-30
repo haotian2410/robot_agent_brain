@@ -93,7 +93,7 @@ class SceneQueryEngine:
                        "above": "上方", "below": "下方", "on": "支撑面上"}[intent.predicate]
             reply = f"{'是' if holds else '否'}，按场景世界坐标，{label(subject)}{'在' if holds else '不在'}{label(reference)}的{wording}。"
         elif intent.query_type == "selection":
-            spatial = next((r for r in intent.relations if r.subject == intent.target and r.relation.value in {"nearest", "farthest"}), None)
+            spatial = next((r for r in intent.relations if r.subject == intent.target and r.relation.value in {"near", "nearest", "farthest"}), None)
             if spatial:
                 reference = self._unique(selector.select(spatial.reference, intent.entities, intent.relations, scene,
                                           bindings_override=overrides), spatial.reference)

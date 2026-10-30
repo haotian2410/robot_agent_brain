@@ -315,6 +315,25 @@ update
 }
 ```
 
+### 替换
+
+`replace` 必须同时声明旧对象 `target` 和新模型对应的
+`replacement_entity`。两个实体都必须出现在本轮 `scene_edit.entities` 中，不能
+把“替换成香蕉”写成只有 `target=apple` 的空操作，也不能把替换误判成机器人搬运：
+
+```json
+{
+  "operation": "replace",
+  "target": "apple",
+  "replacement_entity": "banana",
+  "relation": null,
+  "reference": null
+}
+```
+
+如果用户没有明确新对象，或新对象不能唯一对应资产，返回
+`clarification_required`，不要猜测替换模型。
+
 ### 放在支撑面上
 
 ```json
@@ -503,6 +522,9 @@ left_of、right_of、front_of、behind、above、below、near、on、inside
 - 门、抽屉、把手或旋钮关系不明确；
 - 场景编辑和机器人执行混在同一句且无法安全拆分；
 - 用户要求的关系不能用当前结构明确表达。
+- “最近/最远/靠近”作为选择条件时必须同时给出参照物；“最远的香蕉”
+  不得凭空选择桌子、篮子或当前焦点，缺少参照物必须返回
+  `clarification_required`，问题应询问“相对于哪个物体或位置”。
 
 ## 12. 最终检查
 
