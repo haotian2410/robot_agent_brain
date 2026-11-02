@@ -39,6 +39,24 @@ def parser():
         cmd.add_argument("--seed", type=int)
         cmd.add_argument("--debug", action="store_true", default=None)
         cmd.add_argument("--json", action="store_true")
+    compile_cmd = commands.add_parser("batch-compile", help="Compile an Excel test matrix into batch session JSON")
+    compile_cmd.add_argument("--matrix", required=True)
+    compile_cmd.add_argument("--kind", choices=["generated_edit", "known_scene"], required=True)
+    compile_cmd.add_argument("--asset-roles", default="config/batch_asset_roles.json")
+    compile_cmd.add_argument("--seed", type=int, default=0)
+    compile_cmd.add_argument("--output", required=True)
+    compile_cmd.add_argument("--asset-root")
+    compile_cmd.add_argument("--config")
+    campaign = commands.add_parser("batch-campaign", help="Run a success-gated generated/edit matrix campaign")
+    campaign.add_argument("--matrix", required=True)
+    campaign.add_argument("--asset-roles", default="config/batch_asset_roles.json")
+    campaign.add_argument("--seed", type=int, default=0)
+    campaign.add_argument("--agent-url", default="http://127.0.0.1:8500")
+    campaign.add_argument("--gateway-url", default="http://127.0.0.1:8099")
+    campaign.add_argument("--browser-id")
+    campaign.add_argument("--task-timeout", type=float, default=300)
+    campaign.add_argument("--allow-missing-screenshots", action="store_true")
+    campaign.add_argument("--output-dir", default="var/batch-campaigns")
     schema = commands.add_parser("schemas")
     schema.add_argument("--output-dir", default="var/schemas")
     serve = commands.add_parser("serve", help="Local WebEditor Agent; plans only, no Control")
@@ -54,6 +72,22 @@ def parser():
 def main(argv=None):
     args = parser().parse_args(argv)
     try:
+        if args.command == "batch-compile":
+            from .batch_matrix import compile_from_cli
+            output = compile_from_cli(matrix=args.matrix, kind=args.kind, asset_roles=args.asset_roles,
+                                      seed=args.seed, output=args.output, asset_root=args.asset_root,
+                                      config=args.config)
+            print(output)
+            return 0
+        if args.command == "batch-campaign":
+            from .batch_campaign import run_campaign
+            result, output = run_campaign(matrix=args.matrix, asset_roles=args.asset_roles, seed=args.seed,
+                                          agent_url=args.agent_url, gateway_url=args.gateway_url,
+                                          browser_id=args.browser_id, task_timeout=args.task_timeout,
+                                          screenshot_required=not args.allow_missing_screenshots,
+                                          output_dir=args.output_dir)
+            print(json.dumps({"stages": len(result["stages"]), "output_dir": str(output)}, ensure_ascii=False))
+            return 0 if all(item.get("status", "").startswith(("passed", "skipped")) for item in result["stages"]) else 4
         if args.command == "serve":
             from .web.service import serve
             return serve(args)

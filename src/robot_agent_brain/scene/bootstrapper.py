@@ -13,7 +13,8 @@ from .scene_graph import WorldTransform, world_transform
 IDENTITY = ((1., 0., 0.), (0., 1., 0.), (0., 0., 1.))
 
 
-def make_object(identifier, name, reference, position, *, category=None, support=None, driver=None, asset_type=None):
+def make_object(identifier, name, reference, position, *, category=None, support=None, driver=None,
+                asset_type=None, force_override_color=None):
     components = [
         SceneComponent(component_type="Transform", properties={
             "position": list(position), "quaternion_xyzw": [0, 0, 0, 1],
@@ -23,6 +24,9 @@ def make_object(identifier, name, reference, position, *, category=None, support
     if category is not None:
         components.append(SceneComponent(component_type="Semantic", properties={
             "semantic_name": name, "category": category, "support": support}))
+    if force_override_color is not None:
+        components.append(SceneComponent(component_type="MeshRenderer", properties={
+            "forceOverrideColor": force_override_color}))
     if driver is not None:
         components.append(SceneComponent(component_type="RobotDriver", properties=driver.model_dump(mode="json")))
     return SceneObject(object_id_in_scene=identifier, object_name_in_scene=name, components=components)
@@ -162,10 +166,16 @@ class SceneBootstrapper:
             binding = AssetResolver(self.assets, aliases=self.resolver.aliases,
                                     category_aliases=self.resolver.category_aliases,
                                     default_refs=self.default_scene_edit_assets).resolve(
-                                        entity, allow_default=turn.turn_kind == "scene_edit")
+                                        entity,
+                                        allow_default=turn.turn_kind == "scene_edit",
+                                        allow_color_override=turn.turn_kind == "scene_edit")
             model = binding.model
             bindings[entity.entity_id] = model.metadata_ref
             assumptions.extend(binding.assumptions)
+            if binding.color_override:
+                assumptions.append(
+                    f"source=color_override: {model.semantic_name} -> {binding.color_override}"
+                )
             count = entity.count
             if entity.all_available:
                 count = self.defaults.initial_counts.get(model.semantic_name)
@@ -181,7 +191,7 @@ class SceneBootstrapper:
             for _ in range(count):
                 if next_id > 2**53 - 1:
                     raise ValueError("scene_object_ids_exhausted")
-                specs.append((next_id, model, model.category or entity.category))
+                specs.append((next_id, model, model.category or entity.category, binding.color_override))
                 candidates[entity.entity_id].append(next_id)
                 next_id += 1
         rng = random.Random(self.seed)
@@ -189,7 +199,7 @@ class SceneBootstrapper:
         xmax, ymax = self.defaults.workspace_max
         for _ in range(self.defaults.max_attempts):
             placed, bounds = [], []
-            for identifier, model, category in specs:
+            for identifier, model, category, color_override in specs:
                 from .geometry import local_bounds
                 low, high = local_bounds(model)
                 limits = ((xmin - low[0], xmax - high[0]), (ymin - low[1], ymax - high[1]))
@@ -203,7 +213,8 @@ class SceneBootstrapper:
                     break
                 placed.append(make_object(identifier, model.semantic_name, model.metadata_ref,
                                           position, category=category, support=table_id,
-                                          asset_type=model.asset_type if self.template_scene else None))
+                                          asset_type=model.asset_type if self.template_scene else None,
+                                          force_override_color=color_override))
                 bounds.append(box)
             if len(placed) != len(specs):
                 continue

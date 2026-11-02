@@ -1,0 +1,2605 @@
+{
+  "seed": 20261031,
+  "roles": {
+    "object_a": {
+      "kind": "pickable",
+      "candidates": [
+        "apple",
+        "banana",
+        "baseball",
+        "pen",
+        "marker"
+      ],
+      "selected": {
+        "semantic_name": "baseball",
+        "metadata_ref": "$LIBRARY_SERVER/3",
+        "type": "model",
+        "id": 3
+      }
+    },
+    "object_b": {
+      "kind": "pickable",
+      "candidates": [
+        "apple",
+        "banana",
+        "baseball",
+        "pen",
+        "marker"
+      ],
+      "selected": {
+        "semantic_name": "banana",
+        "metadata_ref": "$LIBRARY_SERVER/2",
+        "type": "model",
+        "id": 2
+      }
+    },
+    "placement_1": {
+      "kind": "container",
+      "candidates": [
+        "basket",
+        "tray",
+        "sugar_box",
+        "mug"
+      ],
+      "selected": {
+        "semantic_name": "mug",
+        "metadata_ref": "$LIBRARY_SERVER/14",
+        "type": "model",
+        "id": 14
+      }
+    },
+    "placement_2": {
+      "kind": "container",
+      "candidates": [
+        "basket",
+        "tray",
+        "sugar_box",
+        "mug"
+      ],
+      "selected": {
+        "semantic_name": "basket",
+        "metadata_ref": "$LIBRARY_SERVER/4",
+        "type": "model",
+        "id": 4
+      }
+    },
+    "surface_1": {
+      "kind": "surface",
+      "candidates": [
+        "table",
+        "coffee_table"
+      ],
+      "selected": {
+        "semantic_name": "table",
+        "metadata_ref": "$LIBRARY_SERVER/29",
+        "type": "model",
+        "id": 29
+      }
+    }
+  },
+  "rows": [
+    {
+      "sheet": "matrix",
+      "row": 2,
+      "session": "single_on_surface-L1-01",
+      "flow_id": "single_on_surface",
+      "parent_flow_id": "",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 3,
+      "session": "single_right_region-L1-01",
+      "flow_id": "single_right_region",
+      "parent_flow_id": "",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 4,
+      "session": "single_left_region-L1-01",
+      "flow_id": "single_left_region",
+      "parent_flow_id": "",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 5,
+      "session": "single_near_container-L1-01",
+      "flow_id": "single_near_container",
+      "parent_flow_id": "",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 6,
+      "session": "single_inside_container-L1-01",
+      "flow_id": "single_inside_container",
+      "parent_flow_id": "",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 7,
+      "session": "single_center_surface-L1-01",
+      "flow_id": "single_center_surface",
+      "parent_flow_id": "",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 8,
+      "session": "single_explicit_color-L1-01",
+      "flow_id": "single_explicit_color",
+      "parent_flow_id": "",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 9,
+      "session": "single_default_asset-L1-01",
+      "flow_id": "single_default_asset",
+      "parent_flow_id": "",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 10,
+      "session": "single_multi_style-L1-01",
+      "flow_id": "single_multi_style",
+      "parent_flow_id": "",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 11,
+      "session": "single_layout_corner-L1-01",
+      "flow_id": "single_layout_corner",
+      "parent_flow_id": "",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 12,
+      "session": "pair_seed-L1-01",
+      "flow_id": "pair_seed",
+      "parent_flow_id": "",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 15,
+      "session": "edit_color-L2-01",
+      "flow_id": "edit_color",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 15,
+      "session": "edit_color-L2-02",
+      "flow_id": "edit_color",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 15,
+      "session": "edit_color-L2-03",
+      "flow_id": "edit_color",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 15,
+      "session": "edit_color-L2-04",
+      "flow_id": "edit_color",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 16,
+      "session": "edit_quantified_move-L3-01",
+      "flow_id": "edit_quantified_move",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 16,
+      "session": "edit_quantified_move-L3-02",
+      "flow_id": "edit_quantified_move",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 16,
+      "session": "edit_quantified_move-L3-03",
+      "flow_id": "edit_quantified_move",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 16,
+      "session": "edit_quantified_move-L3-04",
+      "flow_id": "edit_quantified_move",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 17,
+      "session": "edit_fuzzy_move-L3-01",
+      "flow_id": "edit_fuzzy_move",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 17,
+      "session": "edit_fuzzy_move-L3-02",
+      "flow_id": "edit_fuzzy_move",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 17,
+      "session": "edit_fuzzy_move-L3-03",
+      "flow_id": "edit_fuzzy_move",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 18,
+      "session": "edit_region-L3-01",
+      "flow_id": "edit_region",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 18,
+      "session": "edit_region-L3-02",
+      "flow_id": "edit_region",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 18,
+      "session": "edit_region-L3-03",
+      "flow_id": "edit_region",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 19,
+      "session": "edit_delete-L2-01",
+      "flow_id": "edit_delete",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 19,
+      "session": "edit_delete-L2-02",
+      "flow_id": "edit_delete",
+      "parent_flow_id": "single_on_surface",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 20,
+      "session": "edit_relative_near-L4-01",
+      "flow_id": "edit_relative_near",
+      "parent_flow_id": "pair_seed",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 21,
+      "session": "edit_relative_on-L4-01",
+      "flow_id": "edit_relative_on",
+      "parent_flow_id": "pair_seed",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "sheet": "matrix",
+      "row": 22,
+      "session": "edit_relative_inside-L4-01",
+      "flow_id": "edit_relative_inside",
+      "parent_flow_id": "pair_seed",
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    }
+  ],
+  "matrix": "/home/cscvlab/lht/robot_agent_brain/examples/matrices/generated_edit_matrix.xlsx",
+  "kind": "generated_edit",
+  "session_count": 30
+}

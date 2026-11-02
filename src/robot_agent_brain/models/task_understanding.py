@@ -548,7 +548,85 @@ def _parse_robot_task_wire(value: dict[str, Any], instruction: str) -> BrainTurn
         raise
 
 
-def _wire_scene_edit(value: SceneEditWire | dict[str, Any]) -> SceneEditPlan:
+def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str) -> dict[str, Any]:
+    """Normalize the narrow, unambiguous corner-placement language.
+
+    Qwen occasionally represents ``桌子左上角`` as an ``add`` operation with
+    ``direction=left`` (and sometimes an extra distance).  ``add`` has no
+    motion semantics: a corner is a region on the table.  Only the exact
+    corner phrases are normalized here; arbitrary direction/distance payloads
+    remain strict protocol errors.
+    """
+    if not isinstance(value, dict) or not isinstance(instruction, str):
+        return value
+    scene_edit = value.get("scene_edit")
+    if not isinstance(scene_edit, dict) or not isinstance(scene_edit.get("operations"), list):
+        return value
+    text = instruction.casefold()
+    region = None
+    for phrases, candidate in (
+        (("左上角", "左上方"), "left_front"),
+        (("右上角", "右上方"), "right_front"),
+        (("左下角", "左下方"), "left_back"),
+        (("右下角", "右下方"), "right_back"),
+    ):
+        if any(phrase in text for phrase in phrases):
+            region = candidate
+            break
+    if region is None:
+        return value
+    operations = []
+    changed = False
+    for raw in scene_edit["operations"]:
+        if not isinstance(raw, dict) or raw.get("operation") != "add":
+            operations.append(raw)
+            continue
+        item = dict(raw)
+        # A numeric distance or a second motion field is not a corner
+        # placement.  Leave it untouched so the normal validator reports the
+        # exact forbidden field rather than silently changing user intent.
+        if any(item.get(key) is not None for key in ("distance_m", "motion_scale", "axis", "angle_deg")):
+            operations.append(raw)
+            continue
+        item["relation"] = "on"
+        item["reference"] = item.get("reference") or "table"
+        item["placement_region"] = region
+        item["placement_hint"] = item.get("placement_hint") or "any"
+        item.pop("direction", None)
+        item.pop("coordinate_frame", None)
+        changed = True
+        operations.append(item)
+    if not changed:
+        return value
+    return {**value, "scene_edit": {**scene_edit, "operations": operations}}
+
+
+def _surface_side_ambiguity(instruction: str) -> str | None:
+    """Return a clarification for ``桌子左/右侧`` without a support context.
+
+    The distinction between ``桌面右侧`` (a table region) and ``桌子右边``
+    (an external relative placement) is a protocol rule, not a model guess.
+    Apply it before accepting a model payload so a Qwen response that silently
+    changes the wording to ``on table`` cannot commit a different operation.
+    """
+    text = instruction.casefold().replace(" ", "")
+    if "桌面" in text or "地面" in text or "地上" in text:
+        return None
+    direction = None
+    for needle, display in (("左侧", "左侧"), ("右侧", "右侧"), ("左边", "左侧"), ("右边", "右侧"),
+                            ("前方", "前方"), ("后方", "后方")):
+        if "桌子" + needle in text or "桌" + needle in text:
+            direction = display
+            break
+    if direction is None:
+        return None
+    surface = "桌面" + direction
+    return f"“桌子{direction}”未说明是在{surface}还是桌外地面。请明确说“{surface}”或补充支撑面。"
+
+
+def _wire_scene_edit(value: SceneEditWire | dict[str, Any], instruction: str | None = None) -> SceneEditPlan:
+    if isinstance(value, dict) and instruction is not None:
+        value = _normalize_scene_edit_layout_output(value, instruction)
     if isinstance(value, dict):
         try:
             wire = SceneEditWire.model_validate(value)
@@ -621,6 +699,7 @@ def _wire_scene_edit(value: SceneEditWire | dict[str, Any]) -> SceneEditPlan:
 
 
 def _parse_scene_edit_wire(value: dict[str, Any], instruction: str) -> BrainTurn:
+    value = _normalize_scene_edit_layout_output(value, instruction)
     try:
         wire = TaskParseWireOutput.model_validate(value)
     except ValidationError as exc:
@@ -660,7 +739,7 @@ def _parse_scene_edit_wire(value: dict[str, Any], instruction: str) -> BrainTurn
         raise BrainError("provider_output_schema_invalid", "wire_parse",
                          "task output envelope has invalid field types",
                          category="provider_schema", details={"errors": exc.errors()}) from exc
-    plan = _wire_scene_edit(wire.scene_edit) if wire.scene_edit is not None else None
+    plan = _wire_scene_edit(wire.scene_edit, instruction) if wire.scene_edit is not None else None
     if plan is None:
         raise BrainError("semantic_protocol_error", "semantic_validation",
                          "scene_edit payload is required", category="semantic_protocol")
@@ -786,6 +865,13 @@ def parse_qwen_turn(value, instruction: str) -> BrainTurn:
                              turn_kind=TurnKind.SCENE_QUERY if value.get("turn_kind") == "scene_query" else TurnKind.SCENE_EDIT,
                              instruction=instruction,
                              clarification_question="请说明相对于哪个物体或位置判断最近/最远，不能猜测缺失的参照物。")
+    if (isinstance(value, dict) and value.get("status", "accepted") == "accepted"
+            and value.get("turn_kind") == TurnKind.SCENE_EDIT.value):
+        ambiguity = _surface_side_ambiguity(instruction)
+        if ambiguity:
+            return BrainTurn(status=TurnStatus.CLARIFICATION_REQUIRED,
+                             turn_kind=TurnKind.SCENE_EDIT, instruction=instruction,
+                             clarification_question=ambiguity)
     if isinstance(value, dict) and value.get("status") in {
         TurnStatus.CLARIFICATION_REQUIRED.value, TurnStatus.UNSUPPORTED_TASK.value,
     }:

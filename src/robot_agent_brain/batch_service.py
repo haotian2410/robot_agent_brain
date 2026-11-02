@@ -24,10 +24,109 @@ from .web.protocol import digest
 _SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
 _ARTIFACTS = {"scene_config", "scene_patch", "commands", "query_result"}
 
+_RESULT_COLUMNS = [
+    "用户指令", "真实浏览器场景截图", "系统返回的任务结果",
+    "session", "difficulty", "category", "round", "taskID",
+    "scene_id", "scene_version", "scene_sub_version", "sceneDigest",
+    "camera_id", "outcome", "terminal", "executed", "error_code",
+    "diagnostic_id", "artifacts", "evidence_directory",
+    "asset_role_mapping", "parent_flow_id", "random_seed",
+]
+
+
+def _write_results_workbook(root: Path, rows: list[dict]) -> Path | None:
+    """Write the reader-facing batch result workbook when the optional extra is installed.
+
+    The service must keep producing JSON evidence even on minimal installations,
+    so a missing ``openpyxl`` dependency is recorded instead of turning a
+    completed batch into a transport failure.  ``pip install -e '.[batch]'``
+    enables the workbook export.
+    """
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Alignment, Font, PatternFill
+    except ImportError as exc:
+        (root / "batch_test_results.error.json").write_text(
+            json.dumps({"code": "batch_results_requires_openpyxl",
+                        "message": "Install the optional batch extra: pip install -e '.[batch]'",
+                        "detail": str(exc)}, ensure_ascii=False, indent=2), encoding="utf-8")
+        return None
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "results"
+    sheet.append(_RESULT_COLUMNS)
+    header_fill = PatternFill("solid", fgColor="1F4E78")
+    for cell in sheet[1]:
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for row in rows:
+        scene = row.get("scene") if isinstance(row.get("scene"), dict) else {}
+        screenshot = row.get("screenshot") if isinstance(row.get("screenshot"), dict) else {}
+        evidence = row.get("evidence_directory")
+        if not evidence:
+            session = row.get("output_name") or _safe(str(row.get("session", "session")), "session")
+            turn = int(row.get("turn", 0) or 0)
+            evidence = str(root / "sessions" / session / "turns" / f"{turn:04d}")
+        screenshot_path = Path(evidence) / "screenshot.png"
+        screenshot_value = ""
+        if screenshot.get("status") == "captured" and screenshot_path.is_file():
+            screenshot_value = str(screenshot_path)
+        artifacts = row.get("artifacts", {})
+        system_result = row.get("result") or row.get("error") or {
+            "outcome": row.get("outcome"), "status": row.get("status"),
+            "executed": row.get("executed", False),
+        }
+        values = [
+            row.get("instruction", ""), screenshot_value,
+            json.dumps(system_result, ensure_ascii=False, separators=(",", ":")),
+            row.get("session", ""), row.get("difficulty", ""), row.get("category", ""),
+            row.get("turn", ""), row.get("taskID", ""), scene.get("scene_id", ""),
+            scene.get("scene_version", ""), scene.get("scene_sub_version", 0),
+            scene.get("sceneDigest", ""), screenshot.get("camera_id", row.get("camera_id", "")),
+            row.get("outcome", ""), row.get("terminal", ""), row.get("executed", False),
+            row.get("error_code", ""), row.get("diagnostic_id", ""),
+            json.dumps(artifacts, ensure_ascii=False), evidence,
+            json.dumps(row.get("asset_role_mapping", {}), ensure_ascii=False),
+            row.get("parent_flow_id", ""), row.get("random_seed", ""),
+        ]
+        sheet.append(values)
+        current = sheet.max_row
+        if screenshot_value:
+            cell = sheet.cell(current, 2)
+            cell.hyperlink = Path(screenshot_value).as_uri() if Path(screenshot_value).is_absolute() else screenshot_value
+            cell.style = "Hyperlink"
+        sheet.cell(current, 3).alignment = Alignment(wrap_text=True, vertical="top")
+    widths = {1: 34, 2: 42, 3: 60, 4: 24, 5: 10, 6: 24, 7: 8,
+              8: 16, 9: 12, 10: 14, 11: 16, 12: 70, 13: 12, 14: 24,
+              15: 10, 16: 10, 17: 30, 18: 24, 19: 36, 20: 50,
+              21: 36, 22: 24, 23: 14}
+    for index, width in widths.items():
+        sheet.column_dimensions[chr(64 + index) if index <= 26 else "A"].width = width
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+    output = root / "batch_test_results.xlsx"
+    workbook.save(output)
+    return output
+
 
 def _safe(value: str, fallback: str) -> str:
     value = re.sub(r"[^A-Za-z0-9_-]+", "-", value).strip("-")
     return value[:80] or fallback
+
+
+def _classify_batch_error(error: Exception) -> tuple[str, str, dict]:
+    """Classify expected capability boundaries without hiding real failures."""
+    text = str(error)
+    if "web_platform_profile_unsupported" in text:
+        return "passed", "unsupported", {
+            "code": "web_platform_profile_unsupported",
+            "failure_class": "capability_unsupported",
+            "message": "当前场景可展示，但该机器人平台暂不支持 Agent 任务规划或执行。",
+            "executed": False,
+        }
+    return "failed", "failed", {"message": text, "executed": False}
 
 
 class ServiceBatchRunner:
@@ -265,6 +364,9 @@ class ServiceBatchRunner:
             session_record = {"name": name, "outputName": output_name, "sessionID": session_id, "scene": session_spec.scene,
                               "difficulty": session_spec.difficulty,
                               "capabilities": list(session_spec.capabilities),
+                              "flow_id": session_spec.flow_id, "parent_flow_id": session_spec.parent_flow_id,
+                              "category": session_spec.category, "random_seed": session_spec.random_seed,
+                              "asset_role_mapping": session_spec.asset_role_mapping,
                               "browserID": browser_id, "turns": len(session_spec.instructions)}
             (session_root / "session.json").write_text(json.dumps(session_record, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -274,6 +376,9 @@ class ServiceBatchRunner:
                          "sessionID": session_record.get("sessionID"),
                          "difficulty": session_spec.difficulty,
                          "capabilities": list(session_spec.capabilities),
+                         "flow_id": session_spec.flow_id, "parent_flow_id": session_spec.parent_flow_id,
+                         "category": session_spec.category, "random_seed": session_spec.random_seed,
+                         "asset_role_mapping": session_spec.asset_role_mapping,
                          "browserID": browser_id, "status": status, "turns": rows}
                 if error is not None:
                     value["error"] = error
@@ -337,7 +442,10 @@ class ServiceBatchRunner:
                             (turn_root / "scene_identity.json").write_text(
                                 json.dumps({"status": "blocked", "reason": str(exc)}, ensure_ascii=False, indent=2),
                                 encoding="utf-8")
-                        results.append({"session": name, "turn": turn_index, **result})
+                        results.append({"session": name, "output_name": output_name,
+                                        "difficulty": session_spec.difficulty,
+                                        "category": session_spec.category,
+                                        "turn": turn_index, **result})
                         continue
                     try:
                         request_id, started = self._start_task(session_id, browser_id, instruction, world)
@@ -369,21 +477,30 @@ class ServiceBatchRunner:
                         row_status = "passed" if ok else ("blocked" if screenshot.get("status") != "captured" and self.screenshot_required else "failed")
                         row = {"session": name, "difficulty": session_spec.difficulty,
                                "capabilities": list(session_spec.capabilities),
+                               "category": session_spec.category, "parent_flow_id": session_spec.parent_flow_id,
+                               "output_name": output_name,
+                               "random_seed": session_spec.random_seed,
+                               "asset_role_mapping": session_spec.asset_role_mapping,
                                "turn": turn_index, "instruction": instruction,
                                "taskID": started["taskID"], "status": row_status,
-                               "outcome": outcome, "scene": identity, "screenshot": screenshot,
-                               "artifacts": saved_artifacts}
+                               "outcome": outcome, "terminal": state.get("terminal", False),
+                               "executed": result.get("executed", False),
+                               "scene": identity, "screenshot": screenshot,
+                               "artifacts": saved_artifacts, "result": result,
+                               "evidence_directory": str(turn_root)}
                         results.append(row)
                         if not ok:
                             failed = True
                         world = current
                     except Exception as exc:
-                        failed = True
+                        row_status, row_outcome, row_error = _classify_batch_error(exc)
+                        failed = failed or row_status == "failed"
                         row = {"session": name, "turn": turn_index, "instruction": instruction,
-                               "status": "failed", "error": str(exc)}
+                               "status": row_status, "outcome": row_outcome, "error": row_error,
+                               "failure_class": row_error.get("failure_class")}
                         (turn_root / "error.json").write_text(json.dumps(row, ensure_ascii=False, indent=2), encoding="utf-8")
-                        (turn_root / "task_result.json").write_text(json.dumps({"outcome": "failed", "executed": False,
-                            "error": {"message": str(exc)}}, ensure_ascii=False, indent=2), encoding="utf-8")
+                        (turn_root / "task_result.json").write_text(json.dumps({"outcome": row_outcome, "executed": False,
+                            "failure_class": row_error.get("failure_class"), "error": row_error}, ensure_ascii=False, indent=2), encoding="utf-8")
                         # Preserve the post-failure scene evidence whenever the browser is still
                         # reachable.  A transport failure must never silently discard the reply
                         # context or make a stale screenshot look current.
@@ -397,7 +514,10 @@ class ServiceBatchRunner:
                         results.append(row)
             except Exception as exc:
                 failed = True
-                results.append({"session": name, "turn": 0, "status": "failed", "error": str(exc)})
+                results.append({"session": name, "output_name": output_name,
+                                "difficulty": session_spec.difficulty,
+                                "category": session_spec.category,
+                                "turn": 0, "status": "failed", "error": str(exc)})
                 write_session_summary("failed", str(exc))
                 session_summaries.append({"session": name, "sessionID": session_record.get("sessionID"),
                                           "status": "failed", "error": str(exc)})
@@ -415,4 +535,5 @@ class ServiceBatchRunner:
         for item in results:
             lines.append(f"- {item['session']} / turn {item['turn']}: **{item['status']}** — {item.get('instruction', '')}")
         (root / "summary.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+        _write_results_workbook(root, results)
         return summary, root

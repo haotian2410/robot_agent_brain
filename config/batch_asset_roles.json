@@ -1,0 +1,22 @@
+{
+  "object_a": {
+    "kind": "pickable",
+    "candidates": ["apple", "banana", "baseball", "pen", "marker"]
+  },
+  "object_b": {
+    "kind": "pickable",
+    "candidates": ["apple", "banana", "baseball", "pen", "marker"]
+  },
+  "placement_1": {
+    "kind": "container",
+    "candidates": ["basket", "tray", "sugar_box", "mug"]
+  },
+  "placement_2": {
+    "kind": "container",
+    "candidates": ["basket", "tray", "sugar_box", "mug"]
+  },
+  "surface_1": {
+    "kind": "surface",
+    "candidates": ["table", "coffee_table"]
+  }
+}

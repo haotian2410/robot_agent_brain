@@ -1,7 +1,15 @@
 import json
 import base64
+import pytest
 
-from robot_agent_brain.batch_service import ServiceBatchRunner
+from robot_agent_brain.batch_service import ServiceBatchRunner, _write_results_workbook, _RESULT_COLUMNS, _classify_batch_error
+
+
+def test_capability_boundary_is_classified_as_expected_unsupported():
+    status, outcome, error = _classify_batch_error(RuntimeError("http_422: web_platform_profile_unsupported"))
+    assert (status, outcome) == ("passed", "unsupported")
+    assert error["failure_class"] == "capability_unsupported"
+    assert error["executed"] is False
 
 
 def test_service_batch_activates_each_session_before_loading_its_scene(tmp_path):
@@ -87,3 +95,25 @@ def test_service_batch_capture_uses_rgbd_and_validates_wire_identity(tmp_path):
     assert seen["params"]["type"] == "rgbd"
     assert metadata["status"] == "captured"
     assert destination.read_bytes() == png
+
+
+def test_batch_results_workbook_has_required_columns_and_screenshot_link(tmp_path):
+    evidence = tmp_path / "sessions" / "s" / "turns" / "0001"
+    evidence.mkdir(parents=True)
+    (evidence / "screenshot.png").write_bytes(b"png")
+    output = _write_results_workbook(tmp_path, [{
+        "session": "s", "turn": 1, "instruction": "增加一个苹果",
+        "status": "passed", "outcome": "scene_updated", "terminal": True,
+        "executed": False, "evidence_directory": str(evidence),
+        "screenshot": {"status": "captured", "camera_id": 5},
+        "scene": {"scene_id": 1, "scene_version": 2, "scene_sub_version": 0,
+                  "sceneDigest": "abc"}, "result": {"outcome": "scene_updated"},
+    }])
+    if output is None:
+        pytest.skip("optional openpyxl dependency is not installed")
+    import openpyxl
+    workbook = openpyxl.load_workbook(output)
+    sheet = workbook["results"]
+    assert [cell.value for cell in sheet[1]][:3] == _RESULT_COLUMNS[:3]
+    assert sheet.cell(2, 2).hyperlink is not None
+    assert sheet.cell(2, 3).value

@@ -36,6 +36,14 @@ class BatchSession(BaseModel):
     # preserves the small ``name/scene/instructions`` format.
     difficulty: Literal["L1", "L2", "L3", "L4"] | None = None
     capabilities: list[str] = Field(default_factory=list)
+    # Matrix compiler metadata is carried through to reports but is not used
+    # as an execution control.  All fields are optional to keep the historical
+    # hand-written JSON format fully compatible.
+    flow_id: str | None = None
+    parent_flow_id: str | None = None
+    category: str | None = None
+    random_seed: int | None = None
+    asset_role_mapping: dict = Field(default_factory=dict)
 
     @field_validator("instructions")
     @classmethod

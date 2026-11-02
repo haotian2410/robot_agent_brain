@@ -268,7 +268,8 @@ def _repair_explicit_replace(value: dict[str, Any], instruction: str) -> dict[st
     if not raw_name:
         return value
     aliases = {"苹果": "apple", "香蕉": "banana", "篮子": "basket", "托盘": "tray",
-               "apple": "apple", "banana": "banana", "basket": "basket", "tray": "tray"}
+               "杯子": "mug", "马克杯": "mug", "cup": "mug", "coffee cup": "mug", "coffee_cup": "mug",
+               "apple": "apple", "banana": "banana", "basket": "basket", "tray": "tray", "mug": "mug"}
     semantic_name = aliases.get(raw_name.casefold(), aliases.get(raw_name, raw_name))
     entities = list(scene_edit.get("entities") or [])
     replacement_id = None
@@ -311,7 +312,8 @@ def _repair_explicit_selector_clarification(value: dict[str, Any], instruction: 
     reference_raw, relation_raw, subject_raw, color_raw = (part.strip() for part in match.groups())
     aliases = {
         "苹果": "apple", "香蕉": "banana", "篮子": "basket", "托盘": "tray",
-        "apple": "apple", "banana": "banana", "basket": "basket", "tray": "tray",
+        "杯子": "mug", "马克杯": "mug", "cup": "mug", "coffee cup": "mug", "coffee_cup": "mug",
+        "apple": "apple", "banana": "banana", "basket": "basket", "tray": "tray", "mug": "mug",
     }
     colors = {
         "蓝": "blue", "蓝色": "blue", "红": "red", "红色": "red",

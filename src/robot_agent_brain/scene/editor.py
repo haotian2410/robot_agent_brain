@@ -19,6 +19,7 @@ from .transform_editor import translate, rotate
 from .scale_policy import SceneScalePolicy
 from .colors import ColorResolver
 from ..grounding.scene_reference_resolver import SceneReferenceResolver
+from ..errors import BrainError
 
 
 @dataclass
@@ -350,7 +351,8 @@ class SceneEditor:
         reference_model, object_model = facts.asset(reference, scene), facts.asset(obj, scene)
         if relation in {"left_of", "right_of", "front_of", "behind", "above", "below", "near"}:
             if relation in {"left_of", "right_of", "front_of", "behind"} and facts.is_surface(reference, scene):
-                raise ValueError("scene_edit_position_ambiguous")
+                raise BrainError("scene_edit_position_ambiguous", "scene_edit", "surface-relative direction needs an explicit support context",
+                                 category="semantic", relation=relation, reference=edit.reference)
             candidates = (self.layout.near_candidates(reference_world, reference_model, object_model, current_world)
                           if relation == "near" else
                           self.layout.relative_candidates(relation, reference_world, reference_model,
@@ -467,7 +469,8 @@ class SceneEditor:
 
     def _add(self, edit, entity, scene, next_id, reference, defaults):
         binding = AssetResolver(self.assets, aliases=self.aliases, category_aliases=self.category_aliases,
-                                default_refs=self.default_scene_edit_assets).resolve(entity, allow_default=True)
+                                default_refs=self.default_scene_edit_assets).resolve(
+                                    entity, allow_default=True, allow_color_override=True)
         model = binding.model
         count = entity.count
         if entity.all_available:
@@ -485,10 +488,14 @@ class SceneEditor:
             position = self._placement(model, temporary, reference, edit, defaults, identifier)
             obj = make_object(identifier, model.semantic_name, model.metadata_ref, position,
                               category=model.category or entity.category,
-                              asset_type=model.asset_type if getattr(self.assets, "supports_features", False) else None)
+                              asset_type=model.asset_type if getattr(self.assets, "supports_features", False) else None,
+                              force_override_color=binding.color_override)
             operations.append(ScenePatchOperation(action="add_object", object_id_in_scene=identifier, object=obj))
             temporary = temporary.model_copy(update={"objects": [*temporary.objects, obj]})
-        return operations, binding.assumptions
+        assumptions = list(binding.assumptions)
+        if binding.color_override is not None:
+            assumptions.append(f"source=color_override: {model.semantic_name} -> {binding.color_override}")
+        return operations, assumptions
 
     def _placement(self, model, scene, reference, edit, defaults, identifier):
         facts, index = self._facts(defaults), SceneIndex(scene)
@@ -500,7 +507,8 @@ class SceneEditor:
             support = index.object(self._default_surface_id(scene, defaults))
         elif planar:
             if facts.is_surface(reference, scene):
-                raise ValueError("scene_edit_position_ambiguous")
+                raise BrainError("scene_edit_position_ambiguous", "scene_edit", "surface-relative direction needs an explicit support context",
+                                 category="semantic", relation=relation, reference=edit.reference)
             support_id = (reference.object_id_in_scene if facts.is_surface(reference, scene)
                           else facts.infer_support(reference, scene))
             if support_id is None and defaults is not None:

@@ -382,6 +382,8 @@ class AgentService:
                 if call.get("error"):
                     call["error"] = f"详见本机诊断 {report.request_id}"
         result.update(taskID=identifier, sessionID=report.session_id, outcome=outcome, executed=False)
+        if isinstance(result.get("error"), dict) and result["error"].get("code") == "web_platform_profile_unsupported":
+            result.update(outcome="unsupported", failure_class="capability_unsupported", terminal=True)
         result["artifacts"] = [{"name": name, "url": f"/tasks/{identifier}/artifacts/{quote(name)}"}
                                for name in report.artifacts
                                if name in {"scene_config", "scene_patch", "commands", "query_result"}]
@@ -531,7 +533,15 @@ def create_http_app(service):
             status = 404 if code in {"task_not_found","session_not_found","artifact_not_found"} else 422 if code in {
                 "web_platform_profile_unsupported", "robot_joint_inventory_missing"} else 409 if code in {
                 "task_busy","idempotency_conflict","session_browser_not_active","session_reconciliation_required"} else 400
-            return web.json_response({"error":{"code":code,"message":text}}, status=status)
+            payload = {"error": {"code": code, "message": text}}
+            if code == "web_platform_profile_unsupported":
+                # A scene may be perfectly valid for display while the
+                # current Brain profile cannot plan or execute robot tasks.
+                # Keep the precise legacy error code, but expose the stable
+                # capability classification to WebEditor and batch clients.
+                payload.update({"outcome": "unsupported", "failure_class": "capability_unsupported",
+                                "executed": False, "terminal": True})
+            return web.json_response(payload, status=status)
 
     app = web.Application(middlewares=[errors], client_max_size=100 * 1024 * 1024)
 

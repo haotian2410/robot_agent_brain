@@ -137,6 +137,50 @@ def test_scene_edit_table_reference_is_resolved_later_not_declared_entity():
     assert turn.scene_edit.scene_refs[0].canonical_value == "table"
 
 
+def test_corner_add_is_normalized_to_on_region_before_scene_edit_validation():
+    value = envelope(scene_edit={
+        "scene_basis": "current",
+        "entities": [{"entity_id": "apple", "semantic_name": "apple", "category": "fruit"}],
+        "relations": [],
+        # This is the shape emitted by older constrained decoders for a
+        # corner phrase.  It is safe to normalize because the instruction
+        # explicitly names a table corner and supplies no distance.
+        "operations": [{"operation": "add", "target": "apple", "direction": "left"}],
+    })
+    turn = parse_qwen_turn(value, "在桌子左上角增加一个苹果")
+    operation = turn.scene_edit.operations[0]
+    assert operation.relation.value == "on"
+    assert operation.reference == "table"
+    assert operation.placement_region == "left_front"
+    assert operation.placement_hint == "any"
+    assert operation.direction is None
+
+
+def test_table_side_without_surface_context_is_clarification_even_if_qwen_says_on():
+    value = envelope(scene_edit={
+        "scene_basis": "current",
+        "entities": [{"entity_id": "baseball", "semantic_name": "baseball", "category": "ball"}],
+        "relations": [],
+        "operations": [{"operation": "add", "target": "baseball", "relation": "on", "reference": "table"}],
+    })
+    turn = parse_qwen_turn(value, "在桌子左侧增加一个棒球")
+    assert turn.status.value == "clarification_required"
+    assert "桌面左侧" in turn.clarification_question
+    assert "右边" not in turn.clarification_question
+
+
+def test_tabletop_side_is_not_rejected_as_external_ambiguity():
+    value = envelope(scene_edit={
+        "scene_basis": "current",
+        "entities": [{"entity_id": "baseball", "semantic_name": "baseball", "category": "ball"}],
+        "relations": [],
+        "operations": [{"operation": "add", "target": "baseball", "relation": "on", "reference": "table",
+                         "placement_region": "left_half"}],
+    })
+    turn = parse_qwen_turn(value, "在桌面左侧增加一个棒球")
+    assert turn.status.value == "accepted"
+
+
 def test_scene_edit_target_and_replacement_must_be_declared_entities():
     with pytest.raises(ValidationError, match="scene_edit_unknown_selector"):
         TaskParseWireOutput.model_validate(envelope(scene_edit={

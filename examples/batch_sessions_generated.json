@@ -1,0 +1,2793 @@
+{
+  "sessions": [
+    {
+      "name": "single_on_surface-L1-01",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球"
+      ],
+      "difficulty": "L1",
+      "capabilities": [
+        "single_add_on_surface"
+      ],
+      "flow_id": "single_on_surface",
+      "parent_flow_id": "",
+      "category": "single_add_on_surface",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "single_right_region-L1-01",
+      "scene": null,
+      "instructions": [
+        "在桌子右侧增加一个苹果"
+      ],
+      "difficulty": "L1",
+      "capabilities": [
+        "single_add_right_region"
+      ],
+      "flow_id": "single_right_region",
+      "parent_flow_id": "",
+      "category": "single_add_right_region",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "single_left_region-L1-01",
+      "scene": null,
+      "instructions": [
+        "在桌子左侧增加一个棒球"
+      ],
+      "difficulty": "L1",
+      "capabilities": [
+        "single_add_left_region"
+      ],
+      "flow_id": "single_left_region",
+      "parent_flow_id": "",
+      "category": "single_add_left_region",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "single_near_container-L1-01",
+      "scene": null,
+      "instructions": [
+        "在杯子旁边增加一个苹果"
+      ],
+      "difficulty": "L1",
+      "capabilities": [
+        "single_add_near_container"
+      ],
+      "flow_id": "single_near_container",
+      "parent_flow_id": "",
+      "category": "single_add_near_container",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "single_inside_container-L1-01",
+      "scene": null,
+      "instructions": [
+        "在杯子里增加一个苹果"
+      ],
+      "difficulty": "L1",
+      "capabilities": [
+        "single_add_inside_container"
+      ],
+      "flow_id": "single_inside_container",
+      "parent_flow_id": "",
+      "category": "single_add_inside_container",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "single_center_surface-L1-01",
+      "scene": null,
+      "instructions": [
+        "在桌子中间增加一个苹果"
+      ],
+      "difficulty": "L1",
+      "capabilities": [
+        "single_add_center_surface"
+      ],
+      "flow_id": "single_center_surface",
+      "parent_flow_id": "",
+      "category": "single_add_center_surface",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "single_explicit_color-L1-01",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个蓝色苹果"
+      ],
+      "difficulty": "L1",
+      "capabilities": [
+        "single_add_colored"
+      ],
+      "flow_id": "single_explicit_color",
+      "parent_flow_id": "",
+      "category": "single_add_colored",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "single_default_asset-L1-01",
+      "scene": null,
+      "instructions": [
+        "增加一个篮子"
+      ],
+      "difficulty": "L1",
+      "capabilities": [
+        "single_add_default"
+      ],
+      "flow_id": "single_default_asset",
+      "parent_flow_id": "",
+      "category": "single_add_default",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "single_multi_style-L1-01",
+      "scene": null,
+      "instructions": [
+        "增加一个蓝色篮子"
+      ],
+      "difficulty": "L1",
+      "capabilities": [
+        "single_add_style"
+      ],
+      "flow_id": "single_multi_style",
+      "parent_flow_id": "",
+      "category": "single_add_style",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "single_layout_corner-L1-01",
+      "scene": null,
+      "instructions": [
+        "在桌子左上角增加一个苹果"
+      ],
+      "difficulty": "L1",
+      "capabilities": [
+        "single_add_corner"
+      ],
+      "flow_id": "single_layout_corner",
+      "parent_flow_id": "",
+      "category": "single_add_corner",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "pair_seed-L1-01",
+      "scene": null,
+      "instructions": [
+        "增加一个杯子",
+        "在桌子上增加一个棒球",
+        "在桌子上增加一个香蕉"
+      ],
+      "difficulty": "L1",
+      "capabilities": [
+        "pair_add_container",
+        "pair_add_object",
+        "pair_add_second_object"
+      ],
+      "flow_id": "pair_seed",
+      "parent_flow_id": "",
+      "category": "pair_add_container",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_color-L2-01",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "把棒球改成蓝色"
+      ],
+      "difficulty": "L2",
+      "capabilities": [
+        "color_synonym"
+      ],
+      "flow_id": "edit_color",
+      "parent_flow_id": "single_on_surface",
+      "category": "color_synonym",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_color-L2-02",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "把棒球换成蓝色"
+      ],
+      "difficulty": "L2",
+      "capabilities": [
+        "color_synonym"
+      ],
+      "flow_id": "edit_color",
+      "parent_flow_id": "single_on_surface",
+      "category": "color_synonym",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_color-L2-03",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "把棒球渲染成蓝色"
+      ],
+      "difficulty": "L2",
+      "capabilities": [
+        "color_synonym"
+      ],
+      "flow_id": "edit_color",
+      "parent_flow_id": "single_on_surface",
+      "category": "color_synonym",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_color-L2-04",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "把棒球画成蓝色"
+      ],
+      "difficulty": "L2",
+      "capabilities": [
+        "color_synonym"
+      ],
+      "flow_id": "edit_color",
+      "parent_flow_id": "single_on_surface",
+      "category": "color_synonym",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_quantified_move-L3-01",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "把棒球向左移动五厘米"
+      ],
+      "difficulty": "L3",
+      "capabilities": [
+        "quantified_move"
+      ],
+      "flow_id": "edit_quantified_move",
+      "parent_flow_id": "single_on_surface",
+      "category": "quantified_move",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_quantified_move-L3-02",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "把棒球向右移动五厘米"
+      ],
+      "difficulty": "L3",
+      "capabilities": [
+        "quantified_move"
+      ],
+      "flow_id": "edit_quantified_move",
+      "parent_flow_id": "single_on_surface",
+      "category": "quantified_move",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_quantified_move-L3-03",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "把棒球向前移动五厘米"
+      ],
+      "difficulty": "L3",
+      "capabilities": [
+        "quantified_move"
+      ],
+      "flow_id": "edit_quantified_move",
+      "parent_flow_id": "single_on_surface",
+      "category": "quantified_move",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_quantified_move-L3-04",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "把棒球向后移动五厘米"
+      ],
+      "difficulty": "L3",
+      "capabilities": [
+        "quantified_move"
+      ],
+      "flow_id": "edit_quantified_move",
+      "parent_flow_id": "single_on_surface",
+      "category": "quantified_move",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_fuzzy_move-L3-01",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "把棒球向右一点"
+      ],
+      "difficulty": "L3",
+      "capabilities": [
+        "fuzzy_move"
+      ],
+      "flow_id": "edit_fuzzy_move",
+      "parent_flow_id": "single_on_surface",
+      "category": "fuzzy_move",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_fuzzy_move-L3-02",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "把棒球向右一些"
+      ],
+      "difficulty": "L3",
+      "capabilities": [
+        "fuzzy_move"
+      ],
+      "flow_id": "edit_fuzzy_move",
+      "parent_flow_id": "single_on_surface",
+      "category": "fuzzy_move",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_fuzzy_move-L3-03",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "把棒球向右很多"
+      ],
+      "difficulty": "L3",
+      "capabilities": [
+        "fuzzy_move"
+      ],
+      "flow_id": "edit_fuzzy_move",
+      "parent_flow_id": "single_on_surface",
+      "category": "fuzzy_move",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_region-L3-01",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "把棒球移到桌子右侧"
+      ],
+      "difficulty": "L3",
+      "capabilities": [
+        "region_move"
+      ],
+      "flow_id": "edit_region",
+      "parent_flow_id": "single_on_surface",
+      "category": "region_move",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_region-L3-02",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "把棒球移到桌子右侧中间"
+      ],
+      "difficulty": "L3",
+      "capabilities": [
+        "region_move"
+      ],
+      "flow_id": "edit_region",
+      "parent_flow_id": "single_on_surface",
+      "category": "region_move",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_region-L3-03",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "把棒球移到桌子右下角"
+      ],
+      "difficulty": "L3",
+      "capabilities": [
+        "region_move"
+      ],
+      "flow_id": "edit_region",
+      "parent_flow_id": "single_on_surface",
+      "category": "region_move",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_delete-L2-01",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "删除棒球"
+      ],
+      "difficulty": "L2",
+      "capabilities": [
+        "delete"
+      ],
+      "flow_id": "edit_delete",
+      "parent_flow_id": "single_on_surface",
+      "category": "delete",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_delete-L2-02",
+      "scene": null,
+      "instructions": [
+        "在桌子上增加一个棒球",
+        "移除棒球"
+      ],
+      "difficulty": "L2",
+      "capabilities": [
+        "delete"
+      ],
+      "flow_id": "edit_delete",
+      "parent_flow_id": "single_on_surface",
+      "category": "delete",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_relative_near-L4-01",
+      "scene": null,
+      "instructions": [
+        "增加一个杯子",
+        "在桌子上增加一个棒球",
+        "在桌子上增加一个香蕉",
+        "把棒球移到香蕉旁边"
+      ],
+      "difficulty": "L4",
+      "capabilities": [
+        "relative_near"
+      ],
+      "flow_id": "edit_relative_near",
+      "parent_flow_id": "pair_seed",
+      "category": "relative_near",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_relative_on-L4-01",
+      "scene": null,
+      "instructions": [
+        "增加一个杯子",
+        "在桌子上增加一个棒球",
+        "在桌子上增加一个香蕉",
+        "把棒球放到桌子上面"
+      ],
+      "difficulty": "L4",
+      "capabilities": [
+        "relative_on"
+      ],
+      "flow_id": "edit_relative_on",
+      "parent_flow_id": "pair_seed",
+      "category": "relative_on",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    },
+    {
+      "name": "edit_relative_inside-L4-01",
+      "scene": null,
+      "instructions": [
+        "增加一个杯子",
+        "在桌子上增加一个棒球",
+        "在桌子上增加一个香蕉",
+        "把棒球放进杯子"
+      ],
+      "difficulty": "L4",
+      "capabilities": [
+        "relative_inside"
+      ],
+      "flow_id": "edit_relative_inside",
+      "parent_flow_id": "pair_seed",
+      "category": "relative_inside",
+      "random_seed": 20261031,
+      "asset_role_mapping": {
+        "object_a": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "baseball",
+            "metadata_ref": "$LIBRARY_SERVER/3",
+            "type": "model",
+            "id": 3
+          }
+        },
+        "object_b": {
+          "kind": "pickable",
+          "candidates": [
+            "apple",
+            "banana",
+            "baseball",
+            "pen",
+            "marker"
+          ],
+          "selected": {
+            "semantic_name": "banana",
+            "metadata_ref": "$LIBRARY_SERVER/2",
+            "type": "model",
+            "id": 2
+          }
+        },
+        "placement_1": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "mug",
+            "metadata_ref": "$LIBRARY_SERVER/14",
+            "type": "model",
+            "id": 14
+          }
+        },
+        "placement_2": {
+          "kind": "container",
+          "candidates": [
+            "basket",
+            "tray",
+            "sugar_box",
+            "mug"
+          ],
+          "selected": {
+            "semantic_name": "basket",
+            "metadata_ref": "$LIBRARY_SERVER/4",
+            "type": "model",
+            "id": 4
+          }
+        },
+        "surface_1": {
+          "kind": "surface",
+          "candidates": [
+            "table",
+            "coffee_table"
+          ],
+          "selected": {
+            "semantic_name": "table",
+            "metadata_ref": "$LIBRARY_SERVER/29",
+            "type": "model",
+            "id": 29
+          }
+        }
+      }
+    }
+  ]
+}

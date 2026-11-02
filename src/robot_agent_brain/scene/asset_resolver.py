@@ -2,12 +2,14 @@
 from dataclasses import dataclass
 from ..contracts.asset_library import BrainAssetView
 from .asset_features import matches_features
+from .colors import ColorResolver
 
 
 @dataclass
 class AssetBinding:
     model: BrainAssetView
     assumptions: list[str]
+    color_override: str | None = None
 
 
 class AssetResolver:
@@ -17,23 +19,45 @@ class AssetResolver:
         self.category_aliases = {k.strip().casefold(): v.strip().casefold() for k, v in (category_aliases or {}).items()}
         self.default_refs = {k.strip().casefold(): v for k, v in (default_refs or {}).items()}
 
-    def resolve(self, entity, *, infer_category=False, allow_default=False):
+    def resolve(self, entity, *, infer_category=False, allow_default=False, allow_color_override=False):
         name = entity.semantic_name.strip().casefold()
         name = self.aliases.get(name, name)
         category = entity.category.strip().casefold()
         category = self.category_aliases.get(category, category)
         if getattr(self.catalog, "typed_namespaces", False) and category == "furniture_component":
             category = "furniture"
-        if (entity.color or entity.tags) and not getattr(self.catalog, "supports_features", False):
+        # A plain color on a newly added scene object can be represented by a
+        # MeshRenderer override even when the catalog does not expose asset
+        # feature tags.  Existing-object selection, robot binding, and
+        # explicit style/tag requests still require catalog evidence.
+        if ((entity.color or entity.tags)
+                and not getattr(self.catalog, "supports_features", False)
+                and not (allow_color_override and entity.color and not entity.tags)):
             raise ValueError("asset_color_evidence_missing: " + entity.color)
         candidates = (self.catalog.find_by_category(category) if entity.category_only
                       else self.catalog.find_by_name(name))
         if not candidates:
             raise ValueError("asset_missing: " + entity.semantic_name)
+        color_override = None
         if entity.color or entity.tags:
+            unfiltered = list(candidates)
             candidates = [model for model in candidates if matches_features(model, entity)]
             if not candidates:
-                raise ValueError("asset_feature_missing: " + entity.semantic_name)
+                # A plain color request is an instance appearance request for
+                # scene additions.  It may use the canonical/default model
+                # and a MeshRenderer override, but style/tag requests remain
+                # strict asset-feature selections.
+                if allow_color_override and entity.color and not entity.tags:
+                    if len(unfiltered) == 1:
+                        candidates = unfiltered
+                    elif allow_default and name in self.default_refs:
+                        default_model = self.catalog.resolve(self.default_refs[name], asset_type="model")
+                        candidates = [default_model]
+                    else:
+                        raise ValueError("asset_feature_missing: " + entity.semantic_name)
+                    color_override = ColorResolver.resolve(entity.color)
+                else:
+                    raise ValueError("asset_feature_missing: " + entity.semantic_name)
         # Categories are optional resource selection hints, not a requirement
         # for named resource resolution or existing Scene Semantic facts.
         # Typed Scene v1 uses lexical categories that need not match the model's
@@ -63,8 +87,8 @@ class AssetResolver:
                     assumptions.append("alternatives=" + ",".join(alternatives))
                 if getattr(self.catalog, "demo_assets", False):
                     assumptions.append("demo_assets: metadata only; no real mesh or rendered material")
-                return AssetBinding(default_model, assumptions)
+                return AssetBinding(default_model, assumptions, color_override)
             raise ValueError("asset_ambiguous: " + entity.semantic_name + "; 请补充颜色或款式: " +
                              ", ".join(f"{m.asset_type}:{m.library_asset_id} ({' '.join(m.tags)})" for m in candidates))
         assumptions = ["demo_assets: metadata only; no real mesh or rendered material"] if getattr(self.catalog, "demo_assets", False) else []
-        return AssetBinding(candidates[0], assumptions)
+        return AssetBinding(candidates[0], assumptions, color_override)

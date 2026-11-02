@@ -2,7 +2,7 @@
   "苹果": "apple", "香蕉": "banana", "棒球": "baseball",
   "篮子": "basket", "抽屉": "drawer", "柜子": "cabinet",
   "桌子": "table", "桌面": "table", "work_table": "table",
-  "杯子": "mug", "马克杯": "mug", "螺丝刀": "screwdriver",
+  "杯子": "mug", "马克杯": "mug", "cup": "mug", "coffee_cup": "mug", "coffee cup": "mug", "mug": "mug", "螺丝刀": "screwdriver",
   "魔方": "rubiks_cube", "rubikscube": "rubiks_cube",
   "糖盒": "sugar_box", "sugarbox": "sugar_box",
   "托盘": "tray", "马克笔": "marker", "笔": "pen",

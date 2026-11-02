@@ -1,5 +1,8 @@
 # 批量多会话测试
 
+Excel 维护的生成/编辑矩阵、预设场景矩阵以及成功门控 campaign 见
+[`batch_matrix_testing.md`](batch_matrix_testing.md)。下文的 JSON/JSONL 入口继续兼容。
+
 批量测试文件只需要描述 session、首轮场景和按顺序执行的指令：
 
 ```json
@@ -84,6 +87,11 @@ task ID 或预期字段。
 连续编辑后的 original 快照不变。全部通过后才执行正式的空场景和预设场景批量矩阵。
 
 ## 当前正式批量矩阵文件
+
+Excel 维护入口已迁移到 `examples/matrices/generated_edit_matrix.xlsx` 和
+`examples/matrices/known_scene_matrix.xlsx`，编译后得到
+`examples/batch_sessions_generated.json` 与 `examples/batch_sessions_known.json`。
+下面两个 JSON 仍保留为历史／手写兼容样例：
 
 - `examples/batch_sessions_empty.json`：空场景，L1-L4 每级 10 个 session，共 40 个。
 - `examples/batch_sessions_presets.json`：OLS 1.0.5 的 7 个预设场景，每场景每级 3 个
