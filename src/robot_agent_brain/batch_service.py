@@ -31,6 +31,8 @@ _RESULT_COLUMNS = [
     "camera_id", "outcome", "terminal", "executed", "error_code",
     "diagnostic_id", "artifacts", "evidence_directory",
     "asset_role_mapping", "parent_flow_id", "random_seed",
+    "test_id", "parent_test_id", "coverage_tag", "expected_outcome", "expected_error_codes",
+    "expected_scene_change", "assertion_profile", "assertion_result",
 ]
 
 
@@ -90,6 +92,9 @@ def _write_results_workbook(root: Path, rows: list[dict]) -> Path | None:
             json.dumps(artifacts, ensure_ascii=False), evidence,
             json.dumps(row.get("asset_role_mapping", {}), ensure_ascii=False),
             row.get("parent_flow_id", ""), row.get("random_seed", ""),
+            row.get("test_id", ""), row.get("parent_test_id", ""), row.get("coverage_tag", ""),
+            row.get("expected_outcome", ""), "|".join(row.get("expected_error_codes", []) or []),
+            row.get("expected_scene_change", ""), row.get("assertion_profile", ""), row.get("assertion_result", "not_checked"),
         ]
         sheet.append(values)
         current = sheet.max_row
@@ -127,6 +132,26 @@ def _classify_batch_error(error: Exception) -> tuple[str, str, dict]:
             "executed": False,
         }
     return "failed", "failed", {"message": text, "executed": False}
+
+
+def _check_expectation(session_spec, result: dict, state: dict) -> tuple[str, str | None]:
+    expected = session_spec.expected_outcome
+    if not expected:
+        return "not_checked", None
+    actual = result.get("outcome") or result.get("failure_class")
+    if expected == "capability_unsupported":
+        ok = result.get("failure_class") == "capability_unsupported" or result.get("error_code") == "web_platform_profile_unsupported"
+    elif expected == "safe_rejection":
+        ok = actual in {"failed", "rejected", "safe_rejection", "clarification_required"}
+    elif expected == "query_answered":
+        ok = actual in {"answered", "query_answered"}
+    else:
+        ok = actual == expected or (expected == "success" and actual not in {"failed", "clarification_required", "unsupported"})
+    allowed = set(session_spec.expected_error_codes or [])
+    if allowed:
+        code = result.get("error_code") or (result.get("failure_reason") or {}).get("code")
+        ok = ok and (code in allowed)
+    return ("passed" if ok else "failed", None if ok else f"expected={expected},actual={actual}")
 
 
 class ServiceBatchRunner:
@@ -367,6 +392,11 @@ class ServiceBatchRunner:
                               "flow_id": session_spec.flow_id, "parent_flow_id": session_spec.parent_flow_id,
                               "category": session_spec.category, "random_seed": session_spec.random_seed,
                               "asset_role_mapping": session_spec.asset_role_mapping,
+                              "test_id": session_spec.test_id, "parent_test_id": session_spec.parent_test_id,
+                              "coverage_tag": session_spec.coverage_tag, "expected_outcome": session_spec.expected_outcome,
+                              "expected_error_codes": session_spec.expected_error_codes,
+                              "expected_scene_change": session_spec.expected_scene_change,
+                              "assertion_profile": session_spec.assertion_profile,
                               "browserID": browser_id, "turns": len(session_spec.instructions)}
             (session_root / "session.json").write_text(json.dumps(session_record, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -379,6 +409,11 @@ class ServiceBatchRunner:
                          "flow_id": session_spec.flow_id, "parent_flow_id": session_spec.parent_flow_id,
                          "category": session_spec.category, "random_seed": session_spec.random_seed,
                          "asset_role_mapping": session_spec.asset_role_mapping,
+                         "test_id": session_spec.test_id, "parent_test_id": session_spec.parent_test_id,
+                         "coverage_tag": session_spec.coverage_tag, "expected_outcome": session_spec.expected_outcome,
+                         "expected_error_codes": session_spec.expected_error_codes,
+                         "expected_scene_change": session_spec.expected_scene_change,
+                         "assertion_profile": session_spec.assertion_profile,
                          "browserID": browser_id, "status": status, "turns": rows}
                 if error is not None:
                     value["error"] = error
@@ -470,8 +505,11 @@ class ServiceBatchRunner:
                         if screenshot.get("status") != "captured" and not self.screenshot_required:
                             screenshot = {**screenshot, "status": "skipped"}
                         outcome = result.get("outcome", "failed")
+                        assertion_result, assertion_error = _check_expectation(session_spec, result, state)
                         screenshot_ok = screenshot.get("status") == "captured" or not self.screenshot_required
                         ok = bool(state.get("terminal")) and outcome not in {"failed"} and screenshot_ok
+                        if assertion_result == "failed":
+                            ok = False
                         if result.get("executed", False) is not False:
                             ok = False
                         row_status = "passed" if ok else ("blocked" if screenshot.get("status") != "captured" and self.screenshot_required else "failed")
@@ -487,7 +525,15 @@ class ServiceBatchRunner:
                                "executed": result.get("executed", False),
                                "scene": identity, "screenshot": screenshot,
                                "artifacts": saved_artifacts, "result": result,
-                               "evidence_directory": str(turn_root)}
+                               "evidence_directory": str(turn_root),
+                               "test_id": session_spec.test_id, "parent_test_id": session_spec.parent_test_id,
+                               "coverage_tag": session_spec.coverage_tag, "expected_outcome": session_spec.expected_outcome,
+                               "expected_error_codes": session_spec.expected_error_codes,
+                               "expected_scene_change": session_spec.expected_scene_change,
+                               "assertion_profile": session_spec.assertion_profile,
+                               "assertion_result": assertion_result}
+                        if assertion_error:
+                            row["assertion_error"] = assertion_error
                         results.append(row)
                         if not ok:
                             failed = True

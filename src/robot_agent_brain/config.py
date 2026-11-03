@@ -93,8 +93,14 @@ class BrainConfig(BaseModel):
         ComponentReferenceRegistry(self.component_reference_rules)
         if self.scene_robot_profile is not None and self.scene_robot_profile not in self.robot_profiles.profiles:
             raise ValueError("robot_setup_profile_not_registered")
-        if (self.asset_library_root is None) != (self.asset_geometry_cache is None):
-            raise ValueError("asset_library_config_missing: root and geometry cache must be configured together")
+        if self.asset_library_root is None and self.asset_geometry_cache is not None:
+            raise ValueError("asset_library_config_missing: geometry cache requires a library root")
+        if self.asset_library_root is not None and not Path(self.asset_library_root).is_absolute():
+            # ``BrainConfig.load`` resolves paths relative to the config file.
+            # Direct construction with a relative root is ambiguous and used
+            # to silently fall back to demo assets; absolute roots remain
+            # injectable in unit tests and are validated when the adapter loads.
+            raise ValueError("asset_library_config_root_missing: " + self.asset_library_root)
         if self.asset_category_index is not None and self.asset_library_root is None:
             raise ValueError("asset_library_config_missing: category index requires a library")
         if self.assets is not None and self.asset_library_root is not None:
@@ -133,6 +139,8 @@ class BrainConfig(BaseModel):
                 from .adapters.final_models_library import FinalModelsLibraryAdapter
                 return FinalModelsLibraryAdapter(self.asset_library_root, self.asset_geometry_cache,
                     self.asset_category_index, library_ref_prefix=self.library_ref_prefix)
+            if self.asset_geometry_cache is None:
+                raise ValueError("asset_geometry_cache_required")
             from .adapters.local_asset_library import LocalAssetLibraryAdapter
             return LocalAssetLibraryAdapter(self.asset_library_root, self.asset_geometry_cache,
                 self.asset_category_index, library_ref_prefix=self.library_ref_prefix)

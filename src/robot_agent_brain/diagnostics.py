@@ -10,7 +10,7 @@ def fingerprint(value):
 
 def configuration_summary(config, assets, defaults):
     from .scene.colors import COLOR_POLICY_VERSION
-    from .models.prompts import TASK_UNDERSTANDING_PROMPT, SKILL_PLANNING_PROMPT, DUAL_SKILL_PLANNING_PROMPT
+    from .models.prompts import TASK_UNDERSTANDING_PROMPT, SKILL_PLANNING_PROMPT, DUAL_SKILL_PLANNING_PROMPT, build_asset_catalog_prompt
     from .skills.registry import REGISTRY
     url = urlsplit(config.base_url)
     endpoint = urlunsplit((url.scheme, url.netloc.rsplit("@", 1)[-1], url.path, "", ""))
@@ -53,7 +53,8 @@ def configuration_summary(config, assets, defaults):
             "robot_driver_sha256":fingerprint(config.default_robot_driver.model_dump(mode="json")
                                                if config.default_robot_driver is not None else None),
             "defaults_sha256":fingerprint(defaults.model_dump(mode="json")),
-            "understanding_prompt_sha256":fingerprint(TASK_UNDERSTANDING_PROMPT)}
+            "understanding_prompt_sha256":fingerprint(TASK_UNDERSTANDING_PROMPT),
+            "asset_catalog_sha256": build_asset_catalog_prompt(assets)[1]}
 
 
 def redact(value, secret=None):

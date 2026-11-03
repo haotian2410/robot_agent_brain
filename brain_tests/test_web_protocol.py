@@ -96,7 +96,11 @@ def test_durable_tasks_idempotency_busy_restart(tmp_path):
 
 
 def test_all_ols_scenes_roundtrip_and_joint_inventory():
-    root = Path(__file__).resolve().parents[2] / 'webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data'
+    # Use the OLS package selected by the current WebEditor configuration.
+    # The old 1.0.5 fixture has a different robot namespace (robot:14) and
+    # must not be paired with the 1.0.7 joint inventory.
+    from robot_agent_brain.config import BrainConfig
+    root = Path(BrainConfig.load(Path(__file__).resolve().parents[1] / "config/webeditor.json").asset_library_root)
     inventory = Path('var/webeditor/joint_inventory.json')
     if not root.exists() or not inventory.exists():
         pytest.skip("external OLS 1.0.5 package/joint cache not installed")

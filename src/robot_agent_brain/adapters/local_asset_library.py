@@ -58,10 +58,18 @@ class LocalAssetLibraryAdapter:
             raise ValueError("library_ref_prefix_invalid")
         self.library_ref_prefix = library_ref_prefix
         index = read_library_index(self.asset_root)
+        if geometry_cache is None:
+            raise ValueError("asset_geometry_cache_required")
         cache_path = Path(geometry_cache).resolve()
         if cache_path.is_relative_to(self.asset_root):
             raise ValueError("asset_derived_file_inside_library")
-        cache = json.loads(cache_path.read_text(encoding="utf-8"))
+        raw_cache = json.loads(cache_path.read_text(encoding="utf-8"))
+        if not isinstance(raw_cache, dict):
+            raise ValueError("asset_geometry_cache_invalid")
+        self.geometry_cache_metadata = raw_cache.get("__metadata__", {})
+        if not isinstance(self.geometry_cache_metadata, dict):
+            raise ValueError("asset_geometry_cache_metadata_invalid")
+        cache = {key: value for key, value in raw_cache.items() if key != "__metadata__"}
         if set(cache) != {str(i) for i in index}:
             raise ValueError("asset_geometry_cache_coverage_mismatch")
         self.categories_available = category_index is not None
@@ -107,6 +115,7 @@ class LocalAssetLibraryAdapter:
         return {
             "library_ref_prefix": self.library_ref_prefix,
             "categories_available": self.categories_available,
+            "geometry_cache_metadata": self.geometry_cache_metadata,
             "assets": [self._assets[key].model_dump(mode="json", exclude={"metadata_path"})
                        for key in sorted(self._assets)],
         }

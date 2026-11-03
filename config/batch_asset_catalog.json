@@ -1,0 +1,999 @@
+{
+  "schema_version": 1,
+  "source": {
+    "resource_version": "ResVersion 1.0.7-dev\nbuilt at 2026-10-31T19:38:00",
+    "model_count": 34
+  },
+  "assets": [
+    {
+      "asset_key": "apple_red",
+      "semantic_name": "apple",
+      "display_name": "苹果",
+      "metadata_ref": "$LIBRARY_SERVER/1",
+      "model_id": 1,
+      "category": "fruit",
+      "tags": [
+        "red"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/1/apple.json"
+    },
+    {
+      "asset_key": "banana_yellow",
+      "semantic_name": "banana",
+      "display_name": "香蕉",
+      "metadata_ref": "$LIBRARY_SERVER/2",
+      "model_id": 2,
+      "category": "fruit",
+      "tags": [
+        "yellow"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/2/banana.json"
+    },
+    {
+      "asset_key": "baseball_white",
+      "semantic_name": "baseball",
+      "display_name": "棒球",
+      "metadata_ref": "$LIBRARY_SERVER/3",
+      "model_id": 3,
+      "category": "ball",
+      "tags": [
+        "white"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/3/baseball.json"
+    },
+    {
+      "asset_key": "basket_blue_woven",
+      "semantic_name": "basket",
+      "display_name": "篮子",
+      "metadata_ref": "$LIBRARY_SERVER/4",
+      "model_id": 4,
+      "category": "container",
+      "tags": [
+        "blue",
+        "woven"
+      ],
+      "scalable": true,
+      "scale_range": [
+        1.0,
+        1.8
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query",
+        "scale"
+      ],
+      "source_metadata": "models/4/basket.json"
+    },
+    {
+      "asset_key": "pen_orange_slim",
+      "semantic_name": "pen",
+      "display_name": "钢笔",
+      "metadata_ref": "$LIBRARY_SERVER/5",
+      "model_id": 5,
+      "category": "tool",
+      "tags": [
+        "orange",
+        "slim"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/5/pen.json"
+    },
+    {
+      "asset_key": "pen_black_slim",
+      "semantic_name": "pen",
+      "display_name": "钢笔",
+      "metadata_ref": "$LIBRARY_SERVER/6",
+      "model_id": 6,
+      "category": "tool",
+      "tags": [
+        "black",
+        "slim"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/6/pen.json"
+    },
+    {
+      "asset_key": "screwdriver_red_black",
+      "semantic_name": "screwdriver",
+      "display_name": "螺丝刀",
+      "metadata_ref": "$LIBRARY_SERVER/7",
+      "model_id": 7,
+      "category": "tool",
+      "tags": [
+        "red",
+        "black"
+      ],
+      "scalable": true,
+      "scale_range": [
+        0.8,
+        4.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query",
+        "scale"
+      ],
+      "source_metadata": "models/7/screwdriver.json"
+    },
+    {
+      "asset_key": "gum_bottle_pink",
+      "semantic_name": "gum_bottle",
+      "display_name": "胶瓶",
+      "metadata_ref": "$LIBRARY_SERVER/8",
+      "model_id": 8,
+      "category": "container",
+      "tags": [
+        "pink"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/8/gum_bottle.json"
+    },
+    {
+      "asset_key": "cream_yellow",
+      "semantic_name": "cream",
+      "display_name": "护肤霜",
+      "metadata_ref": "$LIBRARY_SERVER/9",
+      "model_id": 9,
+      "category": "container",
+      "tags": [
+        "yellow"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/9/cream.json"
+    },
+    {
+      "asset_key": "marker_black_white",
+      "semantic_name": "marker",
+      "display_name": "马克笔",
+      "metadata_ref": "$LIBRARY_SERVER/10",
+      "model_id": 10,
+      "category": "tool",
+      "tags": [
+        "black",
+        "white"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/10/marker.json"
+    },
+    {
+      "asset_key": "test_tube_rack_gray",
+      "semantic_name": "test_tube_rack",
+      "display_name": "试管架",
+      "metadata_ref": "$LIBRARY_SERVER/11",
+      "model_id": 11,
+      "category": "container",
+      "tags": [
+        "gray"
+      ],
+      "scalable": true,
+      "scale_range": [
+        1.0,
+        4.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query",
+        "scale"
+      ],
+      "source_metadata": "models/11/test_tube_rack.json"
+    },
+    {
+      "asset_key": "basket_white_woven",
+      "semantic_name": "basket",
+      "display_name": "篮子",
+      "metadata_ref": "$LIBRARY_SERVER/12",
+      "model_id": 12,
+      "category": "container",
+      "tags": [
+        "white_woven"
+      ],
+      "scalable": true,
+      "scale_range": [
+        1.0,
+        2.5
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query",
+        "scale"
+      ],
+      "source_metadata": "models/12/basket.json"
+    },
+    {
+      "asset_key": "screwdriver_blue_black",
+      "semantic_name": "screwdriver",
+      "display_name": "螺丝刀",
+      "metadata_ref": "$LIBRARY_SERVER/13",
+      "model_id": 13,
+      "category": "tool",
+      "tags": [
+        "blue",
+        "black"
+      ],
+      "scalable": true,
+      "scale_range": [
+        0.5,
+        3.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query",
+        "scale"
+      ],
+      "source_metadata": "models/13/screwdriver.json"
+    },
+    {
+      "asset_key": "mug_red_patterned",
+      "semantic_name": "mug",
+      "display_name": "杯子",
+      "metadata_ref": "$LIBRARY_SERVER/14",
+      "model_id": 14,
+      "category": "container",
+      "tags": [
+        "red_patterned"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/14/mug.json"
+    },
+    {
+      "asset_key": "rubiks_cube_multicolor_cubic",
+      "semantic_name": "rubiks_cube",
+      "display_name": "魔方",
+      "metadata_ref": "$LIBRARY_SERVER/15",
+      "model_id": 15,
+      "category": "toy",
+      "tags": [
+        "multicolor",
+        "cubic"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/15/rubiks_cube.json"
+    },
+    {
+      "asset_key": "school_bell_golden_small",
+      "semantic_name": "school_bell",
+      "display_name": "铃铛",
+      "metadata_ref": "$LIBRARY_SERVER/16",
+      "model_id": 16,
+      "category": "object",
+      "tags": [
+        "golden",
+        "small"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/16/school_bell.json"
+    },
+    {
+      "asset_key": "tray_brown_green_rectangular",
+      "semantic_name": "tray",
+      "display_name": "托盘",
+      "metadata_ref": "$LIBRARY_SERVER/17",
+      "model_id": 17,
+      "category": "container",
+      "tags": [
+        "brown",
+        "green",
+        "rectangular"
+      ],
+      "scalable": true,
+      "scale_range": [
+        0.5,
+        2.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query",
+        "scale"
+      ],
+      "source_metadata": "models/17/tray.json"
+    },
+    {
+      "asset_key": "coffee_table_gray_open",
+      "semantic_name": "coffee_table",
+      "display_name": "茶几",
+      "metadata_ref": "$LIBRARY_SERVER/18",
+      "model_id": 18,
+      "category": "surface",
+      "tags": [
+        "gray",
+        "open"
+      ],
+      "scalable": true,
+      "scale_range": [
+        0.8,
+        5.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query",
+        "scale"
+      ],
+      "source_metadata": "models/18/coffee_table.json"
+    },
+    {
+      "asset_key": "sugar_box_white_rectangular",
+      "semantic_name": "sugar_box",
+      "display_name": "糖盒",
+      "metadata_ref": "$LIBRARY_SERVER/19",
+      "model_id": 19,
+      "category": "container",
+      "tags": [
+        "white",
+        "rectangular"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/19/sugar_box.json"
+    },
+    {
+      "asset_key": "test_tube_rack_gray_tall",
+      "semantic_name": "test_tube_rack",
+      "display_name": "试管架",
+      "metadata_ref": "$LIBRARY_SERVER/20",
+      "model_id": 20,
+      "category": "container",
+      "tags": [
+        "gray",
+        "tall"
+      ],
+      "scalable": true,
+      "scale_range": [
+        1.0,
+        4.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query",
+        "scale"
+      ],
+      "source_metadata": "models/20/test_tube_rack.json"
+    },
+    {
+      "asset_key": "test_tube_clear_slim",
+      "semantic_name": "test_tube",
+      "display_name": "试管",
+      "metadata_ref": "$LIBRARY_SERVER/21",
+      "model_id": 21,
+      "category": "container",
+      "tags": [
+        "clear",
+        "slim"
+      ],
+      "scalable": true,
+      "scale_range": [
+        1.0,
+        4.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query",
+        "scale"
+      ],
+      "source_metadata": "models/21/test_tube.json"
+    },
+    {
+      "asset_key": "doll_pink_dinosaur",
+      "semantic_name": "doll",
+      "display_name": "玩偶",
+      "metadata_ref": "$LIBRARY_SERVER/22",
+      "model_id": 22,
+      "category": "toy",
+      "tags": [
+        "pink",
+        "dinosaur"
+      ],
+      "scalable": true,
+      "scale_range": [
+        1.0,
+        5.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query",
+        "scale"
+      ],
+      "source_metadata": "models/22/doll.json"
+    },
+    {
+      "asset_key": "mug_white_textured",
+      "semantic_name": "mug",
+      "display_name": "杯子",
+      "metadata_ref": "$LIBRARY_SERVER/23",
+      "model_id": 23,
+      "category": "container",
+      "tags": [
+        "white",
+        "textured"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/23/mug.json"
+    },
+    {
+      "asset_key": "mug_yellow_white",
+      "semantic_name": "mug",
+      "display_name": "杯子",
+      "metadata_ref": "$LIBRARY_SERVER/24",
+      "model_id": 24,
+      "category": "container",
+      "tags": [
+        "yellow",
+        "white"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/24/mug.json"
+    },
+    {
+      "asset_key": "drawer_light_wooden_double",
+      "semantic_name": "drawer",
+      "display_name": "抽屉",
+      "metadata_ref": "$LIBRARY_SERVER/25",
+      "model_id": 25,
+      "category": "furniture",
+      "tags": [
+        "light",
+        "wooden",
+        "double"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        2.5
+      ],
+      "has_urdf": true,
+      "passive_or_platform": true,
+      "edit_scope": [
+        "query",
+        "capability_boundary"
+      ],
+      "source_metadata": "models/25/drawer.json"
+    },
+    {
+      "asset_key": "drawer_dark_wooden_double",
+      "semantic_name": "drawer",
+      "display_name": "抽屉",
+      "metadata_ref": "$LIBRARY_SERVER/26",
+      "model_id": 26,
+      "category": "furniture",
+      "tags": [
+        "dark",
+        "wooden",
+        "double"
+      ],
+      "scalable": true,
+      "scale_range": [
+        0.5,
+        2.0
+      ],
+      "has_urdf": true,
+      "passive_or_platform": true,
+      "edit_scope": [
+        "query",
+        "capability_boundary"
+      ],
+      "source_metadata": "models/26/drawer.json"
+    },
+    {
+      "asset_key": "drawer_black_double",
+      "semantic_name": "drawer",
+      "display_name": "抽屉",
+      "metadata_ref": "$LIBRARY_SERVER/27",
+      "model_id": 27,
+      "category": "furniture",
+      "tags": [
+        "black",
+        "double"
+      ],
+      "scalable": false,
+      "scale_range": [
+        0.5,
+        2.0
+      ],
+      "has_urdf": true,
+      "passive_or_platform": true,
+      "edit_scope": [
+        "query",
+        "capability_boundary"
+      ],
+      "source_metadata": "models/27/drawer.json"
+    },
+    {
+      "asset_key": "cabinet_red_wooden_single",
+      "semantic_name": "cabinet",
+      "display_name": "柜子",
+      "metadata_ref": "$LIBRARY_SERVER/28",
+      "model_id": 28,
+      "category": "container",
+      "tags": [
+        "red",
+        "wooden",
+        "single"
+      ],
+      "scalable": true,
+      "scale_range": [
+        0.8,
+        3.0
+      ],
+      "has_urdf": true,
+      "passive_or_platform": true,
+      "edit_scope": [
+        "query",
+        "capability_boundary"
+      ],
+      "source_metadata": "models/28/cabinet.json"
+    },
+    {
+      "asset_key": "table_brown_small",
+      "semantic_name": "table",
+      "display_name": "桌子",
+      "metadata_ref": "$LIBRARY_SERVER/29",
+      "model_id": 29,
+      "category": "surface",
+      "tags": [
+        "brown",
+        "small"
+      ],
+      "scalable": true,
+      "scale_range": [
+        0.8,
+        2.0
+      ],
+      "has_urdf": true,
+      "passive_or_platform": true,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query",
+        "scale"
+      ],
+      "source_metadata": "models/29/table.json"
+    },
+    {
+      "asset_key": "microwave_countertop_microwave_handle",
+      "semantic_name": "microwave",
+      "display_name": "微波炉",
+      "metadata_ref": "$LIBRARY_SERVER/30",
+      "model_id": 30,
+      "category": "appliance",
+      "tags": [
+        "countertop",
+        "microwave",
+        "handle"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": true,
+      "passive_or_platform": true,
+      "edit_scope": [
+        "query",
+        "capability_boundary"
+      ],
+      "source_metadata": "models/30/microwave.json"
+    },
+    {
+      "asset_key": "microwave_countertop_microwave_handle_variant2",
+      "semantic_name": "microwave",
+      "display_name": "微波炉",
+      "metadata_ref": "$LIBRARY_SERVER/31",
+      "model_id": 31,
+      "category": "appliance",
+      "tags": [
+        "countertop",
+        "microwave",
+        "handle"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": true,
+      "passive_or_platform": true,
+      "edit_scope": [
+        "query",
+        "capability_boundary"
+      ],
+      "source_metadata": "models/31/microwave.json"
+    },
+    {
+      "asset_key": "bottle_plastic_blue_ridged",
+      "semantic_name": "bottle",
+      "display_name": "瓶子",
+      "metadata_ref": "$LIBRARY_SERVER/32",
+      "model_id": 32,
+      "category": "container",
+      "tags": [
+        "plastic",
+        "blue",
+        "ridged"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": true,
+      "passive_or_platform": true,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/32/bottle.json"
+    },
+    {
+      "asset_key": "button_red_yellow_mushroom",
+      "semantic_name": "button",
+      "display_name": "按钮",
+      "metadata_ref": "$LIBRARY_SERVER/33",
+      "model_id": 33,
+      "category": "button",
+      "tags": [
+        "red",
+        "yellow",
+        "mushroom"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": true,
+      "passive_or_platform": true,
+      "edit_scope": [
+        "query",
+        "capability_boundary"
+      ],
+      "source_metadata": "models/33/button.json"
+    },
+    {
+      "asset_key": "can_red_metallic_slim",
+      "semantic_name": "can",
+      "display_name": "罐子",
+      "metadata_ref": "$LIBRARY_SERVER/34",
+      "model_id": 34,
+      "category": "container",
+      "tags": [
+        "red",
+        "metallic",
+        "slim"
+      ],
+      "scalable": false,
+      "scale_range": [
+        1.0,
+        1.0
+      ],
+      "has_urdf": false,
+      "passive_or_platform": false,
+      "edit_scope": [
+        "add",
+        "remove",
+        "replace",
+        "translate",
+        "move_relative",
+        "rotate",
+        "color",
+        "query"
+      ],
+      "source_metadata": "models/34/can.json"
+    }
+  ]
+}

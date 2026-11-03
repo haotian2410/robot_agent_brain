@@ -26,6 +26,8 @@ from .planning.skill_planner_router import SkillPlannerRouter
 from .skills.registry import REGISTRY
 from .planning.task_expander import TaskExpander
 from .semantics.task_domain_policy import TaskDomainPolicy
+from .errors import BrainError
+from .scene.component_access import SceneIndex
 
 class BrainResult(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
@@ -87,6 +89,11 @@ class BrainPipeline:
                  skill_planning_provider=None, planner_mode="recipe", robot="ur5e", aliases=None, query_near_distance_m=.2):
         self.understanding = understanding
         self.assets = assets
+        # This is the configured command/export profile, not a guess from the
+        # scene image.  A scene may declare another arm platform; before an
+        # explicit RobotProfile is bound we must refuse to export commands
+        # rather than silently serializing them as UR5e commands.
+        self.robot = robot
         self.query_near_distance_m = query_near_distance_m
         self.aliases = getattr(getattr(assets, "metadata", None), "aliases", {})
         if aliases is not None:
@@ -103,6 +110,65 @@ class BrainPipeline:
         self.vision_provider = vision_provider
         self.vision_fallback = VisionFallbackGrounder()
         self.domain_policy = TaskDomainPolicy()
+
+    def _validate_robot_platform(self, scene, robot_profile=None):
+        """Guard the legacy single-arm exporter against platform mismatch.
+
+        Imported Web scenes carry the authoritative robot MetadataRef.  The
+        old pipeline used ``self.exporter`` whenever no RobotProfile was
+        configured, which made Piper/CobotMagic scenes look like UR5e plans.
+        Only arm-like robot objects participate; grippers, cameras and passive
+        articulated models are intentionally ignored.  A configured profile
+        has already validated its manifest and is therefore the explicit
+        opt-in path for a non-default platform.
+        """
+        if robot_profile is not None or scene is None:
+            return
+        index = SceneIndex(scene)
+        detected = []
+        for obj in scene.objects:
+            oid = obj.object_id_in_scene
+            driver = index.robot_driver(oid)
+            if driver is None or driver.role == "passive" or not driver.joint_sequence:
+                continue
+            if index.metadata_type(oid) != "robot":
+                continue
+            semantic = index.semantic(oid)
+            if semantic is not None and semantic.category.casefold() not in {"robot", "arm", "manipulator"}:
+                continue
+            ref = index.metadata_ref(oid)
+            if not ref:
+                continue
+            try:
+                asset = self.assets.resolve(ref, "robot")
+                name = asset.semantic_name
+            except Exception:
+                # Scene validation normally resolves this earlier.  Keep the
+                # diagnostic useful if a direct caller bypasses Web validation.
+                name = ref.rsplit("/", 1)[-1]
+            detected.append((oid, ref, name))
+        if not detected:
+            return
+        expected = self.robot.casefold().replace("-", "_")
+        if expected.endswith("_arm"):
+            expected = expected[:-4]
+        actual = []
+        for _, _, name in detected:
+            value = name.casefold().replace("-", "_")
+            if value.endswith("_arm"):
+                value = value[:-4]
+            actual.append(value)
+        if any(value == expected for value in actual):
+            return
+        raise BrainError(
+            "capability_unsupported",
+            "processing",
+            f"场景机器人平台 {', '.join(sorted(set(actual)))} 未注册到当前 Brain 配置，"
+            f"当前命令配置为 {expected}；不会生成伪造的 UR5e 命令。",
+            category="capability",
+            expected_robot=expected,
+            detected_robots=sorted(set(actual)),
+        )
 
     def understand_turn(self, instruction: str, *, scene: SceneConfig | None = None,
                         dialogue=None) -> BrainTurn:
@@ -216,6 +282,10 @@ class BrainPipeline:
                 query.evidence_source = "image_and_scene_geometry"
                 query.reply = "已通过当前真实图像核对候选物体；以下关系依据同一快照的场景几何。" + (query.reply or str(query.names))
             return BrainResult(turn_kind=turn.turn_kind, scene_query_result=query, focus_object_ids=query.object_ids)
+        # Do this immediately before grounding/planning so scene edits and
+        # queries remain displayable on unsupported platforms, while robot
+        # tasks cannot fall through to the fixed UR5e exporter.
+        self._validate_robot_platform(scene, robot_profile=robot_profile)
         intent = turn.task_intent
         if robot_profile is not None and not dual:
             if arm_states is None or not arm_states.arms["single"].state_known:

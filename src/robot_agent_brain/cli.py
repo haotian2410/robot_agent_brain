@@ -46,6 +46,8 @@ def parser():
     compile_cmd.add_argument("--seed", type=int, default=0)
     compile_cmd.add_argument("--output", required=True)
     compile_cmd.add_argument("--asset-root")
+    compile_cmd.add_argument("--asset-catalog")
+    compile_cmd.add_argument("--schema-version", type=int, default=1)
     compile_cmd.add_argument("--config")
     campaign = commands.add_parser("batch-campaign", help="Run a success-gated generated/edit matrix campaign")
     campaign.add_argument("--matrix", required=True)
@@ -76,7 +78,8 @@ def main(argv=None):
             from .batch_matrix import compile_from_cli
             output = compile_from_cli(matrix=args.matrix, kind=args.kind, asset_roles=args.asset_roles,
                                       seed=args.seed, output=args.output, asset_root=args.asset_root,
-                                      config=args.config)
+                                      config=args.config, asset_catalog=args.asset_catalog,
+                                      schema_version=args.schema_version)
             print(output)
             return 0
         if args.command == "batch-campaign":

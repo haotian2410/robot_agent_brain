@@ -27,6 +27,12 @@ KNOWN_COLUMNS = (
     "enabled", "scene_name", "difficulty", "category", "sample_count",
     "instruction_template", "variants", "role_a", "role_b", "round_index", "notes",
 )
+OPTIONAL_COLUMNS = (
+    "test_id", "parent_test_id", "asset_a_key", "asset_b_key",
+    "placement_1_key", "placement_2_key", "surface_1_key", "scene_basis",
+    "coverage_tag", "requires_visual", "expected_outcome",
+    "expected_error_codes", "expected_scene_change", "assertion_profile",
+)
 PLACEHOLDERS = {"object_a", "object_b", "placement_1", "placement_2", "surface_1",
                 "color", "color_phrase", "direction", "distance"}
 
@@ -85,7 +91,12 @@ def read_matrix(path: str | Path, kind: str) -> list[dict[str, Any]]:
         values = [_cell(cells[positions[name]] if positions[name] < len(cells) else "") for name in headers]
         if not any(values) or not _enabled(values[positions["enabled"]]):
             continue
+        # Keep every known optional column in the row so v2 metadata survives
+        # compilation; unknown spreadsheet columns remain harmless notes.
         item = {name: values[positions[name]] for name in required}
+        for name in OPTIONAL_COLUMNS:
+            if name in positions:
+                item[name] = values[positions[name]]
         if not item.get("instruction_template"):
             raise _row_error("matrix", row_no, "instruction_template", "required")
         item["_row"] = row_no
@@ -110,6 +121,11 @@ def read_matrix(path: str | Path, kind: str) -> list[dict[str, Any]]:
             if policy not in {"seed_parent", "all_parents"}:
                 raise _row_error("matrix", row_no, "branch_policy", "must be seed_parent or all_parents")
             item["branch_policy"] = policy
+            if item.get("parent_test_id") and not item.get("parent_flow_id"):
+                item["parent_flow_id"] = item["parent_test_id"]
+        if item.get("requires_visual"):
+            item["requires_visual"] = _enabled(item["requires_visual"])
+        item["expected_error_codes_list"] = [x.strip() for x in _cell(item.get("expected_error_codes")).split("|") if x.strip()]
         rows.append(item)
     return rows
 
@@ -137,10 +153,51 @@ class AssetChoice:
     ref: str | None
     asset_type: str = "model"
     asset_id: int | None = None
+    asset_key: str | None = None
+    display_name: str | None = None
+    tags: tuple[str, ...] = ()
+    category: str | None = None
 
     def manifest(self) -> dict[str, Any]:
-        return {"semantic_name": self.name, "metadata_ref": self.ref,
+        return {"asset_key": self.asset_key, "semantic_name": self.name,
+                "display_name": self.display_name, "tags": list(self.tags),
+                "category": self.category, "metadata_ref": self.ref,
                 "type": self.asset_type, "id": self.asset_id}
+
+
+def load_asset_catalog(path: str | Path | None) -> dict[str, dict[str, Any]]:
+    """Load the derived OLS catalog keyed by stable asset_key."""
+    if not path:
+        return {}
+    source = Path(path).resolve()
+    try:
+        value = json.loads(source.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise BatchMatrixError(f"batch_asset_catalog_not_found:{source}") from exc
+    assets = value.get("assets") if isinstance(value, dict) else None
+    if not isinstance(assets, list):
+        raise BatchMatrixError("batch_asset_catalog_invalid")
+    result: dict[str, dict[str, Any]] = {}
+    for item in assets:
+        if not isinstance(item, dict) or not item.get("asset_key"):
+            raise BatchMatrixError("batch_asset_catalog_entry_invalid")
+        key = str(item["asset_key"])
+        if key in result:
+            raise BatchMatrixError(f"batch_asset_catalog_duplicate:{key}")
+        result[key] = item
+    return result
+
+
+def _choice_from_catalog(key: str, catalog: dict[str, dict[str, Any]]) -> AssetChoice:
+    item = catalog.get(key)
+    if item is None:
+        raise BatchMatrixError(f"batch_asset_key_missing:{key}")
+    ref = item.get("metadata_ref")
+    asset_id = item.get("model_id")
+    category = item.get("category")
+    return AssetChoice(str(item.get("semantic_name")), ref, str(item.get("type", "model")),
+                       int(asset_id) if str(asset_id).isdigit() else None, key,
+                       item.get("display_name"), tuple(item.get("tags") or ()), category)
 
 
 def load_roles(path: str | Path) -> dict[str, dict[str, Any]]:
@@ -220,7 +277,7 @@ def _instruction_variants(row: dict[str, Any], values: dict[str, Any]) -> list[s
             # common known-scene form is ``苹果在篮子左边吗``).  Do not stuff
             # such a sentence into ``object_a`` merely because the base
             # template happens to contain that placeholder.
-            sentence_markers = ("在", "吗", "旁边", "放", "增加", "移动", "改", "换", "渲染", "画", "左", "右", "前", "后", "上", "下")
+            sentence_markers = ("在", "吗", "旁边", "放", "增加", "移动", "改", "换", "渲染", "画", "左", "右", "前", "后", "上", "下", "有", "没有", "哪个", "查询", "当前")
             if any(marker in variant for marker in sentence_markers) and len(variant) > 4:
                 rendered.append(variant)
                 continue
@@ -260,6 +317,24 @@ def _role_values(choices: dict[str, AssetChoice]) -> dict[str, str]:
     return {role: display.get(choice.name, choice.name) for role, choice in choices.items()}
 
 
+def _row_choices(row: dict[str, Any], global_choices: dict[str, AssetChoice],
+                 catalog: dict[str, dict[str, Any]]) -> dict[str, AssetChoice]:
+    choices = dict(global_choices)
+    for role, column in (("object_a", "asset_a_key"), ("object_b", "asset_b_key"),
+                         ("placement_1", "placement_1_key"), ("placement_2", "placement_2_key"),
+                         ("surface_1", "surface_1_key")):
+        key = row.get(column)
+        if key:
+            if not catalog:
+                raise _row_error("matrix", row["_row"], column, "asset catalog is required")
+            choices[role] = _choice_from_catalog(key, catalog)
+    return choices
+
+
+def _metadata_for_row(row: dict[str, Any], choices: dict[str, AssetChoice]) -> dict[str, Any]:
+    return {role: choice.manifest() for role, choice in choices.items()}
+
+
 def _scene_lookup(asset_root: Path | None) -> dict[str, str]:
     if asset_root is None:
         return {}
@@ -284,24 +359,32 @@ def _validate_template_placeholders(rows: Iterable[dict[str, Any]], kind: str) -
                                  "unknown placeholders: " + ",".join(sorted(unknown)))
     if kind == "generated_edit":
         flows = {row["flow_id"] for row in rows}
+        test_ids = {row.get("test_id") for row in rows if row.get("test_id")}
+        if len(test_ids) != len([row for row in rows if row.get("test_id")]):
+            raise BatchMatrixError("batch_matrix_duplicate_test_id")
         for row in rows:
             parent = row.get("parent_flow_id")
             if parent and parent not in flows:
                 raise _row_error("matrix", row["_row"], "parent_flow_id", f"unknown flow {parent}")
+            parent_test = row.get("parent_test_id")
+            if parent_test and parent_test not in test_ids:
+                raise _row_error("matrix", row["_row"], "parent_test_id", f"unknown test_id {parent_test}")
 
 
 def compile_matrix(matrix: str | Path, *, kind: str, asset_roles: str | Path | None = None,
                    seed: int = 0, output: str | Path | None = None,
                    asset_root: str | Path | None = None,
                    default_assets: dict[str, str] | None = None,
-                   category_index: dict[str, str] | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+                   category_index: dict[str, str] | None = None,
+                   asset_catalog: str | Path | None = None,
+                   schema_version: int = 1) -> tuple[dict[str, Any], dict[str, Any]]:
     """Compile a workbook, returning ``(session_document, manifest)``."""
     rows = read_matrix(matrix, kind)
     _validate_template_placeholders(rows, kind)
     roles = load_roles(asset_roles) if asset_roles else {}
     choices, manifest = resolve_role_choices(roles, seed=seed, asset_root=asset_root,
                                               default_assets=default_assets, category_index=category_index)
-    values = _role_values(choices)
+    catalog = load_asset_catalog(asset_catalog)
     sessions: list[dict[str, Any]] = []
     matrix_path = Path(matrix).resolve()
     if kind == "known_scene":
@@ -312,6 +395,8 @@ def compile_matrix(matrix: str | Path, *, kind: str, asset_roles: str | Path | N
                 raise _row_error("matrix", row["_row"], "scene_name", f"unknown scene {row['scene_name']}")
             if output:
                 scene = os.path.relpath(scene, Path(output).resolve().parent)
+            row_choices = _row_choices(row, choices, catalog)
+            values = _role_values(row_choices)
             instructions = _instruction_variants(row, values)
             for variant_index, instruction in enumerate(instructions, 1):
                 count = row["sample_count"]
@@ -320,9 +405,19 @@ def compile_matrix(matrix: str | Path, *, kind: str, asset_roles: str | Path | N
                     sessions.append({"name": name, "scene": scene, "instructions": [instruction],
                                      "difficulty": row["difficulty"], "capabilities": [row["category"]],
                                      "category": row["category"], "random_seed": seed,
-                                     "asset_role_mapping": manifest["roles"]})
+                                     "asset_role_mapping": _metadata_for_row(row, row_choices),
+                                     "test_id": row.get("test_id") or f"row-{row['_row']}",
+                                     "parent_test_id": row.get("parent_test_id") or None,
+                                     "coverage_tag": row.get("coverage_tag") or None,
+                                     "scene_basis": row.get("scene_basis") or "preset",
+                                     "requires_visual": row.get("requires_visual") or False,
+                                     "expected_outcome": row.get("expected_outcome") or None,
+                                     "expected_error_codes": row.get("expected_error_codes_list", []),
+                                     "expected_scene_change": row.get("expected_scene_change") or None,
+                                     "assertion_profile": row.get("assertion_profile") or None})
                     manifest.setdefault("rows", []).append({"sheet": "matrix", "row": row["_row"],
-                        "session": name, "asset_role_mapping": manifest["roles"], "scene_name": row["scene_name"]})
+                        "session": name, "asset_role_mapping": _metadata_for_row(row, row_choices), "scene_name": row["scene_name"],
+                        "test_id": row.get("test_id") or f"row-{row['_row']}", "coverage_tag": row.get("coverage_tag")})
     else:
         grouped: dict[str, list[dict[str, Any]]] = {}
         for row in rows:
@@ -353,7 +448,8 @@ def compile_matrix(matrix: str | Path, *, kind: str, asset_roles: str | Path | N
                 # sample_count below cycles over these branches, so a row with
                 # four colour phrasings exercises all four rather than silently
                 # selecting one and repeating it for every sample.
-                options = _instruction_variants(row, values)
+                row_choices = _row_choices(row, choices, catalog)
+                options = _instruction_variants(row, _role_values(row_choices))
                 expanded: list[dict[str, Any]] = []
                 for prefix_index, prefix in enumerate(generated, 1):
                     for option_index, option in enumerate(options, 1):
@@ -379,12 +475,33 @@ def compile_matrix(matrix: str | Path, *, kind: str, asset_roles: str | Path | N
                                  "capabilities": sorted({row["category"] for row in rows_for_flow}),
                                  "flow_id": flow, "parent_flow_id": rows_for_flow[0].get("parent_flow_id"),
                                  "category": rows_for_flow[0]["category"], "random_seed": seed,
-                                 "asset_role_mapping": manifest["roles"]})
+                                 "asset_role_mapping": _metadata_for_row(rows_for_flow[0], _row_choices(rows_for_flow[0], choices, catalog)),
+                                 "test_id": rows_for_flow[0].get("test_id") or flow,
+                                 "parent_test_id": rows_for_flow[0].get("parent_test_id") or None,
+                                 "coverage_tag": rows_for_flow[0].get("coverage_tag") or None,
+                                 "scene_basis": rows_for_flow[0].get("scene_basis") or "empty_bootstrap",
+                                 "requires_visual": rows_for_flow[0].get("requires_visual") or False,
+                                 "expected_outcome": rows_for_flow[0].get("expected_outcome") or None,
+                                 "expected_error_codes": rows_for_flow[0].get("expected_error_codes_list", []),
+                                 "expected_scene_change": rows_for_flow[0].get("expected_scene_change") or None,
+                                 "assertion_profile": rows_for_flow[0].get("assertion_profile") or None})
                 manifest.setdefault("rows", []).append({"sheet": "matrix", "row": rows_for_flow[0]["_row"],
                     "session": name, "flow_id": flow, "parent_flow_id": rows_for_flow[0].get("parent_flow_id"),
-                    "asset_role_mapping": manifest["roles"]})
+                    "test_id": rows_for_flow[0].get("test_id") or flow,
+                    "parent_test_id": rows_for_flow[0].get("parent_test_id"),
+                    "coverage_tag": rows_for_flow[0].get("coverage_tag"),
+                    "expected_outcome": rows_for_flow[0].get("expected_outcome"),
+                    "asset_role_mapping": _metadata_for_row(rows_for_flow[0], _row_choices(rows_for_flow[0], choices, catalog))})
     document = {"sessions": sessions}
-    manifest.update({"matrix": str(matrix_path), "kind": kind, "session_count": len(sessions)})
+    covered = {str(v.get("asset_key")) for session in sessions for v in (session.get("asset_role_mapping") or {}).values() if v.get("asset_key")}
+    uncovered = sorted(set(catalog) - covered) if catalog else []
+    if kind == "generated_edit" and catalog:
+        # Passive mechanisms are intentionally covered by known-scene capability
+        # rows, not generated as ordinary movable objects.
+        uncovered = sorted(key for key in uncovered if not catalog[key].get("passive_or_platform"))
+    manifest.update({"matrix": str(matrix_path), "kind": kind, "schema_version": schema_version,
+                     "session_count": len(sessions), "covered_asset_keys": sorted(covered),
+                     "uncovered_asset_keys": uncovered})
     if output:
         out = Path(output).resolve()
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -395,7 +512,8 @@ def compile_matrix(matrix: str | Path, *, kind: str, asset_roles: str | Path | N
 
 
 def compile_from_cli(*, matrix: str, kind: str, asset_roles: str | None, seed: int,
-                     output: str, asset_root: str | None = None, config: str | None = None) -> Path:
+                     output: str, asset_root: str | None = None, config: str | None = None,
+                     asset_catalog: str | None = None, schema_version: int = 1) -> Path:
     defaults: dict[str, str] = {}
     category_index: dict[str, str] = {}
     # The documented command intentionally keeps configuration optional.  In a
@@ -420,7 +538,12 @@ def compile_from_cli(*, matrix: str, kind: str, asset_roles: str | None, seed: i
                 category_path = base / category_path
             if category_path.is_file():
                 category_index = json.loads(category_path.read_text(encoding="utf-8"))
+    if asset_catalog is None and schema_version >= 2:
+        candidate_catalog = Path(config).resolve().parent / "batch_asset_catalog.json" if config else Path.cwd() / "config" / "batch_asset_catalog.json"
+        if candidate_catalog.is_file():
+            asset_catalog = str(candidate_catalog)
     document, _ = compile_matrix(matrix, kind=kind, asset_roles=asset_roles, seed=seed,
                                   output=output, asset_root=asset_root, default_assets=defaults,
-                                  category_index=category_index)
+                                  category_index=category_index, asset_catalog=asset_catalog,
+                                  schema_version=schema_version)
     return Path(output).resolve()

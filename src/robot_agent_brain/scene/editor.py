@@ -351,12 +351,16 @@ class SceneEditor:
         reference_model, object_model = facts.asset(reference, scene), facts.asset(obj, scene)
         if relation in {"left_of", "right_of", "front_of", "behind", "above", "below", "near"}:
             if relation in {"left_of", "right_of", "front_of", "behind"} and facts.is_surface(reference, scene):
-                raise BrainError("scene_edit_position_ambiguous", "scene_edit", "surface-relative direction needs an explicit support context",
-                                 category="semantic", relation=relation, reference=edit.reference)
-            candidates = (self.layout.near_candidates(reference_world, reference_model, object_model, current_world)
-                          if relation == "near" else
-                          self.layout.relative_candidates(relation, reference_world, reference_model,
-                                                         object_model, current_world))
+                region = {"left_of": "left_half", "right_of": "right_half", "front_of": "front_half", "behind": "back_half"}[relation]
+                candidates = self.layout.surface_candidates(reference_world, reference_model, object_model, current_world,
+                    region=region, center_only=False,
+                    workspace_min=self.scale_defaults.workspace_min if self.scale_defaults else None,
+                    workspace_max=self.scale_defaults.workspace_max if self.scale_defaults else None)
+            else:
+                candidates = (self.layout.near_candidates(reference_world, reference_model, object_model, current_world)
+                              if relation == "near" else
+                              self.layout.relative_candidates(relation, reference_world, reference_model,
+                                                             object_model, current_world))
         elif relation == "on":
             entry = self._layout_entry(reference, scene)
             if not facts.is_surface(reference, scene) and not (entry and entry.verified and entry.supports_on_top):
@@ -506,9 +510,6 @@ class SceneEditor:
         if reference is None:
             support = index.object(self._default_surface_id(scene, defaults))
         elif planar:
-            if facts.is_surface(reference, scene):
-                raise BrainError("scene_edit_position_ambiguous", "scene_edit", "surface-relative direction needs an explicit support context",
-                                 category="semantic", relation=relation, reference=edit.reference)
             support_id = (reference.object_id_in_scene if facts.is_surface(reference, scene)
                           else facts.infer_support(reference, scene))
             if support_id is None and defaults is not None:
@@ -537,7 +538,13 @@ class SceneEditor:
         if reference is not None:
             reference_world = world_transform(scene, reference.object_id_in_scene)
             reference_model = facts.asset(reference, scene)
-            if relation in {"left_of", "right_of", "front_of", "behind", "above", "below", "near"}:
+            if relation in {"left_of", "right_of", "front_of", "behind"} and facts.is_surface(reference, scene):
+                region = {"left_of": "left_half", "right_of": "right_half", "front_of": "front_half", "behind": "back_half"}[relation]
+                relation_candidates = self.layout.surface_candidates(reference_world, reference_model, model, world,
+                    region=region, center_only=False,
+                    workspace_min=defaults.workspace_min if defaults else None,
+                    workspace_max=defaults.workspace_max if defaults else None)
+            elif relation in {"left_of", "right_of", "front_of", "behind", "above", "below", "near"}:
                 relation_candidates = (self.layout.near_candidates(reference_world, reference_model, model, world)
                                       if relation == "near" else
                                       self.layout.relative_candidates(relation, reference_world, reference_model, model, world))

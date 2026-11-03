@@ -38,6 +38,8 @@ class BrainApplication:
                 timeout=self.config.timeout, structured_output=self.config.structured_output,
                 planner_max_completion_tokens=self.config.planner_max_completion_tokens)
         self.provider = provider
+        if hasattr(provider, "set_asset_catalog"):
+            provider.set_asset_catalog(self.assets)
         if self.config.vision and (platform_factory is LocalScenePlatform or not hasattr(provider, "detect")):
             raise BrainError("vision_requires_rendering_platform", "configuration",
                              "Vision requires an explicit rendering platform and a detection provider; LocalScenePlatform has no images")

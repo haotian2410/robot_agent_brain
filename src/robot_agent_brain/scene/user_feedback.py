@@ -87,13 +87,10 @@ def explain_issue(issue, exc, scene, assets):
         direction = {
             "left_of": "左侧", "right_of": "右侧", "front_of": "前方", "behind": "后方",
         }.get(relation, "该位置")
-        surface_direction = {
-            "left_of": "桌面左侧", "right_of": "桌面右侧", "front_of": "桌面前方", "behind": "桌面后方",
-        }.get(relation, "明确的桌面区域")
         if relation in {"left_of", "right_of", "front_of", "behind"}:
-            question = f"“桌子{direction}”未说明是在{surface_direction}还是桌外地面。请明确说“{surface_direction}”或补充支撑面。"
+            question = f"将按桌面区域处理“桌子{direction}”；当前无法在桌面找到满足碰撞和工作区约束的位置，请补充更具体的桌面区域。"
         else:
-            question = "相对于桌子的位置未说明是在桌面区域还是桌外地面。请明确桌面区域或补充支撑面。"
+            question = "相对于桌面的位置不明确，请说明左/右/前/后或具体桌面区域。"
     elif code == "scene_edit_support_unknown":
         question = "无法确认目标物应放在哪个支撑面上。请明确桌面、托盘或其他可靠支撑物。"
     elif code == "scene_edit_default_surface_missing":

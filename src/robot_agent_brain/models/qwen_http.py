@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from ..contracts.camera import CameraFrame
 from ..contracts.task_intent import TaskIntent
 from ..errors import BrainError
-from .prompts import TASK_UNDERSTANDING_PROMPT, VISION_GROUNDING_PROMPT, SKILL_PLANNING_PROMPT, prompt_payload
+from .prompts import TASK_UNDERSTANDING_PROMPT, VISION_GROUNDING_PROMPT, SKILL_PLANNING_PROMPT, prompt_payload, build_asset_catalog_prompt
 from .skill_planning import SkillPlanningRequest, SkillPlanLLMOutput
 from .task_understanding import (TaskUnderstandingRequest, parse_qwen_turn,
                                   task_understanding_v3_wire_schema)
@@ -42,6 +42,7 @@ class QwenHTTPProvider:
         client: httpx.Client | None = None,
         transport: httpx.BaseTransport | None = None,
         planner_max_completion_tokens: int = 1024,
+        asset_catalog=None,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -55,6 +56,13 @@ class QwenHTTPProvider:
         self.calls: list[dict[str, Any]] = []
         self.last_raw_values: dict[str, Any] = {}
         self.last_raw_text: dict[str, str] = {}
+        self.asset_catalog_prompt = ""
+        self.asset_catalog_sha256 = None
+        if asset_catalog is not None:
+            self.set_asset_catalog(asset_catalog)
+
+    def set_asset_catalog(self, assets) -> None:
+        self.asset_catalog_prompt, self.asset_catalog_sha256 = build_asset_catalog_prompt(assets)
 
     def _redact(self, text):
         return text.replace(self.api_key, "[REDACTED]") if self.api_key else text
@@ -82,6 +90,8 @@ class QwenHTTPProvider:
         summary_url = urlunsplit((url.scheme, url.netloc.rsplit("@", 1)[-1], url.path, "", ""))
         record = {"stage":stage, "status":"failed", "request_id":request_id,
                   "model":self.model, "base_url":summary_url, "finish_reason":None, "usage":None}
+        if stage == "task_understanding" and self.asset_catalog_sha256:
+            record["asset_catalog_sha256"] = self.asset_catalog_sha256
         started = time.monotonic()
         self.last_raw_text.pop(stage, None)
         self.last_raw_values.pop(stage, None)
@@ -170,7 +180,7 @@ class QwenHTTPProvider:
         """
         return self._call(
             "task_understanding",
-            TASK_UNDERSTANDING_PROMPT,
+            TASK_UNDERSTANDING_PROMPT + self.asset_catalog_prompt,
             prompt_payload({"instruction": request.instruction}),
             task_understanding_v3_wire_schema(),
             lambda value: _task_intent_from_v3(value, request.instruction),
@@ -181,7 +191,8 @@ class QwenHTTPProvider:
             value = _repair_explicit_replace(value, request.instruction)
             value = _repair_explicit_selector_clarification(value, request.instruction)
             return parse_qwen_turn(value, request.instruction)
-        return self._call("task_understanding", TASK_UNDERSTANDING_PROMPT,
+        prompt = TASK_UNDERSTANDING_PROMPT + self.asset_catalog_prompt
+        return self._call("task_understanding", prompt,
                           prompt_payload({"instruction": request.instruction}), task_understanding_v3_wire_schema(), parse)
 
     def plan(self, request: SkillPlanningRequest) -> SkillPlanLLMOutput:

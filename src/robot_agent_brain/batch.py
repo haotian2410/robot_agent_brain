@@ -44,6 +44,17 @@ class BatchSession(BaseModel):
     category: str | None = None
     random_seed: int | None = None
     asset_role_mapping: dict = Field(default_factory=dict)
+    # v2 matrix metadata.  These fields are optional so hand-written v1 JSON
+    # keeps the same small contract.
+    test_id: str | None = None
+    parent_test_id: str | None = None
+    coverage_tag: str | None = None
+    scene_basis: str | None = None
+    requires_visual: bool | None = None
+    expected_outcome: str | None = None
+    expected_error_codes: list[str] = Field(default_factory=list)
+    expected_scene_change: str | None = None
+    assertion_profile: str | None = None
 
     @field_validator("instructions")
     @classmethod

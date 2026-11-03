@@ -28,6 +28,31 @@ class AssetGeometry(BaseModel):
         return self
 
 
+def geometry_from_ols_aabb(value) -> AssetGeometry:
+    """Convert OLS's six signed face coordinates to Brain geometry.
+
+    OLS publishes ``[x+, x-, y+, y-, z+, z-]``.  The values are coordinates
+    in the asset-local frame, not guaranteed to be ordered or opposite in
+    sign (for example a model origin can be outside its mesh).  Treat each
+    pair as unordered endpoints and retain the resulting exact local bounds.
+    """
+    if not isinstance(value, (list, tuple)) or len(value) != 6:
+        raise ValueError("asset_aabb6_invalid")
+    try:
+        values = tuple(float(item) for item in value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("asset_aabb6_invalid") from exc
+    if not all(math.isfinite(item) for item in values):
+        raise ValueError("asset_aabb6_invalid")
+    low = tuple(min(values[index], values[index + 1]) for index in (0, 2, 4))
+    high = tuple(max(values[index], values[index + 1]) for index in (0, 2, 4))
+    return AssetGeometry(
+        dimensions_m=tuple(upper - lower for lower, upper in zip(low, high)),
+        local_aabb_min_m=low,
+        local_aabb_max_m=high,
+    )
+
+
 class BrainAssetView(AssetGeometry):
     library_asset_id: LibraryAssetId
     metadata_ref: str = Field(min_length=1)
