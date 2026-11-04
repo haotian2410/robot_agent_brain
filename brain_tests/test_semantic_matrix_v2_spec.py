@@ -80,3 +80,43 @@ def test_expected_json_route_contract_keeps_clarification_and_catalog_cases_open
                                 "clarification_required", {"_row": 18})
     _validate_expected_contract({"allowed_catalog_names": ["mug"], "selected_asset_key_in_request": True},
                                 "semantic_accepted", {"_row": 19})
+
+
+def test_expected_json_deep_schema_accepts_route_operation_shapes():
+    row = {"_row": 22}
+    _validate_expected_contract({
+        "route": "scene_edit", "operation": "add", "target_role": "object_a",
+        "relation": "on", "reference_role": "surface_1", "region": "right_front",
+        "placement_hint": "any", "count": 1,
+    }, "scene_updated", row)
+    _validate_expected_contract({
+        "route": "scene_edit", "operation": "scale", "target_role": "object_a",
+        "scale_mode": "multiply", "scale_xyz": [1.1, 1.1, 1.1],
+    }, "scene_updated", row)
+    _validate_expected_contract({
+        "route": "scene_query", "query_type": "selection", "target_role": "object_a",
+        "selection": "nearest", "reference_role": "placement_1", "selected_count": 1,
+    }, "answered", row)
+    _validate_expected_contract({
+        "route": "robot_task", "operation": "place", "executed": False,
+    }, "plan_ready", row)
+
+
+@pytest.mark.parametrize(
+    ("payload", "outcome", "message"),
+    [
+        ({"route": "scene_edit", "operation": "add", "target_role": "object_a",
+          "relation": "near"}, "scene_updated", "relation_reference_must_be_paired"),
+        ({"route": "scene_edit", "operation": "rotate", "target_role": "object_a",
+          "axis": "z", "angle_deg": "ninety"}, "scene_updated", "angle_deg_type"),
+        ({"route": "scene_edit", "operation": "scale", "target_role": "object_a",
+          "scale_mode": "multiply", "scale_xyz": [1.0, 0.0, 1.0]}, "scene_updated", "scale_xyz_type"),
+        ({"route": "scene_edit", "operations": ["what:object_a"]}, "scene_updated", "operation_invalid"),
+        ({"route": "scene_query", "query_type": "selection", "target_role": "object_a",
+          "selection": "nearest"}, "answered", "selection_requires_reference_role"),
+        ({"route": "robot_task", "operation": "place", "executed": True}, "plan_ready", "plan_ready_requires_executed=false"),
+    ],
+)
+def test_expected_json_deep_schema_rejects_malformed_nested_contract(payload, outcome, message):
+    with pytest.raises(BatchMatrixError, match=message):
+        _validate_expected_contract(payload, outcome, {"_row": 23})

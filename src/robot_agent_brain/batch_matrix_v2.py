@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from .batch_matrix import BatchMatrixError, _cell, _enabled, _fields, _render, load_asset_catalog
+from .batch_matrix import (BatchMatrixError, _cell, _enabled, _fields, _render,
+                           load_asset_catalog_document)
 
 
 MATRIX_COLUMNS = (
@@ -33,6 +35,99 @@ ALLOWED_OUTCOMES = {"scene_updated", "answered", "clarification_required", "safe
                     "plan_ready", "capability_unsupported", "blocked", "semantic_accepted", "robot_setup_updated"}
 ALLOWED_EXPECTED_ROUTES = {"scene_edit", "scene_query", "robot_task", "robot_config"}
 V2_PLACEHOLDERS = {"object_a", "object_b", "placement_1", "placement_2", "surface_1"}
+SCENE_EDIT_OPERATIONS = {"add", "remove", "replace", "translate", "move_relative", "rotate",
+                         "scale", "update_properties"}
+SCENE_EDIT_RELATIONS = {"left_of", "right_of", "front_of", "behind", "above", "below", "near", "on", "inside"}
+SCENE_EDIT_REGIONS = {"any", "center", "left_half", "right_half", "front_half", "back_half",
+                      "left_front", "right_front", "left_back", "right_back"}
+SCENE_QUERY_TYPES = {"count", "existence", "selection", "relation", "neighbors", "position"}
+SCENE_QUERY_SELECTIONS = {"nearest", "farthest", "leftmost", "rightmost", "frontmost", "backmost"}
+TRANSLATE_DIRECTIONS = {"left", "right", "front", "back", "above", "below", "up", "down"}
+SCALE_DIRECTIONS = {"enlarge", "shrink"}
+SCALE_AMOUNTS = {"small", "medium", "large"}
+
+
+def _contract_error(row: dict[str, Any], detail: str) -> None:
+    raise BatchMatrixError(
+        f"semantic_matrix_v2_expected_contract_invalid:variants!expected_json{row['_row']}:{detail}")
+
+
+def _contract_field(expected: dict[str, Any], name: str, row: dict[str, Any], *, required: bool = False,
+                    types: tuple[type, ...] = (str,), allow_none: bool = False) -> Any:
+    """Read and type-check one expected-json field.
+
+    This intentionally reports a JSON path-like field name.  Workbook authors
+    otherwise get a late assertion failure with no indication which part of a
+    nested route contract was malformed.
+    """
+    value = expected.get(name)
+    if value is None:
+        if required and not allow_none:
+            _contract_error(row, f"{name}_missing")
+        return value
+    if allow_none and value is None:
+        return value
+    if not isinstance(value, types) or (str in types and isinstance(value, str) and not value.strip()):
+        labels = "/".join(item.__name__ for item in types)
+        _contract_error(row, f"{name}_type={labels}")
+    return value
+
+
+def _contract_bool(expected: dict[str, Any], name: str, row: dict[str, Any], *, required: bool = False) -> Any:
+    return _contract_field(expected, name, row, required=required, types=(bool,))
+
+
+def _contract_number(expected: dict[str, Any], name: str, row: dict[str, Any], *, required: bool = False,
+                     allow_none: bool = False) -> Any:
+    value = _contract_field(expected, name, row, required=required, types=(int, float), allow_none=allow_none)
+    if value is not None and (isinstance(value, bool) or not math.isfinite(float(value))):
+        _contract_error(row, f"{name}_finite")
+    return value
+
+
+def _contract_string_list(expected: dict[str, Any], name: str, row: dict[str, Any], *, required: bool = False) -> Any:
+    value = expected.get(name)
+    if value is None:
+        if required:
+            _contract_error(row, f"{name}_missing")
+        return value
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+        _contract_error(row, f"{name}_type=list[str]")
+    return value
+
+
+def _validate_operation_token(value: Any, row: dict[str, Any], index: int) -> None:
+    """Validate the compact operation form used by the authoritative sheet.
+
+    Existing matrix rows use values such as ``add:object_a`` and
+    ``translate:object_a:right:0.05``.  New matrices may use object entries;
+    both forms are checked instead of allowing an arbitrary list of strings.
+    """
+    path = f"operations[{index}]"
+    if isinstance(value, str):
+        parts = value.split(":")
+        if not parts or parts[0] not in (SCENE_EDIT_OPERATIONS | {"color"}):
+            _contract_error(row, f"{path}.operation_invalid")
+        if len(parts) < 2 or not parts[1].strip():
+            _contract_error(row, f"{path}.target_role_missing")
+        if parts[0] == "translate" and len(parts) >= 4:
+            try:
+                distance = float(parts[3])
+            except ValueError:
+                _contract_error(row, f"{path}.distance_m_type")
+            if not math.isfinite(distance):
+                _contract_error(row, f"{path}.distance_m_finite")
+        return
+    if not isinstance(value, dict):
+        _contract_error(row, f"{path}.type=list|string|object")
+    operation = value.get("operation", value.get("type"))
+    if not isinstance(operation, str) or operation not in SCENE_EDIT_OPERATIONS:
+        _contract_error(row, f"{path}.operation_invalid")
+    for name in ("target_role", "reference_role", "replacement_role"):
+        if name in value and value[name] is not None and (not isinstance(value[name], str) or not value[name].strip()):
+            _contract_error(row, f"{path}.{name}_type=string")
+    if "count" in value and (not isinstance(value["count"], int) or isinstance(value["count"], bool) or value["count"] < 1):
+        _contract_error(row, f"{path}.count_type=positive_integer")
 
 
 def _validate_expected_contract(expected: dict[str, Any], outcome: str, row: dict[str, Any]) -> None:
@@ -46,37 +141,163 @@ def _validate_expected_contract(expected: dict[str, Any], outcome: str, row: dic
     """
     route = expected.get("route")
     if route is None:
-        if outcome == "clarification_required" and expected.get("actionable_payload_absent") is not True:
-            raise BatchMatrixError(
-                f"semantic_matrix_v2_expected_contract_invalid:variants!expected_json{row['_row']}:"
-                "clarification_requires_actionable_payload_absent=true")
-        if outcome not in {"clarification_required", "semantic_accepted"}:
-            raise BatchMatrixError(
-                f"semantic_matrix_v2_expected_contract_invalid:variants!expected_json{row['_row']}:route_missing")
-        return
+        if outcome == "clarification_required":
+            if expected.get("actionable_payload_absent") is not True:
+                _contract_error(row, "clarification_requires_actionable_payload_absent=true")
+            if "required_missing_slot" in expected and (not isinstance(expected["required_missing_slot"], str) or
+                                                        not expected["required_missing_slot"].strip()):
+                _contract_error(row, "required_missing_slot_type=string")
+            if "must_not_drop" in expected and (not isinstance(expected["must_not_drop"], str) or
+                                                 not expected["must_not_drop"].strip()):
+                _contract_error(row, "must_not_drop_type=string")
+            return
+        if outcome == "semantic_accepted":
+            _contract_string_list(expected, "allowed_catalog_names", row, required=True)
+            flags = ["selected_asset_key_in_request", "exact_catalog_name_respected", "no_stale_key"]
+            if not any(expected.get(flag) is True for flag in flags):
+                _contract_error(row, "catalog_acceptance_requires_selection_evidence")
+            for flag in flags:
+                if flag in expected and not isinstance(expected[flag], bool):
+                    _contract_error(row, f"{flag}_type=boolean")
+            return
+        _contract_error(row, "route_missing")
+    if not isinstance(route, str) or not route.strip():
+        _contract_error(row, "route_type=string")
     if route not in ALLOWED_EXPECTED_ROUTES:
-        raise BatchMatrixError(
-            f"semantic_matrix_v2_expected_contract_invalid:variants!expected_json{row['_row']}:route={route}")
+        _contract_error(row, f"route={route}")
+    # These fields are shared by several routes.  Validate them before the
+    # route discriminator so a malformed scalar cannot silently pass merely
+    # because its route has a permissive extension field.
+    if "count" in expected and (not isinstance(expected["count"], int) or isinstance(expected["count"], bool) or expected["count"] < 1):
+        _contract_error(row, "count_type=positive_integer")
+    if "count_delta" in expected and (not isinstance(expected["count_delta"], int) or isinstance(expected["count_delta"], bool)):
+        _contract_error(row, "count_delta_type=integer")
+    for name in ("allowed_error_codes", "error_codes", "allowed_catalog_names"):
+        if name in expected:
+            _contract_string_list(expected, name, row)
+    for name in ("atomic", "scene_unchanged", "preserve_instance", "preserve_pose", "preserve_orientation",
+                 "platform_unchanged", "new_instance_required", "non_targets_unchanged", "original_hash_unchanged",
+                 "same_instance", "table_and_task_objects_unchanged"):
+        if name in expected and not isinstance(expected[name], bool):
+            _contract_error(row, f"{name}_type=boolean")
     if route == "scene_edit":
         operation = expected.get("operation")
         operations = expected.get("operations")
         if operation is None and not (isinstance(operations, list) and operations):
-            raise BatchMatrixError(
-                f"semantic_matrix_v2_expected_contract_invalid:variants!expected_json{row['_row']}:"
-                "scene_edit_requires_operation_or_operations")
-        if operation is not None and not isinstance(operation, str):
-            raise BatchMatrixError(
-                f"semantic_matrix_v2_expected_contract_invalid:variants!expected_json{row['_row']}:operation_type")
+            _contract_error(row, "scene_edit_requires_operation_or_operations")
+        if operation is not None:
+            if not isinstance(operation, str) or operation not in SCENE_EDIT_OPERATIONS:
+                _contract_error(row, "operation_invalid")
+            target_required = outcome not in {"safe_rejection", "clarification_required"}
+            _contract_field(expected, "target_role", row, required=target_required)
+            if operation in {"add", "move_relative"}:
+                relation = expected.get("relation")
+                reference = expected.get("reference_role")
+                if relation is not None and relation not in SCENE_EDIT_RELATIONS:
+                    _contract_error(row, f"relation_invalid={relation}")
+                if (relation is None) != (reference is None):
+                    _contract_error(row, "relation_reference_must_be_paired")
+                if reference is not None and (not isinstance(reference, str) or not reference.strip()):
+                    _contract_error(row, "reference_role_type=string")
+            if operation == "add":
+                region = expected.get("region")
+                placement_hint = expected.get("placement_hint")
+                if region is not None and region not in SCENE_EDIT_REGIONS:
+                    _contract_error(row, f"region_invalid={region}")
+                if placement_hint is not None and placement_hint not in {"any", "center"}:
+                    _contract_error(row, f"placement_hint_invalid={placement_hint}")
+            elif operation == "rotate":
+                if outcome not in {"safe_rejection", "clarification_required"}:
+                    axis = _contract_field(expected, "axis", row, required=True)
+                    if axis not in {"x", "y", "z", "local_x", "local_y", "local_z"}:
+                        _contract_error(row, f"axis_invalid={axis}")
+                    _contract_number(expected, "angle_deg", row, required=True)
+            elif operation == "translate":
+                if outcome not in {"safe_rejection", "clarification_required"}:
+                    direction = _contract_field(expected, "direction", row, required=True)
+                    if direction not in TRANSLATE_DIRECTIONS:
+                        _contract_error(row, f"direction_invalid={direction}")
+                    distance = _contract_number(expected, "distance_m", row, allow_none=True)
+                    motion_scale = expected.get("motion_scale")
+                    if motion_scale is not None and (not isinstance(motion_scale, str) or not motion_scale.strip()):
+                        _contract_error(row, "motion_scale_type=string|null")
+                    if distance is None and motion_scale is None:
+                        _contract_error(row, "translate_requires_distance_or_motion_scale")
+            elif operation == "scale":
+                if outcome not in {"safe_rejection", "clarification_required"}:
+                    scale_xyz = expected.get("scale_xyz")
+                    has_xyz = isinstance(scale_xyz, list)
+                    has_direction = expected.get("scale_direction") is not None or expected.get("scale_amount") is not None
+                    if has_xyz == has_direction:
+                        _contract_error(row, "scale_requires_exactly_one_mode")
+                    if has_xyz:
+                        if len(scale_xyz) != 3 or any(isinstance(value, bool) or not isinstance(value, (int, float)) or
+                                                     not math.isfinite(float(value)) or float(value) <= 0 for value in scale_xyz):
+                            _contract_error(row, "scale_xyz_type=positive_number[3]")
+                    else:
+                        if expected.get("scale_direction") not in SCALE_DIRECTIONS or expected.get("scale_amount") not in SCALE_AMOUNTS:
+                            _contract_error(row, "scale_direction_or_amount_invalid")
+            elif operation == "update_properties" and outcome not in {"safe_rejection", "clarification_required"}:
+                color = _contract_field(expected, "color", row, required=True)
+                if not isinstance(color, str) or not color.strip():
+                    _contract_error(row, "color_type=string")
+            elif operation == "replace" and outcome not in {"safe_rejection", "clarification_required"}:
+                _contract_field(expected, "replacement_role", row, required=True)
+            elif operation == "remove" and outcome not in {"safe_rejection", "clarification_required"}:
+                count = expected.get("count")
+                all_available = expected.get("all_available")
+                if count is None and all_available is not True:
+                    _contract_error(row, "remove_requires_count_or_all_available")
+                if count is not None and (not isinstance(count, int) or isinstance(count, bool) or count < 1):
+                    _contract_error(row, "count_type=positive_integer")
+        if operations is not None:
+            if not isinstance(operations, list) or not operations:
+                _contract_error(row, "operations_type=non_empty_list")
+            for index, item in enumerate(operations):
+                _validate_operation_token(item, row, index)
     elif route == "scene_query":
-        if not isinstance(expected.get("query_type"), str) or not isinstance(expected.get("target_role"), str):
-            raise BatchMatrixError(
-                f"semantic_matrix_v2_expected_contract_invalid:variants!expected_json{row['_row']}:"
-                "scene_query_requires_query_type_and_target_role")
+        if not isinstance(expected.get("query_type"), str) or not expected.get("query_type", "").strip() or (
+                outcome not in {"safe_rejection", "clarification_required"} and
+                (not isinstance(expected.get("target_role"), str) or not expected.get("target_role", "").strip())):
+            # Keep the historical discriminator in the error text while also
+            # naming the concrete missing field for workbook diagnostics.
+            missing = "query_type" if not isinstance(expected.get("query_type"), str) or not expected.get("query_type", "").strip() else "target_role"
+            _contract_error(row, f"scene_query_requires_query_type_and_target_role:{missing}_missing")
+        query_type = _contract_field(expected, "query_type", row, required=True)
+        target_required = outcome not in {"safe_rejection", "clarification_required"}
+        _contract_field(expected, "target_role", row, required=target_required)
+        if query_type not in SCENE_QUERY_TYPES:
+            _contract_error(row, f"query_type_invalid={query_type}")
+        if "reference_role" in expected and expected["reference_role"] is not None and not isinstance(expected["reference_role"], str):
+            _contract_error(row, "reference_role_type=string|null")
+        if query_type == "selection":
+            selection = _contract_field(expected, "selection", row, required=outcome not in {"safe_rejection", "clarification_required"})
+            if selection is not None and selection not in SCENE_QUERY_SELECTIONS:
+                _contract_error(row, f"selection_invalid={selection}")
+            if selection in {"nearest", "farthest"} and not expected.get("reference_role") and outcome not in {"safe_rejection", "clarification_required"}:
+                _contract_error(row, "selection_requires_reference_role")
+        if "selected_count" in expected and (not isinstance(expected["selected_count"], int) or isinstance(expected["selected_count"], bool) or expected["selected_count"] < 1):
+            _contract_error(row, "selected_count_type=positive_integer")
+    elif route == "robot_task":
+        operation = expected.get("operation")
+        operations = expected.get("operations")
+        if operation is None and not (isinstance(operations, list) and operations):
+            _contract_error(row, "robot_task_requires_operation_or_operations")
+        if operation is not None and (not isinstance(operation, str) or not operation.strip()):
+            _contract_error(row, "operation_type=string")
+        if operations is not None and (not isinstance(operations, list) or not operations):
+            _contract_error(row, "operations_type=non_empty_list")
+        if "executed" in expected and not isinstance(expected["executed"], bool):
+            _contract_error(row, "executed_type=boolean")
+        if outcome == "plan_ready" and expected.get("executed") is not False:
+            _contract_error(row, "plan_ready_requires_executed=false")
     elif route == "robot_config":
-        if expected.get("mode") not in {"single", "dual"} or expected.get("profile_registered") is not True:
-            raise BatchMatrixError(
-                f"semantic_matrix_v2_expected_contract_invalid:variants!expected_json{row['_row']}:"
-                "robot_config_requires_registered_profile")
+        mode = _contract_field(expected, "mode", row, required=True)
+        profile_registered = _contract_bool(expected, "profile_registered", row, required=True)
+        if mode not in {"single", "dual"} or profile_registered is not True:
+            _contract_error(row, "robot_config_requires_registered_profile")
+        if "executed" in expected and not isinstance(expected["executed"], bool):
+            _contract_error(row, "executed_type=boolean")
 
 
 def _openpyxl():
@@ -399,9 +620,11 @@ def compile_semantic_matrix_v2(matrix: str | Path, *, kind: str = "generated_edi
     if kind not in {"generated_edit", "known_scene"}:
         raise BatchMatrixError(f"semantic_matrix_v2_kind_invalid:{kind}")
     roles = json.loads(Path(asset_roles).read_text(encoding="utf-8")) if asset_roles else {}
-    catalog = load_asset_catalog(asset_catalog) if asset_catalog else {}
+    catalog, declared_catalog_revision = (load_asset_catalog_document(asset_catalog)
+                                          if asset_catalog else ({}, None))
     catalog_payload = json.dumps(catalog, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    catalog_revision = "sha256:" + hashlib.sha256(catalog_payload.encode("utf-8")).hexdigest()
+    catalog_revision = (declared_catalog_revision or
+                        ("sha256:" + hashlib.sha256(catalog_payload.encode("utf-8")).hexdigest()))
     # Profiles alter execution topology only; never mutate the reader's source
     # rows in place because callers may reuse ``spec`` for a second compile.
     apply_matrix_run_profile(spec, run_profile)
@@ -495,7 +718,10 @@ def compile_semantic_matrix_v2(matrix: str | Path, *, kind: str = "generated_edi
                 "variant_count": len(spec["variants"]), "invariant_count": spec["invariant_count"],
                 "session_count": len(sessions),
                 "seed_algorithm": "sha256(brain-semantic-matrix.v2|root|axis|stable-ids)",
-                "catalog_revision": catalog_revision, "rows": manifest_rows,
+                "catalog_revision": catalog_revision,
+                "catalog_revision_source": ("derived_ols_snapshot" if declared_catalog_revision
+                                             else "assets_mapping_digest"),
+                "rows": manifest_rows,
                 "catalog_keys": sorted(catalog),
                 "coverage": {"enabled_variants": len(spec["variants"]),
                              "compiled_sessions": len(sessions),
