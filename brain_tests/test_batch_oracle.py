@@ -37,6 +37,29 @@ def test_oracle_proves_add_and_asset_role_without_using_brain_selector():
     assert value["status"] == "passed", value
 
 
+def test_oracle_counts_only_requested_role_during_platform_bootstrap():
+    # The first empty-scene edit creates the tabletop platform together with
+    # the requested object.  Platform IDs must not be counted as user adds.
+    before = _scene([])
+    table = _obj(1, "table")
+    table["components"][1]["properties"] = {"path": "$LIBRARY_SERVER/29", "type": "model"}
+    table["components"][2]["properties"] = {"semantic_name": "table", "category": "surface", "support": None}
+    marker = _obj(8, "marker", 0.2, 0.1)
+    marker["components"][1]["properties"] = {"path": "$LIBRARY_SERVER/10", "type": "model"}
+    marker["components"][2]["properties"] = {"semantic_name": "marker", "category": "tool", "support": 1}
+    after = _scene([table, marker])
+    value = evaluate_turn(
+        expected={"operation": "add", "target_role": "object_a", "count": 1,
+                  "support": "primary_table"},
+        expected_outcome="scene_updated", before_scene=before, after_scene=after,
+        result={"outcome": "scene_updated", "executed": False},
+        role_mapping={"object_a": {"semantic_name": "marker",
+                                    "metadata_ref": "$LIBRARY_SERVER/10",
+                                    "type": "model"}},
+    )
+    assert value["status"] == "passed", value
+
+
 def test_oracle_detects_query_mutating_scene():
     before = _scene([_obj(10, "apple")])
     after = _scene([_obj(10, "apple", 0.1, 0.0)])

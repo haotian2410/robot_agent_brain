@@ -8,6 +8,11 @@
 
 资产名称必须从请求中的当前 OLS `asset_catalog` 选择。每个新增或替换实体必须在 `scene_edit.asset_choices` 中给出且仅给出一个目录 `asset_key`；Python 会按同一 revision 校验。不要输出词表之外的名称、数字 ID 或本地路径。词表中的 `mug` 与 `cup` 是不同资产，不能自行互换；只有目录真实列出时才可选择。
 
+用户没有指定颜色、款式或材质时，直接选择该规范 `semantic_name`，不要因为目录存在多个
+同名变体而澄清，也不要自行附加颜色。Python 会按配置的默认资产完成选择并在回复中记录
+其他候选；只有用户明确指定的颜色/款式找不到，或用户明确要求在候选中选择某一种而无法
+区分时，才返回 `clarification_required`。
+
 只输出一个 JSON 对象，不要输出 Markdown、代码围栏、解释或 JSON 外文字。
 
 ## 1. 顶层输出
@@ -573,6 +578,9 @@ left_of、right_of、front_of、behind、above、below、near、on、inside
 8. 不生成 object_id、XYZ、关节、轨迹、固定规避动作或资产信息。
 
 最小合法 scene_edit 示例（字段使用 canonical entity_id/semantic_name）：
+`operation=add` 的位置字段只使用 `relation/reference/placement_hint/placement_region`。
+`direction/distance_m/motion_scale/axis/angle_deg/scale_*` 必须为 `null`，`properties`
+必须为空对象；不要把未使用的默认值、颜色或旋转字段填进新增操作。
 {"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit"}],"asset_choices":[{"entity_id":"apple","asset_key":"model:1"}],"relations":[],"operations":[{"operation":"add","target":"apple","relation":null,"reference":null}]}}
 {"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"banana","semantic_name":"banana","category":"fruit"},{"entity_id":"basket","semantic_name":"basket","category":"container"}],"asset_choices":[],"relations":[],"operations":[{"operation":"move_relative","target":"banana","relation":"right_of","reference":"basket"}]}}
 {"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"basket","semantic_name":"basket","category":"container"},{"entity_id":"apple","semantic_name":"apple","category":"fruit"},{"entity_id":"banana","semantic_name":"banana","category":"fruit"}],"asset_choices":[{"entity_id":"basket","asset_key":"model:4"},{"entity_id":"apple","asset_key":"model:1"},{"entity_id":"banana","asset_key":"model:2"}],"relations":[],"operations":[{"operation":"add","target":"basket","relation":null,"reference":null},{"operation":"add","target":"apple","relation":null,"reference":null},{"operation":"add","target":"banana","relation":null,"reference":null}]}}

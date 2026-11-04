@@ -50,6 +50,12 @@ def test_runtime_prompt_binds_vague_scene_motion_to_python_scale_policy():
     assert "机器人任务仍不能凭空猜测执行距离" in TASK_UNDERSTANDING_PROMPT
 
 
+def test_runtime_prompt_uses_python_default_for_unspecified_asset_style():
+    assert "不要因为目录存在多个" in TASK_UNDERSTANDING_PROMPT
+    assert "Python 会按配置的默认资产完成选择" in TASK_UNDERSTANDING_PROMPT
+    assert "operation=add" in TASK_UNDERSTANDING_PROMPT
+
+
 def test_v3_schema_requires_route_and_all_payload_slots():
     schema = task_understanding_v3_wire_schema()
     assert set(schema["required"]) == set(schema["properties"])

@@ -179,16 +179,25 @@ def _check_new_object(expected: dict, before: dict[str, dict], after: dict[str, 
                       role_mapping: dict | None, checks: list[dict], errors: list[str]):
     before_ids, after_ids = set(before), set(after)
     added = sorted(after_ids - before_ids, key=lambda x: (len(x), x))
+    role = expected.get("target_role")
+    # A bootstrap edit legitimately adds the platform table/robot/cameras at
+    # the same time as the requested object.  Count and validate only the
+    # target role when one is declared; otherwise a bootstrap would look like
+    # nine user-added objects instead of one marker.
+    target_added = added
+    if role:
+        added_objects = {oid: after[oid] for oid in added}
+        target_added = [oid for oid, _ in _find_by_role(added_objects, role, role_mapping)]
     count = expected.get("count")
     if count is not None:
-        ok = len(added) == int(count)
-        _append(checks, "added_object_count", ok, expected=int(count), actual=len(added), ids=added)
+        ok = len(target_added) == int(count)
+        _append(checks, "added_object_count", ok, expected=int(count), actual=len(target_added), ids=target_added,
+                all_added_ids=added)
         if not ok:
             errors.append("added_object_count")
-    role = expected.get("target_role")
-    if role and added:
+    if role and target_added:
         target_name = _role_name(role_mapping, role)
-        matching = [oid for oid in added if not target_name or _semantic(after[oid]) == target_name]
+        matching = [oid for oid in target_added if not target_name or _semantic(after[oid]) == target_name]
         ok = len(matching) >= 1
         _append(checks, "added_object_role", ok, role=role, expected_semantic=target_name,
                 matching_ids=matching)
@@ -203,27 +212,27 @@ def _check_new_object(expected: dict, before: dict[str, dict], after: dict[str, 
             if not ok:
                 errors.append("added_object_asset")
     support = expected.get("support")
-    if support == "primary_table" and added:
+    if support == "primary_table" and target_added:
         table = _find_primary_table(after, role_mapping)
         table_id = table[0] if table else None
         supported = []
-        for oid in added:
+        for oid in target_added:
             semantic = _component(after[oid], "Semantic") or {}
             if _oid(semantic.get("support")) == _oid(table_id) and table_id is not None:
                 supported.append(oid)
         # Some browser fixtures omit support while still placing a model on a
         # configured tabletop.  Treat that as unproven, never as a pass.
-        ok = table_id is not None and len(supported) == len(added)
+        ok = table_id is not None and len(supported) == len(target_added)
         _append(checks, "primary_table_support", ok, table_id=table_id, supported_ids=supported,
-                added_ids=added)
+                added_ids=target_added, all_added_ids=added)
         if not ok:
             errors.append("primary_table_support")
     region = expected.get("region")
-    if region and region != "any" and added:
+    if region and region != "any" and target_added:
         table = _find_primary_table(after, role_mapping)
         table_transform = _transform(table[1]) if table else {}
         center = _vec(table_transform.get("position"))
-        positions = [_vec(_transform(after[oid]).get("position")) for oid in added]
+        positions = [_vec(_transform(after[oid]).get("position")) for oid in target_added]
         if not table or center is None or any(position is None for position in positions):
             _append(checks, "region_position_evidence", False, region=region, reason="missing_table_or_transform")
             errors.append("region_position_evidence")
