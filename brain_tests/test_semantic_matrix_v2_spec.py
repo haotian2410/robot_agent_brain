@@ -121,6 +121,8 @@ def test_expected_json_deep_schema_accepts_route_operation_shapes():
         ({"route": "robot_task", "operation": "place", "executed": True}, "plan_ready", "plan_ready_requires_executed=false"),
         ({"route": "scene_edit", "operations": [{"operation": "replace", "target_role": "object_a"}]},
          "scene_updated", "replacement_role_missing"),
+        ({"allowed_catalog_names": [], "selected_asset_key_in_request": True},
+         "semantic_accepted", "allowed_catalog_names_non_empty"),
     ],
 )
 def test_expected_json_deep_schema_rejects_malformed_nested_contract(payload, outcome, message):

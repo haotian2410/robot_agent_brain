@@ -93,6 +93,8 @@ def _contract_string_list(expected: dict[str, Any], name: str, row: dict[str, An
         return value
     if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
         _contract_error(row, f"{name}_type=list[str]")
+    if required and not value:
+        _contract_error(row, f"{name}_non_empty")
     return value
 
 
