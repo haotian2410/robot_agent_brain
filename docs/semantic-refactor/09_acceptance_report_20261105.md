@@ -256,6 +256,31 @@ conda run --no-capture-output -n robot_agent_integ \
 JSON/Scene 文档解析及被拒对象检查。新增测试覆盖显式浏览器无相机和后续预设缺失时不
 触碰浏览器。真实故障注入仍未执行。
 
+### 当前 HEAD 的增量复核
+
+当前源码基线为 `95580d2`（随后仅更新本报告基线文档）。本轮增量修复/验证包括：
+
+- OLS 目录热刷新改为一次性发布完整状态；新目录元数据校验失败时，旧 revision 和
+  资产集合保持不变；新增目录删除演进回归。
+- `validate_spec.py` 现在同时使用 `04_test_plan.schema.json` 的
+  `Draft202012Validator`，不再只比较 20/115/27 计数。
+- clean v3 Prompt 中的完整 envelope、实体、机器人操作、场景编辑操作、场景查询和
+  嵌套 payload 示例均按实际 v3 wire 子 schema 校验；空 payload scaffold 明确只作字段
+  形状示例，不作为 accepted turn。
+- 全量自动回归：`878 passed`，退出码 0；`validate_spec.py` 仍输出
+  `feature_rows=20`、`expressions=115`、`regression_invariants=27`。
+
+在当前已启动的真实 Qwen/OLS/Brain/Gateway 上另做了独立 smoke（服务未因这次文档/测试
+提交而重启，故不把它当作热刷新代码已经在线生效的证据）：
+
+- 空场景新增苹果 + 预设空场景查询：`2/2 passed`，证据目录
+  `/tmp/semantic-current-smoke.1BHhXD/out/batch-20261105-062240-10858692/`。
+- OLS 1.0.7 的 7 个场景各查询一次：`7/7 passed`，证据目录
+  `/tmp/semantic-known-current.I0fMlz/out/batch-20261105-062339-b92acb8e/`。
+
+以上 smoke 只覆盖代表性路径，不能替代完整 115 表达、27 条不变量或 known-scene
+全矩阵；最新的热刷新实现需要下一次重启 Brain 后再做在线目录演进验证。
+
 ## 未验证、阻塞和边界
 
 以下项目不能标成通过：
