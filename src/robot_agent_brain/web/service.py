@@ -481,7 +481,15 @@ class AgentService:
     def _asset_verdict(self):
         client = self.catalog_client
         try:
+            # Refresh the local read-only adapter before publishing health.  A
+            # successful refresh changes the catalog revision used on the next
+            # task-understanding turn; a failed/stale refresh is never hidden
+            # by the old in-memory catalog.
+            refreshed = self.app.refresh_assets()
             detail = check_ols(client, self.ols_url, self.config.asset_library_root)
+            detail["catalog_revision"] = self.app.pipeline.asset_catalog.revision \
+                if self.app.pipeline.asset_catalog is not None else None
+            detail["catalog_refreshed"] = refreshed
             return {"assets": "ok" if detail.get("matched") else detail, "asset_detail": detail}
         except Exception as exc:
             return {"assets": {"matched": False, "error": str(exc)}, "asset_detail": {"matched": False, "error": str(exc)}}

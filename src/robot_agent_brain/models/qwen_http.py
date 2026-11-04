@@ -247,14 +247,29 @@ class QwenHTTPProvider:
         if not isinstance(choices, list):
             raise QwenProviderError("scene_edit.asset_choices must be an array", code="provider_output_schema_invalid")
         by_entity = {}
+        entities = {
+            item.get("entity_id"): item for item in (payload.get("entities") or [])
+            if isinstance(item, dict) and isinstance(item.get("entity_id"), str)
+        }
         for index, item in enumerate(choices):
             if not isinstance(item, dict) or not isinstance(item.get("entity_id"), str) or not isinstance(item.get("asset_key"), str):
                 raise QwenProviderError(f"scene_edit.asset_choices[{index}] is invalid", code="provider_output_schema_invalid")
             entity_id, key = item["entity_id"], item["asset_key"]
             if entity_id in by_entity:
                 raise QwenProviderError(f"duplicate asset choice: {entity_id}", code="provider_output_schema_invalid")
-            if not request.asset_catalog.contains_model(key):
+            catalog_item = request.asset_catalog.model_by_key(key)
+            if catalog_item is None:
                 raise QwenProviderError(f"asset_key_not_in_catalog:{key}", code="asset_catalog_key_invalid")
+            if not catalog_item.selectable_for_add:
+                raise QwenProviderError(f"asset_not_selectable_for_scene_edit:{key}", code="asset_catalog_key_invalid")
+            entity = entities.get(entity_id)
+            if entity is None:
+                raise QwenProviderError(f"asset_choice_unknown_entity:{entity_id}", code="provider_output_schema_invalid")
+            semantic_name = entity.get("semantic_name")
+            if isinstance(semantic_name, str) and semantic_name.casefold() != catalog_item.name.casefold():
+                raise QwenProviderError(
+                    f"asset_choice_name_mismatch:{entity_id}:{semantic_name}!={catalog_item.name}",
+                    code="asset_catalog_key_invalid")
             by_entity[entity_id] = key
         required = []
         for op in payload.get("operations") or []:
@@ -267,6 +282,11 @@ class QwenHTTPProvider:
         missing = [item for item in required if item and item not in by_entity]
         if missing:
             raise QwenProviderError("missing asset choice for: " + ",".join(missing), code="asset_choice_missing")
+        allowed = {item for item in required if item}
+        extra = sorted(set(by_entity) - allowed)
+        if extra:
+            raise QwenProviderError("asset choice has no add/replace operation: " + ",".join(extra),
+                                    code="provider_output_schema_invalid")
 
     def plan(self, request: SkillPlanningRequest) -> SkillPlanLLMOutput:
         content = {**request.context.model_dump(mode="json"), "skills": request.skill_catalog}

@@ -218,7 +218,13 @@ class BrainPipeline:
         else:
             intent = self.understanding.understand(request)
             turn = BrainTurn(status="accepted", turn_kind="robot_task", instruction=instruction, task_intent=intent)
-        turn = turn.model_copy(update={"instruction": instruction})
+        # Bind the canonical turn to the exact catalog used in its provider
+        # request.  This is checked again immediately before scene editing so
+        # an OLS update between understanding and execution cannot retarget a
+        # model key to a different asset.
+        turn = turn.model_copy(update={"instruction": instruction,
+                                       "asset_catalog_revision": self.asset_catalog.revision
+                                       if self.asset_catalog is not None else None})
         # The scene basis is a safety-sensitive routing decision, not a
         # semantic detail that Qwen may omit.  An explicit user request for
         # the original/initial scene must win over a model response that
@@ -266,6 +272,9 @@ class BrainPipeline:
         self.skill_planner.last_trace = None
         if turn.status != TurnStatus.ACCEPTED:
             return BrainResult(status=turn.status, turn_kind=turn.turn_kind)
+        if (turn.asset_catalog_revision is not None and self.asset_catalog is not None
+                and turn.asset_catalog_revision != self.asset_catalog.revision):
+            raise ValueError("asset_catalog_revision_conflict")
         dual = robot_profile is not None and robot_profile.setup.mode == "dual"
         if not dual:
             turn.require_legacy_execution()

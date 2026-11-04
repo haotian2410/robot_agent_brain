@@ -1,0 +1,32 @@
+# brain-web 语义重构验收记录（2026-11-05）
+
+## 已验证
+
+- 官方规范导入：20 个 feature row、115 条完整表达、27 条回归不变量。
+- 官方 v2 编译：schema v2；生成与已知场景两种 kind 均可编译 115 个 session。
+- 目录注入：当前 OLS 1.0.7 本地目录读取 34 个 model、13 个 robot、7 个 scene；模型和机器人命名空间不混用。
+- 每轮任务理解请求携带完整 `asset_catalog`、`workspace` 和 `scene_context`；请求体与 system prompt 使用同一 catalog revision。
+- v3.1 场景编辑的 `asset_choices` 现在额外校验：实体存在、规范名称与 key 一致、模型允许新增、不得有多余选择。
+- OLS 本地只读目录变化可在服务健康刷新时原子重载；新 revision 会同步到 pipeline/provider，旧 Scene 快照不会被重写。
+- 2026-11-04 的真实 Qwen 一轮“增加一个苹果”已成功生成场景更新；该证据只代表单轮冒烟，不代表全量矩阵通过。
+
+## 本轮自动测试
+
+```text
+conda run --no-capture-output -n robot_agent_integ pytest -q
+```
+
+结果：全量通过（退出码 0）。另有官方 `validate_spec.py` 通过，编译输出 schema v2 / 115 sessions。
+
+## 仍未宣称通过的项目
+
+- 本轮没有重新执行 115 条真实 Qwen/Gateway 浏览器用例；C7 全量真实验收仍为 `unverified`。
+- 远端 OLS HTTP 发生变化而本地联调目录未同步时，服务会报告目录不匹配并拒绝静默使用旧缓存；不会自动下载或修改 OLS 原始资产。
+- `cup`/`mug` 的旧兼容别名仍保留给历史 replay/旧协议；v3.1 在线路径要求 Qwen 从当前 catalog 选择精确 `asset_key`。目录同时存在 `cup` 与 `mug` 时不会把 `cup` 追加为 `mug` 别名。
+- 真实机器人执行、Control、IK、MuJoCo 和双臂规划不在本期范围。
+
+## 证据与限制
+
+- Wheel smoke 仍受当前环境缺少 `hatchling.build` 阻塞；这不是代码测试失败。
+- 不同 seed 不保证一定抽到不同资产；manifest 必须记录 seed、catalog revision、实际 asset key 和父快照 digest。
+- 生产 OLS、原始 OBJ/MTL/PNG/URDF 未修改；本记录只描述 Brain 代码和派生校验缓存。

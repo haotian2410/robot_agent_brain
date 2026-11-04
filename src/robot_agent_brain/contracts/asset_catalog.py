@@ -74,6 +74,9 @@ class AssetCatalogSnapshot(BaseModel):
     def contains_model(self, key: str) -> bool:
         return key in self.model_keys()
 
+    def model_by_key(self, key: str) -> CatalogAsset | None:
+        return next((item for item in self.models if item.asset_key == key), None)
+
     def canonical_payload(self) -> dict:
         return {
             "protocol_version": self.protocol_version,

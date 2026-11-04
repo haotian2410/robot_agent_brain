@@ -408,6 +408,10 @@ class BrainTurn(BaseModel):
     scene_query: SceneQueryIntent | None = None
     session_control: SessionControlIntent | None = None
     robot_setup_request: RobotSetupRequest | None = None
+    # Catalog identity is captured with the understanding result.  Geometry
+    # resolution must not silently reinterpret a turn against a later OLS
+    # revision.
+    asset_catalog_revision: str | None = None
 
     def require_legacy_execution(self):
         """Temporary fail-closed boundary until session v3 routing is installed."""

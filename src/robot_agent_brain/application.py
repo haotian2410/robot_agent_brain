@@ -92,6 +92,45 @@ class BrainApplication:
         self.revisions = {}
         self.platform_factory = platform_factory
 
+    def refresh_assets(self) -> bool:
+        """Reload a changed OLS catalog without rebuilding sessions.
+
+        The adapter is read-only, so a refresh is safe to stage off to the
+        side.  Asset-dependent pipeline helpers are rebound only after the
+        replacement adapter has passed all metadata/AABB checks.  Existing
+        Scene snapshots remain untouched; the new catalog is used by the next
+        understanding turn and by subsequent geometry resolution.
+        """
+        adapter = self.assets
+        if not hasattr(adapter, "refresh_from_source"):
+            return False
+        changed = adapter.refresh_from_source()
+        if not changed:
+            return False
+        aliases = self.config.load_semantic_aliases() if self.config.semantic_aliases else {}
+        self.config_summary = configuration_summary(self.config, self.assets, self.defaults)
+        self.config_fingerprint = fingerprint(self.config_summary)
+        self.pipeline.assets = self.assets
+        self.pipeline.grounder.assets = self.assets
+        self.pipeline.motion.assets = self.assets
+        self.pipeline.scene_editor.assets = self.assets
+        self.pipeline.aliases = aliases
+        self.pipeline.category_aliases = getattr(getattr(self.assets, "metadata", None), "category_aliases", {})
+        self.pipeline.grounder.aliases = aliases
+        self.pipeline.grounder.category_aliases = self.pipeline.category_aliases
+        self.pipeline.scene_editor.aliases = aliases
+        self.pipeline.scene_editor.category_aliases = self.pipeline.category_aliases
+        self.pipeline.asset_catalog = self.assets.catalog_snapshot(
+            aliases=aliases, registered_profiles=list(self.config.robot_profiles.profiles))
+        self.bootstrapper.assets = self.assets
+        self.bootstrapper.resolver.catalog = self.assets
+        self.bootstrapper.resolver.aliases = dict(aliases)
+        self.codec.assets = self.assets
+        if hasattr(self.provider, "set_asset_catalog"):
+            self.provider.set_asset_catalog(self.assets, aliases=aliases,
+                                            registered_profiles=list(self.config.robot_profiles.profiles))
+        return True
+
     def get_session(self, session_id):
         safe_identifier(session_id)
         state = self.store.load(session_id)

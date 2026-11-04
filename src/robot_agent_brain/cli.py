@@ -64,6 +64,7 @@ def parser():
     campaign.add_argument("--matrix-version", type=int, default=None)
     campaign.add_argument("--run-profile", default="default")
     campaign.add_argument("--asset-catalog")
+    campaign.add_argument("--fixture-dir", help="Directory containing explicit v2 fixture JSON files")
     schema = commands.add_parser("schemas")
     schema.add_argument("--output-dir", default="var/schemas")
     serve = commands.add_parser("serve", help="Local WebEditor Agent; plans only, no Control")
@@ -104,7 +105,8 @@ def main(argv=None):
                     agent_url=args.agent_url, gateway_url=args.gateway_url,
                     browser_id=args.browser_id, task_timeout=args.task_timeout,
                     screenshot_required=not args.allow_missing_screenshots,
-                    output_dir=args.output_dir, run_profile=args.run_profile)
+                    output_dir=args.output_dir, run_profile=args.run_profile,
+                    fixture_dir=args.fixture_dir)
                 print(json.dumps({"stages": len(result["stages"]), "output_dir": str(output)}, ensure_ascii=False))
                 return 0 if all(item.get("status", "").startswith(("passed", "skipped")) for item in result["stages"]) else 4
             from .batch_campaign import run_campaign

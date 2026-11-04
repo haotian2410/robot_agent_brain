@@ -16,6 +16,8 @@ class FinalModelsLibraryAdapter:
 
     def __init__(self, root, geometry_cache=None, category_index=None, *, library_ref_prefix="$LIBRARY_SERVER/"):
         self.root = Path(root).resolve()
+        self.geometry_cache_path = str(Path(geometry_cache).resolve()) if geometry_cache else None
+        self.category_index_path = str(Path(category_index).resolve()) if category_index else None
         self.prefix = library_ref_prefix
         if not self.prefix.endswith("/"):
             raise ValueError("library_ref_prefix_invalid")
@@ -82,6 +84,28 @@ class FinalModelsLibraryAdapter:
                     grasp_properties=data.get("grasp_properties", {}),
                 )
                 self._assets[key] = view
+
+    def refresh_from_source(self) -> bool:
+        """Atomically reload the read-only OLS index and metadata.
+
+        OLS is allowed to publish a new catalog while Brain stays up.  The
+        previous implementation only re-hashed the adapter's in-memory maps,
+        so a newly added model could never reach the next turn.  Build a new
+        adapter first; only replace this instance after every identity,
+        geometry-cache and metadata check succeeds.
+        """
+        aliases = getattr(self, "catalog_aliases", {})
+        fresh = type(self)(self.root, self.geometry_cache_path,
+                           self.category_index_path, library_ref_prefix=self.prefix)
+        fresh.catalog_aliases = dict(aliases)
+        before = self.catalog_snapshot(aliases=aliases).revision
+        after = fresh.catalog_snapshot(aliases=aliases).revision
+        if before == after:
+            return False
+        self.__dict__.clear()
+        self.__dict__.update(fresh.__dict__)
+        self.catalog_aliases = dict(aliases)
+        return True
 
     @staticmethod
     def _load_geometry_cache(path):

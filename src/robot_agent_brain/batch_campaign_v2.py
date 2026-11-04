@@ -13,13 +13,15 @@ from pathlib import Path
 
 from .batch_matrix_v2 import compile_semantic_matrix_v2, read_semantic_matrix_v2
 from .batch_service import ServiceBatchRunner
+from .web.protocol import digest
 
 
 def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
                           agent_url="http://127.0.0.1:8500",
                           gateway_url="http://127.0.0.1:8099", browser_id=None,
                           task_timeout=300, screenshot_required=True,
-                          output_dir="var/batch-campaigns", run_profile="default"):
+                          output_dir="var/batch-campaigns", run_profile="default",
+                          fixture_dir=None):
     output = Path(output_dir).resolve()
     root = output / ("campaign-" + time.strftime("%Y%m%d-%H%M%S") + "-" + str(seed))
     root.mkdir(parents=True, exist_ok=False)
@@ -32,11 +34,30 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
     ordered_cases = [str(row["case_id"]) for row in spec["cases"]]
     by_case = {case_id: [item for item in compiled if item.get("test_id") == case_id]
                for case_id in ordered_cases}
+    # case_id -> list of *successful* parent runs.  A failed/blocked parent is
+    # intentionally not represented as a usable snapshot.
     completed = {}
     stages = []
     for case_id in ordered_cases:
         rows = by_case.get(case_id, [])
         parent = spec["cases_by_id"][case_id].get("parent_case_id")
+        fixture_id = spec["cases_by_id"][case_id].get("fixture_id")
+        # ``workspace_empty`` is the built-in empty-table baseline.  Every
+        # other root fixture must be supplied explicitly; never run a Qwen
+        # expression against an unrelated empty world and call it a pass.
+        if not parent and fixture_id and fixture_id != "workspace_empty":
+            fixture_path = None
+            if fixture_dir:
+                candidate = Path(fixture_dir) / f"{fixture_id}.json"
+                if candidate.is_file():
+                    fixture_path = candidate.resolve()
+            if fixture_path is None:
+                stages.append({"test_id": case_id, "status": "blocked_fixture",
+                               "fixture_id": fixture_id, "sessions": [],
+                               "reason": "fixture_not_supplied"})
+                completed[case_id] = False
+                continue
+            rows = [dict(item, scene=str(fixture_path)) for item in rows]
         if parent and not completed.get(parent):
             stages.append({"test_id": case_id, "status": "skipped_parent_failed",
                            "parent_test_id": parent, "sessions": []})
@@ -64,6 +85,22 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
                 value["instructions"] = [value["instructions"][-1]]
                 value["scene"] = str(scene_path)
                 value["name"] = f"{value['name']}-from-{parent_name}"
+                value["parent_run_id"] = parent_name
+                value["parent_scene_path"] = str(scene_path)
+                try:
+                    parent_scene = json.loads(scene_path.read_text(encoding="utf-8"))
+                    value["parent_scene_digest"] = digest(parent_scene)
+                except (OSError, ValueError):
+                    value["parent_scene_digest"] = None
+                value["baseline_digest"] = value["parent_scene_digest"]
+                value["role_bindings"] = value.get("asset_role_mapping", {})
+            else:
+                # An explicit fixture is a declared baseline, not a hidden
+                # replay of a prior Qwen turn.  The service runner may resolve
+                # a concrete fixture path in a future campaign profile; until
+                # then retain the ID in the manifest so a missing fixture is
+                # reported as fixture evidence rather than model success.
+                value["fixture_id"] = value.get("fixture_id")
             stage_rows.append(value)
         if not stage_rows:
             stages.append({"test_id": case_id, "status": "skipped_parent_scene_missing",
@@ -87,7 +124,13 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
             status = "passed" if passed and len(passed) == len(stage_rows) else "failed"
             stages.append({"test_id": case_id, "parent_test_id": parent,
                            "status": status, "root": str(stage_root),
-                           "sessions": summary.get("sessions", [])})
+                           "fixture_id": spec["cases_by_id"][case_id].get("fixture_id"),
+                           "sessions": summary.get("sessions", []),
+                           "parent_runs": [{"name": item.get("name"),
+                                            "parent_scene_digest": item.get("parent_scene_digest"),
+                                            "baseline_digest": item.get("baseline_digest"),
+                                            "role_bindings": item.get("role_bindings", {})}
+                                           for item in stage_rows]})
             completed[case_id] = passed
         except Exception as exc:
             stages.append({"test_id": case_id, "parent_test_id": parent,
