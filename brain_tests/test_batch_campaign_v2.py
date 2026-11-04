@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from robot_agent_brain import batch_campaign_v2 as campaign
+from robot_agent_brain.batch_service import _result_classification, _semantic_result_classification
 from robot_agent_brain.batch import BatchSession
 from robot_agent_brain.web.protocol import digest
 
@@ -221,3 +222,20 @@ def test_parent_snapshot_turn_is_preserved_in_batch_session_contract():
         "parent_snapshot_turn": 1,
     })
     assert session.parent_snapshot_turn == 1
+
+
+def test_semantic_clarification_is_preserved_when_screenshot_is_blocked():
+    """Separate a correct semantic result from missing browser evidence."""
+    class Spec:
+        expected_outcome = "clarification_required"
+
+    result = {"outcome": "clarification_required", "executed": False}
+    oracle = {"status": "expected_clarification"}
+    semantic = _semantic_result_classification(
+        session_spec=Spec(), result=result, assertion_result="passed",
+        oracle=oracle, semantic_ok=True)
+    envelope = _result_classification(
+        session_spec=Spec(), result=result, assertion_result="passed",
+        oracle=oracle, screenshot_ok=False, ok=False)
+    assert semantic == "expected_clarification"
+    assert envelope == "blocked"

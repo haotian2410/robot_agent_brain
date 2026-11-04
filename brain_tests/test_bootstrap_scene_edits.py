@@ -34,6 +34,14 @@ def test_first_add_objects_created_exactly_once():
     assert len(named_objects(final, "apple")) == 2
 
 
+def test_bare_add_records_primary_table_workspace_source():
+    turn, initial, editor, defaults = prepare([
+        TaskEntity(entity_id="a", semantic_name="apple", category="fruit")],
+        [SceneEditIntent(operation="add", target="a")])
+    result = editor.edit_result(turn.scene_edit, initial.scene, defaults=defaults)
+    assert "source=workspace_default: primary_table" in result.assumptions
+
+
 def test_add_then_move_same_turn_identity():
     turn, initial, editor, defaults = prepare([
         TaskEntity(entity_id="a", semantic_name="apple", category="fruit", dialogue_ref=True)], [

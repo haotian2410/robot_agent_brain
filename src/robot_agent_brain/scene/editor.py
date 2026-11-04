@@ -507,6 +507,12 @@ class SceneEditor:
             operations.append(ScenePatchOperation(action="add_object", object_id_in_scene=identifier, object=obj))
             temporary = temporary.model_copy(update={"objects": [*temporary.objects, obj]})
         assumptions = list(binding.assumptions)
+        # In tabletop mode a bare add (no explicit relation/reference) is
+        # intentionally equivalent to placing on the configured primary
+        # surface.  Preserve that semantic source in the result instead of
+        # making callers infer it from the generated Transform/ support ID.
+        if edit.relation is None and reference is None and defaults is not None:
+            assumptions.insert(0, "source=workspace_default: primary_table")
         if binding.color_override is not None:
             assumptions.append(f"source=color_override: {model.semantic_name} -> {binding.color_override}")
         return operations, assumptions

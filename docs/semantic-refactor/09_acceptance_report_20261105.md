@@ -1,6 +1,6 @@
 # Semantic Refactor C0–C7 验收报告（2026-11-05）
 
-> 续验基线：当前 HEAD 为 `08acd9d`；远端仍为 `f0fc82f`（本轮按要求未自动推送）。
+> 续验基线：当前 HEAD 与远端均为 `50da3d1`（本轮按要求未再次推送）。
 > 文中历史段落若出现旧 SHA，
 > 仅表示当时的证据快照，不代表当前代码版本。
 
@@ -11,7 +11,7 @@ C0–C6 的代码、结构化校验和自动回归已完成；C7 的首五行真
 fixture 上完成，T03/T04/T05 共 26 条表达全部通过独立场景 oracle。完整 20 行、
 115 条表达的真实 Qwen/Gateway 验收尚未完成，不能据此宣称整个矩阵通过。
 
-当前本地 HEAD：`08acd9d`，远端 `origin/main` 为 `f0fc82f`。
+当前本地 HEAD/远端 `origin/main`：`50da3d1`。
 
 ## 运行基线
 
@@ -81,21 +81,21 @@ robot-brain batch-compile --matrix-version 2 \
 
 ## C7 真实验收
 
-### 最新 fixed campaign 证据
+### 当前 HEAD 的 generated campaign 证据
 
-修复 `BatchSession.parent_snapshot_turn` 后的 generated campaign 证据目录：
+当前 HEAD 运行的 generated campaign 证据目录：
 
 ```text
-/tmp/c7-campaign-generated-fixed.KDKfhA/campaign-20261105-040433-20261105-a487d718/
+/tmp/semantic-c7-full.X3PAbX/campaign-20261105-044141-20261105-641ab6ea/
 ```
 
-该运行使用真实 Qwen、OLS、Brain 和 Gateway。按 stage 统计如下；失败和安全拒绝
-没有被折算成通过：
+该运行使用真实 Qwen、OLS、Brain 和 Gateway。按 stage 统计如下；失败、安全拒绝和
+截图证据阻塞没有被折算成通过：
 
 | case | 结果 |
 |---|---|
 | T01 | 5/5 passed |
-| T02 | 6/12 passed；其余为 `scene_edit_layout_collision`，场景未改变 |
+| T02 | 6/12 passed；6 条为 `scene_edit_layout_collision`，场景未改变，当前 fixture/workspace 不满足左半区/中心正例 |
 | T03 | 8/8 passed |
 | T04 | 8/8 passed |
 | T05 | 10/10 passed |
@@ -103,17 +103,20 @@ robot-brain batch-compile --matrix-version 2 \
 | T07 | 6/6 passed |
 | T08 | 5/6 passed；“南侧”一条返回澄清，矩阵当前预期为成功 |
 | T09/T10 | `blocked_fixture` |
-| T11 | 0/5；4 条真实 Qwen 多样式 pen 澄清，1 条缺 `replacement_entity` |
+| T11 | 0/5；4 条真实 Qwen 对多样式 pen 正确澄清但矩阵要求成功，1 条缺 `replacement_entity` |
 | T12 | 5/5 passed |
 | T13/T14 | `blocked_fixture` |
-| T15 | 1/4 passed；其余为真实 Qwen 澄清/路由差异 |
+| T15 | 1/4 passed；其余语义澄清但截图证据不可用，已分离 `semantic_classification` 与 `evidence_status` |
 | T16–T20 | `blocked_fixture` |
 
 逐轮 raw/canonical、Scene、digest、截图和 oracle 保存在上述 stage 目录。
+本次实际执行 70 个 turn：58 个完整通过、7 个协议/运行时失败、5 个断言失败、
+3 个截图证据阻塞；另外 9 个根 stage 因缺少隔离 fixture 阻塞。此统计不等于
+115 条表达全部通过。
 
 ### 首五行完整表达
 
-使用匹配的独立 fixture：
+使用匹配的独立 fixture（早于当前 HEAD 的历史快照）：
 
 ```text
 /tmp/c7-retest-20261105-WChkHj/t03_t05_matching.json
@@ -139,7 +142,8 @@ conda run --no-capture-output -n robot_agent_integ robot-brain batch \
 /tmp/c7-retest-20261105-WChkHj/out-final/batch-20261105-022737-3d13b5ac/
 ```
 
-结果：`passed=26, failed=0, blocked=0, skipped=0`。
+结果：`passed=26, failed=0, blocked=0, skipped=0`；该目录只能作为历史参考，
+不能代替当前 HEAD 的完整验收证据。
 
 | 行 | 表达数 | 结果 |
 |---|---:|---|
@@ -201,9 +205,9 @@ conda run --no-capture-output -n robot_agent_integ \
 
 以下项目不能标成通过：
 
-1. **完整 115 条真实 C7**：最新 fixed campaign 已覆盖部分根/子 stage，但仍有
-   失败和 fixture 阻塞；不能宣称 115 条全部通过。T02 的几何拒绝、T08 的“南侧”
-   澄清、T11/T15 的真实 Qwen差异均保留原始证据。
+1. **完整 115 条真实 C7**：当前 HEAD campaign 已覆盖 70 个 turn，但仍有失败和
+   fixture 阻塞；不能宣称 115 条全部通过。T02 的几何拒绝、T08 的“南侧”澄清、
+   T11/T15 的真实 Qwen差异均保留原始证据。
 2. **27 个回归不变量的真实运行**：结构和自动单测已验证，但没有把每一条都在
    真实浏览器/OLS 环境中执行并附独立证据。
 3. **Known-scene C7**：官方 known 编译成功，但 workbook 当前未给出 scene
@@ -212,6 +216,17 @@ conda run --no-capture-output -n robot_agent_integ \
    不是业务测试失败。
 5. **真实机器人执行、Control、IK、MuJoCo、双臂规划**：按范围明确跳过；所有
    计划结果必须保持 `executed=false`。
+
+### 证据分类补充
+
+- `classification=blocked` 只表示截图/浏览器等证据条件未满足；若任务语义已经得到
+  正确澄清或安全拒绝，逐轮 JSON 另有 `semantic_classification`（如
+  `expected_clarification`）和 `evidence_status=blocked`，不能把两者混为模型失败。
+- 编译期 `config/batch_asset_catalog.json` revision 与运行时 OLS catalog revision
+  分开记录；当前运行时请求携带的是 OLS 当轮 revision。两者不是同一个快照，故不能
+  宣称“编译 manifest 与运行请求版本完全一致”，这属于待补的锁定证据。
+- 官方 `A01–A13/M01–M13/R01` 27 项回归断言目前只有规范结构和自动单测覆盖，
+  没有逐条真实浏览器证据；报告保留为未验证，不将计数校验写成行为通过。
 
 本轮新增的 v2 结构证据目录（临时目录，不是生产资产）为：
 `/tmp/semantic-v2-check.8BVZha/`。其中 generated/known 两份编译输出各有

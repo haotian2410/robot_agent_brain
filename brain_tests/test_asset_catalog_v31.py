@@ -94,6 +94,26 @@ def test_live_qwen_payload_contains_full_current_ols_catalog_and_scenes():
     assert "scene_name=ur5e_table_empty" in requests[0]["messages"][0]["content"]
 
 
+def test_asset_prompt_labels_passive_platform_and_tabletop_usage():
+    """The full catalog must expose capability boundaries, not only names."""
+    config = json.loads((ROOT / "config/webeditor.json").read_text())
+    root = Path(config["asset_library_root"])
+    if not root.is_absolute():
+        root = (ROOT / "config" / root).resolve()
+    cache = Path(config["asset_geometry_cache"])
+    if not cache.is_absolute():
+        cache = (ROOT / "config" / cache).resolve()
+    categories = (ROOT / "config" / config["asset_category_index"]).resolve()
+    adapter = FinalModelsLibraryAdapter(root, geometry_cache=cache, category_index=categories,
+                                        library_ref_prefix=config["library_ref_prefix"])
+    from robot_agent_brain.models.prompts import build_asset_catalog_prompt
+    prompt, _ = build_asset_catalog_prompt(adapter)
+    assert "model:29" in prompt and "usage=support_surface" in prompt
+    assert "model:25" in prompt and "usage=passive_mechanism_capability_boundary" in prompt
+    assert "model:30" in prompt and "availability=passive_mechanism_only" in prompt
+    assert "robot:1" in prompt and "usage=robot_platform_capability_boundary" in prompt
+
+
 def test_per_turn_catalog_keeps_registered_profiles_in_payload_and_revision():
     from robot_agent_brain.contracts.asset_catalog import AssetCatalogSnapshot, CatalogAsset
 
@@ -153,6 +173,45 @@ def test_pipeline_refreshes_live_ols_before_each_understanding_turn():
     assert all(request.asset_catalog is not None for request in provider.requests)
     assert all(request.asset_catalog.revision == pipeline.asset_catalog.revision
                for request in provider.requests)
+
+
+def test_live_pipeline_http_sends_full_catalog_on_every_turn():
+    """Verify the real pipeline/provider boundary, not only a fake provider."""
+    from robot_agent_brain.pipeline import BrainPipeline
+
+    config = json.loads((ROOT / "config/webeditor.json").read_text())
+    root = Path(config["asset_library_root"])
+    if not root.is_absolute():
+        root = (ROOT / "config" / root).resolve()
+    cache = Path(config["asset_geometry_cache"])
+    if not cache.is_absolute():
+        cache = (ROOT / "config" / cache).resolve()
+    categories = (ROOT / "config" / config["asset_category_index"]).resolve()
+    adapter = FinalModelsLibraryAdapter(root, geometry_cache=cache, category_index=categories,
+                                        library_ref_prefix=config["library_ref_prefix"])
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=_provider_response())
+
+    provider = QwenHTTPProvider("http://example/v1", "qwen-test",
+                                transport=httpx.MockTransport(handler))
+    pipeline = BrainPipeline(provider, adapter)
+    pipeline.understand_turn("暂停")
+    pipeline.understand_turn("继续")
+    model_index = json.loads((root / "models" / "model_index.json").read_text())
+    robot_index = json.loads((root / "robots" / "robot_index.json").read_text())
+    scene_index = json.loads((root / "scenes" / "scene_index.json").read_text())
+    assert len(requests) == 2
+    for body in requests:
+        catalog = body["messages"][1]["content"]
+        payload = json.loads(catalog)
+        assert len(payload["asset_catalog"]["models"]) == len(model_index["by_id"])
+        assert len(payload["asset_catalog"]["robots"]) == len(robot_index["by_id"])
+        assert len(payload["asset_catalog"]["scenes"]) == len(scene_index)
+        assert payload["asset_catalog"]["revision"].startswith("sha256:")
+        assert "model:1" in body["messages"][0]["content"]
 
 
 def test_future_cup_name_is_not_attached_as_mug_alias():

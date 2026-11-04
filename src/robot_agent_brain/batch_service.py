@@ -35,6 +35,7 @@ _RESULT_COLUMNS = [
     "test_id", "parent_test_id", "coverage_tag", "expected_outcome", "expected_error_codes",
     "expected_scene_change", "assertion_profile", "assertion_result",
     "expected_assertions", "classification",
+    "semantic_classification", "evidence_status",
     "oracle_status", "oracle_checks", "oracle_errors", "actual_outcome",
     "catalog_revision", "variant_id", "equivalence_group", "fixture_id", "asset_seed",
     "parent_run_id", "parent_scene_digest",
@@ -101,6 +102,7 @@ def _write_results_workbook(root: Path, rows: list[dict]) -> Path | None:
             row.get("expected_outcome", ""), "|".join(row.get("expected_error_codes", []) or []),
             row.get("expected_scene_change", ""), row.get("assertion_profile", ""), row.get("assertion_result", "not_checked"),
             json.dumps(row.get("expected_assertions", {}), ensure_ascii=False), row.get("classification", ""),
+            row.get("semantic_classification", row.get("classification", "")), row.get("evidence_status", ""),
             row.get("oracle_status", "not_checked"), json.dumps(row.get("oracle_checks", []), ensure_ascii=False),
             json.dumps(row.get("oracle_errors", []), ensure_ascii=False), row.get("actual_outcome", row.get("outcome", "")),
             row.get("catalog_revision", ""), row.get("variant_id", ""), row.get("equivalence_group", ""),
@@ -221,6 +223,32 @@ def _result_classification(*, session_spec, result: dict, assertion_result: str,
     if ok:
         return "passed"
     return "failed_protocol/runtime"
+
+
+def _semantic_result_classification(*, session_spec, result: dict,
+                                    assertion_result: str, oracle: dict,
+                                    semantic_ok: bool) -> str:
+    """Classify the task semantics independently of screenshot evidence.
+
+    A clarification or safe rejection can be semantically correct even when a
+    browser camera is unavailable.  Keep that fact separate from the evidence
+    status so a missing screenshot cannot turn a valid semantic observation
+    into an unexplained protocol failure.
+    """
+    if oracle.get("status") == "failed_assertion":
+        return "failed_assertion"
+    if assertion_result == "failed":
+        return "failed_protocol/runtime"
+    expected = getattr(session_spec, "expected_outcome", None)
+    if expected == "clarification_required" and semantic_ok:
+        return "expected_clarification"
+    if expected == "safe_rejection" and semantic_ok:
+        return "expected_safe_rejection"
+    if expected == "capability_unsupported" and semantic_ok:
+        return "capability_unsupported"
+    if expected == "blocked" or result.get("outcome") == "blocked":
+        return "blocked"
+    return "passed" if semantic_ok else "failed_protocol/runtime"
 
 
 class ServiceBatchRunner:
@@ -518,9 +546,15 @@ class ServiceBatchRunner:
             def write_session_summary(status, error=None):
                 rows = [item for item in results if item.get("session") == name]
                 classification_counts = {}
+                semantic_counts = {}
+                evidence_counts = {}
                 for item in rows:
                     classification = item.get("classification", "not_run")
                     classification_counts[classification] = classification_counts.get(classification, 0) + 1
+                    semantic = item.get("semantic_classification", "not_run")
+                    semantic_counts[semantic] = semantic_counts.get(semantic, 0) + 1
+                    evidence = item.get("evidence_status", "not_recorded")
+                    evidence_counts[evidence] = evidence_counts.get(evidence, 0) + 1
                 value = {"name": name, "outputName": output_name,
                          "sessionID": session_record.get("sessionID"),
                          "difficulty": session_spec.difficulty,
@@ -545,7 +579,9 @@ class ServiceBatchRunner:
                          "baseline_digest": getattr(session_spec, "baseline_digest", None),
                          "role_bindings": getattr(session_spec, "role_bindings", {}) or {},
                          "browserID": browser_id, "status": status, "turns": rows,
-                         "classification_counts": classification_counts}
+                         "classification_counts": classification_counts,
+                         "semantic_classification_counts": semantic_counts,
+                         "evidence_status_counts": evidence_counts}
                 if error is not None:
                     value["error"] = error
                 (session_root / "session_summary.json").write_text(
@@ -666,15 +702,21 @@ class ServiceBatchRunner:
                         oracle_ok = oracle.get("status") in {
                             "passed", "expected_clarification", "expected_safe_rejection"
                         }
-                        ok = bool(state.get("terminal")) and semantic_ok and screenshot_ok and oracle_ok
+                        semantic_ok = bool(state.get("terminal")) and semantic_ok and oracle_ok
+                        ok = semantic_ok and screenshot_ok
                         if assertion_result == "failed":
                             ok = False
                         if result.get("executed", False) is not False:
                             ok = False
+                        semantic_classification = _semantic_result_classification(
+                            session_spec=session_spec, result=result,
+                            assertion_result=assertion_result, oracle=oracle,
+                            semantic_ok=semantic_ok and result.get("executed", False) is False)
                         classification = _result_classification(
                             session_spec=session_spec, result=result,
                             assertion_result=assertion_result, oracle=oracle,
                             screenshot_ok=screenshot_ok, ok=ok)
+                        evidence_status = "captured" if screenshot_ok else "blocked"
                         row_status = "passed" if ok else ("blocked" if screenshot.get("status") != "captured" and self.screenshot_required else "failed")
                         row = {"session": name, "difficulty": session_spec.difficulty,
                                "capabilities": list(session_spec.capabilities),
@@ -701,6 +743,8 @@ class ServiceBatchRunner:
                                "oracle_checks": oracle.get("checks", []),
                                "oracle_errors": oracle.get("errors", []),
                                "actual_outcome": outcome,
+                               "semantic_classification": semantic_classification,
+                               "evidence_status": evidence_status,
                                "debug_evidence": debug_evidence,
                                "catalog_revision": (getattr(session_spec, "catalog_revision", None)
                                    or result.get("metrics", {}).get("catalog_revision")

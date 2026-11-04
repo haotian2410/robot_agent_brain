@@ -67,17 +67,36 @@ def build_asset_catalog_prompt(assets, aliases=None, *, snapshot=None, registere
     snapshot = snapshot or _snapshot_for_assets(assets, aliases, registered_profiles)
     rows = []
     for item in (*snapshot.models, *snapshot.robots):
+        # Keep the complete OLS directory visible to the model while making
+        # the safety boundary explicit.  ``category`` is an asset taxonomy,
+        # not an instruction about whether the object can be added to a
+        # tabletop scene; passive URDF mechanisms and robot platforms need a
+        # distinct usage label so Qwen does not treat every catalog row as a
+        # normal scene-edit candidate.
+        if item.availability_reason == "passive_mechanism_only":
+            usage = "passive_mechanism_capability_boundary"
+        elif item.asset_type == "robot" or item.availability_reason == "robot_platform_only":
+            usage = "robot_platform_capability_boundary"
+        elif (item.category or "").casefold() in {"surface", "support_surface", "table"}:
+            usage = "support_surface"
+        elif (item.category or "").casefold() in {"container", "receptacle"}:
+            usage = "container"
+        else:
+            usage = "ordinary_scene_object"
         rows.append({"asset_key": item.asset_key, "semantic_name": item.name,
                      "display_name": item.display_name or item.name,
                      "aliases": list(item.aliases), "tags": list(item.tags),
                      "category": item.category or "object",
                      "scope": "robot" if item.asset_type == "robot" else "scene_model",
-                     "selectable_for_add": item.selectable_for_add})
+                     "selectable_for_add": item.selectable_for_add,
+                     "availability_reason": item.availability_reason,
+                     "usage": usage})
     lines = ["\n当前 OLS 资产目录（revision=%s）。新建/替换只能选择其中真实存在的 asset_key；不要输出目录外名称、数字实例ID或本地路径：" % snapshot.revision]
     for row in rows:
         aliases_text = ", ".join(row["aliases"]) or "-"
         tags = ", ".join(row["tags"]) or "-"
-        lines.append(f"- {row['asset_key']} | semantic_name={row['semantic_name']} | display={row['display_name']} | aliases={aliases_text} | category={row['category']} | tags={tags} | add={str(row['selectable_for_add']).lower()} | scope={row['scope']}")
+        reason = row["availability_reason"] or "available"
+        lines.append(f"- {row['asset_key']} | semantic_name={row['semantic_name']} | display={row['display_name']} | aliases={aliases_text} | category={row['category']} | tags={tags} | usage={row['usage']} | availability={reason} | add={str(row['selectable_for_add']).lower()} | scope={row['scope']}")
     if snapshot.scenes:
         lines.append("当前 OLS 场景模板（仅用于场景上下文/预设选择，不可作为 scene_edit.add 的物体）：")
         for item in snapshot.scenes:
