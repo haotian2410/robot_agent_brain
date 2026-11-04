@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from robot_agent_brain import batch_campaign_v2 as campaign
+from robot_agent_brain.batch import BatchSession
 from robot_agent_brain.web.protocol import digest
 
 
@@ -210,3 +211,13 @@ def test_missing_root_fixture_blocks_and_cascades_without_running_qwen(tmp_path,
     assert result["stages"][0]["status"] == "blocked_fixture"
     assert result["stages"][1]["status"] == "skipped_parent_failed"
     assert _FakeRunner.calls == []
+
+
+def test_parent_snapshot_turn_is_preserved_in_batch_session_contract():
+    """Campaign lineage metadata must survive strict BatchSession parsing."""
+    session = BatchSession.model_validate({
+        "name": "child",
+        "instructions": ["move A"],
+        "parent_snapshot_turn": 1,
+    })
+    assert session.parent_snapshot_turn == 1

@@ -77,6 +77,7 @@ class BatchSession(BaseModel):
     parent_scene_path: str | None = None
     parent_scene_digest: str | None = None
     baseline_digest: str | None = None
+    parent_snapshot_turn: int | None = None
     role_bindings: dict = Field(default_factory=dict)
 
     @field_validator("instructions")
