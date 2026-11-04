@@ -19,6 +19,7 @@ import httpx
 
 from .batch import load_batch_input
 from .batch_oracle import evaluate_turn
+from .contracts.scene import parse_scene_document
 from .web.protocol import digest
 
 
@@ -301,6 +302,11 @@ class ServiceBatchRunner:
         if self.browser_id:
             if not connected or live_browser != self.browser_id:
                 raise RuntimeError("batch_browser_not_connected")
+            # An explicitly supplied browser ID must satisfy the same live
+            # camera preflight as the automatically selected browser.  The
+            # CLI flag selects an identity; it must not bypass evidence
+            # requirements for screenshot-backed runs.
+            self._ensure_live_camera(self.browser_id)
             return self.browser_id, health
         if not live_browser:
             stale = health["agent"].get("browser_id")
@@ -310,13 +316,41 @@ class ServiceBatchRunner:
         # A connected browser is not enough for a screenshot-backed batch.  Do
         # not begin a run that will later fabricate a camera or reuse an old
         # frame; the active live world must expose at least one Camera object.
-        world = self._world(live_browser)
+        self._ensure_live_camera(live_browser)
+        return live_browser, health
+
+    def _ensure_live_camera(self, browser_id):
+        world = self._world(browser_id)
         cameras = [obj for obj in world.get("objects", [])
                    if any(component.get("component_type") == "Camera"
                           for component in obj.get("components", []) or [])]
         if not cameras:
             raise RuntimeError("batch_browser_camera_unavailable")
-        return live_browser, health
+
+    def _preflight_input(self, input_path, loaded):
+        """Validate every preset before touching the browser or creating a task.
+
+        A missing or malformed later scene must fail at startup rather than
+        after earlier sessions have already changed the shared browser.  This
+        is intentionally a lossless Scene v1 parse; runtime platform/joint
+        checks still happen when Gateway adopts the scene.
+        """
+        base = Path(input_path).resolve().parent
+        for index, session_spec in enumerate(loaded["sessions"], 1):
+            if not session_spec.scene:
+                continue
+            scene_path = (base / session_spec.scene).resolve()
+            if not scene_path.is_file():
+                raise RuntimeError(f"batch_preset_scene_missing:{index}:{scene_path}")
+            try:
+                value = json.loads(scene_path.read_text(encoding="utf-8"))
+                document = parse_scene_document(value)
+            except Exception as exc:
+                raise RuntimeError(f"batch_preset_scene_invalid:{index}:{scene_path}:{exc}") from exc
+            if document.rejected_objects:
+                reasons = ",".join(sorted({str(item.get("reason", "unknown"))
+                                              for item in document.rejected_objects}))
+                raise RuntimeError(f"batch_preset_scene_invalid:{index}:{scene_path}:scene_object_rejected:{reasons}")
 
     def _world(self, browser_id):
         response = self._request("GET", self.gateway_url + "/getWorld", params={"browser_id": browser_id})
@@ -512,6 +546,10 @@ class ServiceBatchRunner:
         loaded = load_batch_input(input_path)
         if loaded["kind"] != "sessions":
             raise ValueError("service_batch_requires_sessions_json")
+        # Validate all preset documents before selecting the browser.  This
+        # prevents a later bad path/schema from partially executing an earlier
+        # session against the shared live browser.
+        self._preflight_input(input_path, loaded)
         browser_id, health = self._resolve_browser()
         root = self.output / ("batch-" + time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8])
         root.mkdir(parents=True, exist_ok=False)

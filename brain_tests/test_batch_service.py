@@ -47,6 +47,37 @@ def test_service_batch_preflight_rejects_connected_browser_without_camera(tmp_pa
         runner._resolve_browser()
 
 
+def test_explicit_browser_id_does_not_bypass_camera_preflight(tmp_path):
+    runner = ServiceBatchRunner(agent_url="http://agent", gateway_url="http://gateway",
+                                output_dir=tmp_path, browser_id="browser-1",
+                                screenshot_required=False)
+    runner._health = lambda: {"agent": {}, "gateway": {
+        "browser": {"connected": True, "browser_id": "browser-1"}}}
+    runner._world = lambda browser_id: {"objects": []}
+    with pytest.raises(RuntimeError, match="batch_browser_camera_unavailable"):
+        runner._resolve_browser()
+
+
+def test_batch_preflights_all_preset_scene_documents_before_browser(tmp_path):
+    scenes = tmp_path / "scenes"
+    scenes.mkdir()
+    valid = {"scene_schema_version": 1, "scene_id": 1, "scene_version": 1,
+             "scene_sub_version": 0, "scene_name": "valid", "objects": []}
+    (scenes / "valid.json").write_text(json.dumps(valid), encoding="utf-8")
+    cases = tmp_path / "cases.json"
+    cases.write_text(json.dumps({"sessions": [
+        {"name": "first", "scene": "scenes/valid.json", "instructions": ["one"]},
+        {"name": "later", "scene": "scenes/missing.json", "instructions": ["two"]},
+    ]}), encoding="utf-8")
+    runner = ServiceBatchRunner(agent_url="http://agent", gateway_url="http://gateway",
+                                output_dir=tmp_path / "out", screenshot_required=False)
+    called = {"resolve": False}
+    runner._resolve_browser = lambda: called.__setitem__("resolve", True)
+    with pytest.raises(RuntimeError, match="batch_preset_scene_missing:2"):
+        runner.run(cases)
+    assert called["resolve"] is False
+
+
 def test_service_batch_activates_each_session_before_loading_its_scene(tmp_path):
     """A shared browser must not be loaded with session B's scene while A is active."""
     scenes = tmp_path / "scenes"
