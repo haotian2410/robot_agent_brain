@@ -37,6 +37,57 @@ def test_service_batch_preflight_rejects_missing_qwen_assets_or_running_task(tmp
             runner._health()
 
 
+@pytest.mark.parametrize(
+    ("runtime_revision", "expected_error"),
+    [("sha256:actual", "batch_catalog_revision_mismatch"),
+     (None, "batch_catalog_revision_unavailable")],
+)
+def test_service_batch_preflight_fails_closed_on_catalog_revision_drift(
+    tmp_path, runtime_revision, expected_error
+):
+    """A compiled matrix must not run against a different/unknown OLS snapshot."""
+    runner = ServiceBatchRunner(agent_url="http://agent", gateway_url="http://gateway",
+                                output_dir=tmp_path, screenshot_required=False)
+    runner.expected_catalog_revision = "sha256:expected"
+
+    class Response:
+        def __init__(self, value):
+            self.value = value
+
+        def json(self):
+            return self.value
+
+    agent = {"qwen": "ready", "asset_detail": {"matched": True},
+             "tasks": {"active_task_id": None, "queued": 0}}
+    if runtime_revision is not None:
+        agent["asset_detail"]["catalog_revision"] = runtime_revision
+    runner._request = lambda method, url, agent=agent: Response(
+        agent if url.endswith("/health") else {"protocol": "brain-web/2"})
+    with pytest.raises(RuntimeError, match=expected_error):
+        runner._health()
+
+
+def test_service_batch_preflight_records_matching_runtime_catalog_revision(tmp_path):
+    runner = ServiceBatchRunner(agent_url="http://agent", gateway_url="http://gateway",
+                                output_dir=tmp_path, screenshot_required=False)
+    runner.expected_catalog_revision = runner_revision = "sha256:matching"
+
+    class Response:
+        def __init__(self, value):
+            self.value = value
+
+        def json(self):
+            return self.value
+
+    agent = {"qwen": "ready", "asset_detail": {"matched": True,
+                                                   "catalog_revision": runner_revision},
+             "tasks": {"active_task_id": None, "queued": 0}}
+    runner._request = lambda method, url: Response(
+        agent if url.endswith("/health") else {"protocol": "brain-web/2"})
+    health = runner._health()
+    assert health["agent"]["asset_detail"]["catalog_revision"] == runner.runtime_catalog_revision == runner_revision
+
+
 def test_service_batch_preflight_rejects_connected_browser_without_camera(tmp_path):
     runner = ServiceBatchRunner(agent_url="http://agent", gateway_url="http://gateway",
                                 output_dir=tmp_path, screenshot_required=False)

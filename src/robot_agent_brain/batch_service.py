@@ -38,7 +38,7 @@ _RESULT_COLUMNS = [
     "expected_assertions", "classification",
     "semantic_classification", "evidence_status",
     "oracle_status", "oracle_checks", "oracle_errors", "actual_outcome",
-    "catalog_revision", "variant_id", "equivalence_group", "fixture_id", "asset_seed",
+    "catalog_revision", "runtime_catalog_revision", "variant_id", "equivalence_group", "fixture_id", "asset_seed",
     "parent_run_id", "parent_scene_digest", "catalog_scenario",
 ]
 
@@ -106,7 +106,7 @@ def _write_results_workbook(root: Path, rows: list[dict]) -> Path | None:
             row.get("semantic_classification", row.get("classification", "")), row.get("evidence_status", ""),
             row.get("oracle_status", "not_checked"), json.dumps(row.get("oracle_checks", []), ensure_ascii=False),
             json.dumps(row.get("oracle_errors", []), ensure_ascii=False), row.get("actual_outcome", row.get("outcome", "")),
-            row.get("catalog_revision", ""), row.get("variant_id", ""), row.get("equivalence_group", ""),
+            row.get("catalog_revision", ""), row.get("runtime_catalog_revision", ""), row.get("variant_id", ""), row.get("equivalence_group", ""),
             row.get("fixture_id", ""), row.get("asset_seed", ""), row.get("parent_run_id", ""),
             row.get("parent_scene_digest", ""), row.get("catalog_scenario", ""),
         ]
@@ -264,6 +264,12 @@ class ServiceBatchRunner:
         self.task_timeout = task_timeout
         self.screenshot_required = screenshot_required
         self.client = httpx.Client(timeout=httpx.Timeout(20, connect=5), trust_env=False)
+        # v2 sessions carry the revision used by the compiler.  Keep this
+        # separate from the runtime value reported by Brain health/model
+        # diagnostics; silently substituting one for the other makes a batch
+        # report look reproducible when it was run against a different OLS.
+        self.expected_catalog_revision: str | None = None
+        self.runtime_catalog_revision: str | None = None
 
     def _request(self, method, url, **kwargs):
         response = self.client.request(method, url, **kwargs)
@@ -283,6 +289,16 @@ class ServiceBatchRunner:
         asset_detail = agent.get("asset_detail")
         if not isinstance(asset_detail, dict) or asset_detail.get("matched") is not True:
             raise RuntimeError("batch_assets_unavailable")
+        runtime_revision = asset_detail.get("catalog_revision")
+        self.runtime_catalog_revision = runtime_revision if isinstance(runtime_revision, str) else None
+        expected_revision = self.expected_catalog_revision
+        if expected_revision is not None:
+            if self.runtime_catalog_revision is None:
+                raise RuntimeError("batch_catalog_revision_unavailable")
+            if self.runtime_catalog_revision != expected_revision:
+                raise RuntimeError(
+                    "batch_catalog_revision_mismatch:"
+                    f"expected={expected_revision}:actual={self.runtime_catalog_revision}")
         tasks = agent.get("tasks") or {}
         if tasks.get("active_task_id") is not None or int(tasks.get("queued") or 0) != 0:
             raise RuntimeError("batch_tasks_already_running")
@@ -553,6 +569,11 @@ class ServiceBatchRunner:
         loaded = load_batch_input(input_path)
         if loaded["kind"] != "sessions":
             raise ValueError("service_batch_requires_sessions_json")
+        revisions = {session.catalog_revision for session in loaded["sessions"]
+                     if session.catalog_revision}
+        if len(revisions) > 1:
+            raise ValueError("batch_catalog_revision_multiple_expected")
+        self.expected_catalog_revision = next(iter(revisions), None)
         # Validate all preset documents before selecting the browser.  This
         # prevents a later bad path/schema from partially executing an earlier
         # session against the shared live browser.
@@ -600,6 +621,7 @@ class ServiceBatchRunner:
                               "parent_variant_id": session_spec.parent_variant_id,
                               "fixture_id": session_spec.fixture_id, "asset_seed": session_spec.asset_seed,
                               "catalog_revision": getattr(session_spec, "catalog_revision", None),
+                              "runtime_catalog_revision": self.runtime_catalog_revision,
                               "seed_algorithm": getattr(session_spec, "seed_algorithm", None),
                               "parent_run_id": getattr(session_spec, "parent_run_id", None),
                               "parent_scene_path": getattr(session_spec, "parent_scene_path", None),
@@ -641,6 +663,7 @@ class ServiceBatchRunner:
                                "catalog_scenario": getattr(session_spec, "catalog_scenario", None),
                                "asset_seed": session_spec.asset_seed,
                          "catalog_revision": getattr(session_spec, "catalog_revision", None),
+                         "runtime_catalog_revision": self.runtime_catalog_revision,
                          "seed_algorithm": getattr(session_spec, "seed_algorithm", None),
                          "parent_run_id": getattr(session_spec, "parent_run_id", None),
                          "parent_scene_path": getattr(session_spec, "parent_scene_path", None),
@@ -822,6 +845,10 @@ class ServiceBatchRunner:
                                             (result.get("metrics", {}).get("model_call_details") or [])
                                             if call.get("stage") == "task_understanding"
                                             and call.get("catalog_revision")), None)),
+                               # Never overwrite the compiler revision above
+                               # with the runtime value.  Both are required to
+                               # prove a run used the intended OLS snapshot.
+                               "runtime_catalog_revision": self.runtime_catalog_revision,
                                "classification": classification,
                                "variant_id": session_spec.variant_id,
                                "equivalence_group": session_spec.equivalence_group,
