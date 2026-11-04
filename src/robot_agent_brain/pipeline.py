@@ -177,6 +177,17 @@ class BrainPipeline:
     def understand_turn(self, instruction: str, *, scene: SceneConfig | None = None,
                         dialogue=None) -> BrainTurn:
         """Call understanding once; keep injected context out of the user text."""
+        # The OLS directory is a per-turn input, not a process-start constant.
+        # Adapters backed by a read-only local index can cheaply return the same
+        # revision; adapters that refresh from OLS expose the new revision here.
+        # Updating the provider prompt and the request together prevents a new
+        # catalog from being used to interpret an old response (or vice versa).
+        if hasattr(self.assets, "catalog_snapshot"):
+            current_catalog = self.assets.catalog_snapshot(aliases=self.aliases)
+            if self.asset_catalog is None or current_catalog.revision != self.asset_catalog.revision:
+                self.asset_catalog = current_catalog
+                if hasattr(self.understanding, "set_asset_catalog"):
+                    self.understanding.set_asset_catalog(current_catalog)
         deferred_reference_error = None
         try:
             original_requested = any(token in instruction.casefold() for token in ("原始场景", "初始场景", "最开始的场景", "original scene", "initial scene"))
@@ -192,6 +203,7 @@ class BrainPipeline:
             "basis": "current" if scene is not None else "bootstrap",
             "primary_table_available": bool(scene is not None),
             "object_count": len(scene.objects) if scene is not None else 0,
+            "catalog_revision": self.asset_catalog.revision if self.asset_catalog is not None else None,
         }
         request = TaskUnderstandingRequest(instruction=provider_instruction,
                                            asset_catalog=self.asset_catalog,

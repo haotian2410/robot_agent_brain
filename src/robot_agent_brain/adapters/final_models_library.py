@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 
 from ..contracts.asset_library import AssetGeometry, BrainAssetView, geometry_from_ols_aabb
-from ..contracts.asset_catalog import AssetCatalogSnapshot, CatalogAsset
+from ..contracts.asset_catalog import AssetCatalogSnapshot, CatalogAsset, CatalogScene
 from ..scene.colors import color_tags
 
 
@@ -20,6 +20,19 @@ class FinalModelsLibraryAdapter:
         if not self.prefix.endswith("/"):
             raise ValueError("library_ref_prefix_invalid")
         self._assets = {}
+        self._scenes = []
+        scene_index_path = self.root / "scenes" / "scene_index.json"
+        if scene_index_path.is_file():
+            scene_index = json.loads(scene_index_path.read_text(encoding="utf-8"))
+            if not isinstance(scene_index, list):
+                raise ValueError("scene_index_invalid")
+            for item in scene_index:
+                if (not isinstance(item, dict) or type(item.get("id")) is not int
+                        or not isinstance(item.get("name"), str) or not item["name"]):
+                    raise ValueError("scene_index_invalid")
+                self._scenes.append(CatalogScene(
+                    scene_key=f"scene:{item['id']}", name=item["name"],
+                    display_name=item.get("display_name") or item["name"]))
         cache, cache_metadata = self._load_geometry_cache(geometry_cache)
         self._validate_cache_metadata(cache_metadata, geometry_cache)
         self.geometry_cache_metadata = cache_metadata
@@ -168,5 +181,5 @@ class FinalModelsLibraryAdapter:
                 availability_reason=None if view.asset_type == "model" else "robot_platform_only",
                 scalable=view.scalable, scale_range=view.scale_range)
             (models if view.asset_type == "model" else robots).append(item)
-        return AssetCatalogSnapshot.from_items(models, robots,
+        return AssetCatalogSnapshot.from_items(models, robots, scenes=self._scenes,
                                                registered_profiles=registered_profiles or ())

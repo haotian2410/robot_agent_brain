@@ -69,6 +69,23 @@ def test_future_cup_name_is_not_attached_as_mug_alias():
     assert mug.asset_key != cup.asset_key and "cup" not in mug.aliases
 
 
+def test_catalog_snapshot_keeps_scene_templates_separate_from_addable_models():
+    catalog = json.loads((ROOT / "config/webeditor.json").read_text())
+    root = Path(catalog["asset_library_root"])
+    if not root.is_absolute():
+        root = (ROOT / "config" / root).resolve()
+    cache = Path(catalog["asset_geometry_cache"])
+    if not cache.is_absolute():
+        cache = (ROOT / "config" / cache).resolve()
+    categories = (ROOT / "config" / catalog["asset_category_index"]).resolve()
+    adapter = FinalModelsLibraryAdapter(root, geometry_cache=cache, category_index=categories,
+                                        library_ref_prefix=catalog["library_ref_prefix"])
+    snapshot = adapter.catalog_snapshot()
+    assert len(snapshot.scenes) == 7
+    assert any(item.scene_key == "scene:1" and item.name == "ur5e_table_empty" for item in snapshot.scenes)
+    assert all(not item.scene_key.startswith("model:") for item in snapshot.scenes)
+
+
 def test_live_table_side_words_canonicalize_to_tabletop_regions():
     from robot_agent_brain.models.task_understanding import parse_qwen_turn
 

@@ -72,6 +72,10 @@ def build_asset_catalog_prompt(assets, aliases=None, *, snapshot=None) -> tuple[
         aliases_text = ", ".join(row["aliases"]) or "-"
         tags = ", ".join(row["tags"]) or "-"
         lines.append(f"- {row['asset_key']} | semantic_name={row['semantic_name']} | display={row['display_name']} | aliases={aliases_text} | category={row['category']} | tags={tags} | add={str(row['selectable_for_add']).lower()} | scope={row['scope']}")
+    if snapshot.scenes:
+        lines.append("当前 OLS 场景模板（仅用于场景上下文/预设选择，不可作为 scene_edit.add 的物体）：")
+        for item in snapshot.scenes:
+            lines.append(f"- {item.scene_key} | scene_name={item.name} | display={item.display_name or item.name}")
     lines.append("目录中的 mug 与 cup 是两个不同资产；只有当当前目录实际列出 cup 时才选择 cup。不要自行做名称替换。")
     lines.append("场景编辑统一在主桌面工作域解释：右/东=+X，前/北=+Y，上=+Z；角落和中间不表示桌外地面。")
     return "\n".join(lines), snapshot.revision.removeprefix("sha256:")

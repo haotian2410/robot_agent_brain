@@ -30,6 +30,17 @@ class CatalogAsset(BaseModel):
     scale_range: tuple[float, float] | None = None
 
 
+class CatalogScene(BaseModel):
+    """A scene template in the OLS directory, separate from addable models."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    scene_key: str = Field(pattern=r"^scene:[0-9]+$")
+    name: str = Field(min_length=1)
+    display_name: str | None = None
+    availability_reason: str | None = None
+
+
 class AssetCatalogSnapshot(BaseModel):
     """A deterministic, bounded catalog sent with every understanding turn."""
 
@@ -39,6 +50,7 @@ class AssetCatalogSnapshot(BaseModel):
     revision: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     models: tuple[CatalogAsset, ...] = ()
     robots: tuple[CatalogAsset, ...] = ()
+    scenes: tuple[CatalogScene, ...] = ()
     registered_profiles: tuple[str, ...] = ()
 
     @model_validator(mode="after")
@@ -51,6 +63,9 @@ class AssetCatalogSnapshot(BaseModel):
             raise ValueError("asset_catalog_model_namespace_invalid")
         if any(item.asset_type != "robot" for item in self.robots):
             raise ValueError("asset_catalog_robot_namespace_invalid")
+        scene_keys = [item.scene_key for item in self.scenes]
+        if len(scene_keys) != len(set(scene_keys)):
+            raise ValueError("asset_catalog_duplicate_scene_key")
         return self
 
     def model_keys(self) -> set[str]:
@@ -65,20 +80,23 @@ class AssetCatalogSnapshot(BaseModel):
             "revision": self.revision,
             "models": [item.model_dump(mode="json") for item in self.models],
             "robots": [item.model_dump(mode="json") for item in self.robots],
+            "scenes": [item.model_dump(mode="json") for item in self.scenes],
             "registered_profiles": list(self.registered_profiles),
         }
 
     @classmethod
     def from_items(cls, models: list[CatalogAsset], robots: list[CatalogAsset], *,
+                   scenes: list[CatalogScene] | tuple[CatalogScene, ...] = (),
                    registered_profiles: list[str] | tuple[str, ...] = ()) -> "AssetCatalogSnapshot":
         payload = {
             "models": [item.model_dump(mode="json") for item in sorted(models, key=lambda x: x.asset_key)],
             "robots": [item.model_dump(mode="json") for item in sorted(robots, key=lambda x: x.asset_key)],
+            "scenes": [item.model_dump(mode="json") for item in sorted(scenes, key=lambda x: x.scene_key)],
             "registered_profiles": sorted(set(registered_profiles)),
         }
         digest = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True,
                                           separators=(",", ":")).encode("utf-8")).hexdigest()
         return cls(revision=f"sha256:{digest}", models=tuple(sorted(models, key=lambda x: x.asset_key)),
                    robots=tuple(sorted(robots, key=lambda x: x.asset_key)),
+                   scenes=tuple(sorted(scenes, key=lambda x: x.scene_key)),
                    registered_profiles=tuple(sorted(set(registered_profiles))))
-
