@@ -1,6 +1,6 @@
 # Semantic Refactor C0–C7 验收报告（2026-11-05）
 
-> 报告使用的源代码基线为 `c64f57a`，远端同步基线为 `50da3d1`（本轮按要求未自动推送）。
+> 报告使用的源代码基线为 `d381080`，远端同步基线为 `c64f57a`（本轮按要求未自动推送）。
 > 文中历史段落若出现旧 SHA，
 > 仅表示当时的证据快照，不代表当前代码版本。
 
@@ -11,7 +11,7 @@ C0–C6 的代码、结构化校验和自动回归已完成；C7 的首五行真
 fixture 上完成，T03/T04/T05 共 26 条表达全部通过独立场景 oracle。完整 20 行、
 115 条表达的真实 Qwen/Gateway 验收尚未完成，不能据此宣称整个矩阵通过。
 
-源代码基线：`c64f57a`；远端同步基线：`50da3d1`。generated campaign
+源代码基线：`d381080`；远端同步基线：`c64f57a`。generated campaign
 的服务运行证据以 `50da3d1` 语义代码基线记录，后续提交仅补充证据分类、hash 和文档。
 
 ## 运行基线
@@ -38,7 +38,7 @@ fixture 上完成，T03/T04/T05 共 26 条表达全部通过独立场景 oracle�
 | C1 OLS 目录与命名空间 | 已验证（自动/静态） | `FinalModelsLibraryAdapter` 读取 34/13/7；model/robot 数字 ID 分离；每轮可原子刷新 OLS 与别名 revision |
 | C2 首阶段上下文 | 已验证（自动/静态） | 每轮请求携带完整 `asset_catalog`、`workspace`、`scene_context`，并使用同一 revision；mug-only/future-cup alias 回归通过 |
 | C3 资产选择 | 已验证 | v3.1 `asset_choices` 校验 key、规范名、可新增性和 catalog revision；不把 cup 永久改写成 mug |
-| C4 固定桌面语义 | 已验证 | live v3.1 桌子左右归一到桌面区域；不生成桌外地面关系；几何保护、回滚保留 |
+| C4 固定桌面语义 | 已验证 | live v3.1 桌子左右归一到桌面区域；对象相对关系缺参照物时澄清；center 严格检查真实桌面中心与 workspace；几何保护、回滚保留 |
 | C5 矩阵编译 | 已验证 | 官方校验得到 20 行、115 表达、27 不变量；v2 生成/known 两种 kind 均输出 schema v2；`--schema-version 2` 不再回退到 v1 |
 | C6 父快照与分支隔离 | 已验证 | campaign 只接受父 run 全部 turn `classification=passed` 且 digest/角色满足子行要求 |
 
@@ -201,6 +201,18 @@ conda run --no-capture-output -n robot_agent_integ \
 
 输出 `status=valid`、`feature_rows=20`、`expressions=115`、
 `regression_invariants=27`、首五行为 `T01..T05`。
+
+本轮 `d381080` 新增专项回归命令：
+
+```text
+conda run --no-capture-output -n robot_agent_integ \
+  pytest -q brain_tests/test_task_understanding_clean_v3.py \
+  brain_tests/test_scene_default_grid.py
+```
+
+结果：33 项通过。新增行为包括：对象相对新增缺少 `reference` 时明确澄清且不转成
+`on(table)`；`center` 放置严格使用桌面几何中心，中心超出 workspace 时拒绝而不取
+裁剪后的工作区中点。修改代码后需要重启运行中的 Brain 进程才能在服务中生效。
 
 ## 未验证、阻塞和边界
 
