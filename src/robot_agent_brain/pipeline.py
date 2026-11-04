@@ -98,6 +98,10 @@ class BrainPipeline:
         self.aliases = getattr(getattr(assets, "metadata", None), "aliases", {})
         if aliases is not None:
             self.aliases = aliases
+        self.asset_catalog = (assets.catalog_snapshot(aliases=self.aliases)
+                              if hasattr(assets, "catalog_snapshot") else None)
+        from .contracts.workspace import WorkspaceSemanticPolicy
+        self.workspace_context = WorkspaceSemanticPolicy()
         self.category_aliases = getattr(getattr(assets, "metadata", None), "category_aliases", {})
         self.grounder = SceneGrounder(aliases=self.aliases, category_aliases=self.category_aliases, assets=assets)
         self.motion = MotionScaleResolver(assets)
@@ -184,7 +188,15 @@ class BrainPipeline:
             # introduced in this turn. Do not reject it before understanding.
             deferred_reference_error = exc
             provider_instruction = instruction
-        request = TaskUnderstandingRequest(instruction=provider_instruction)
+        scene_context = {
+            "basis": "current" if scene is not None else "bootstrap",
+            "primary_table_available": bool(scene is not None),
+            "object_count": len(scene.objects) if scene is not None else 0,
+        }
+        request = TaskUnderstandingRequest(instruction=provider_instruction,
+                                           asset_catalog=self.asset_catalog,
+                                           workspace=self.workspace_context,
+                                           scene_context=scene_context)
         if hasattr(self.understanding, "understand_turn"):
             turn = self.understanding.understand_turn(request)
         else:

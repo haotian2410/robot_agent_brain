@@ -1,5 +1,6 @@
 """Explicit metadata-only demo resources using the same AssetLibraryPort."""
 from ..contracts.asset_library import BrainAssetView
+from ..contracts.asset_catalog import AssetCatalogSnapshot, CatalogAsset
 from .local_asset_catalog import AssetDocument
 
 
@@ -39,3 +40,17 @@ class DemoAssetLibrary:
 
     def configuration_payload(self):
         return self.metadata.model_dump(mode="json")
+
+    def catalog_snapshot(self, *, aliases=None, registered_profiles=None) -> AssetCatalogSnapshot:
+        alias_map = {str(k).casefold(): str(v).casefold() for k, v in (aliases or {}).items()}
+        models = []
+        canonical_names = {view.semantic_name.casefold() for view in self._views.values()}
+        for view in sorted(self._views.values(), key=lambda item: item.library_asset_id):
+            models.append(CatalogAsset(
+                asset_key=f"model:{view.library_asset_id}", name=view.semantic_name,
+                display_name=view.semantic_name,
+                aliases=tuple(sorted({key for key, value in alias_map.items()
+                                      if value == view.semantic_name.casefold() and key not in canonical_names})),
+                category=view.category, asset_type="model", metadata_ref=view.metadata_ref,
+                selectable_for_add=True))
+        return AssetCatalogSnapshot.from_items(models, [], registered_profiles=registered_profiles or ())

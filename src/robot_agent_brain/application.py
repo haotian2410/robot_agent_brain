@@ -28,6 +28,8 @@ class BrainApplication:
         self.config = config or BrainConfig.load()
         self.assets = self.config.load_assets()
         self.defaults = self.config.load_defaults()
+        aliases = (self.config.load_semantic_aliases() if self.config.semantic_aliases is not None
+                   else getattr(getattr(self.assets, "metadata", None), "aliases", {}))
         self.config_summary = configuration_summary(self.config, self.assets, self.defaults)
         self.config_fingerprint = fingerprint(self.config_summary)
         if provider is None:
@@ -39,12 +41,10 @@ class BrainApplication:
                 planner_max_completion_tokens=self.config.planner_max_completion_tokens)
         self.provider = provider
         if hasattr(provider, "set_asset_catalog"):
-            provider.set_asset_catalog(self.assets)
+            provider.set_asset_catalog(self.assets, aliases=aliases)
         if self.config.vision and (platform_factory is LocalScenePlatform or not hasattr(provider, "detect")):
             raise BrainError("vision_requires_rendering_platform", "configuration",
                              "Vision requires an explicit rendering platform and a detection provider; LocalScenePlatform has no images")
-        aliases = (self.config.load_semantic_aliases() if self.config.semantic_aliases is not None
-                   else getattr(getattr(self.assets, "metadata", None), "aliases", {}))
         category_aliases = getattr(getattr(self.assets, "metadata", None), "category_aliases", {})
         scene_reference_catalog = self.config.load_scene_reference_catalog()
         layout_interiors = SceneLayoutGeometryRegistry.from_path(self.config.scene_layout_interiors)

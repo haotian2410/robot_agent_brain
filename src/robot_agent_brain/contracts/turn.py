@@ -240,6 +240,13 @@ class SceneEditIntent(BaseModel):
         return self
 
 
+class AssetChoice(BaseModel):
+    """Exact OLS model identity selected for an add/replace entity."""
+    model_config = ConfigDict(extra="forbid")
+    entity_id: str = Field(min_length=1)
+    asset_key: str = Field(pattern=r"^model:[0-9]+$")
+
+
 class SceneEditPlan(BaseModel):
     """Ordered edits sharing the same entity/selection contract as robot tasks."""
     model_config = ConfigDict(extra="forbid")
@@ -248,6 +255,7 @@ class SceneEditPlan(BaseModel):
     relations: list[SpatialRelation] = Field(default_factory=list)
     operations: list[SceneEditIntent] = Field(min_length=1)
     scene_refs: list[CanonicalReference] = Field(default_factory=list)
+    asset_choices: list[AssetChoice] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_selectors(self):
@@ -312,6 +320,11 @@ class SceneEditPlan(BaseModel):
         declared_scene_refs = {ref.raw_value for ref in self.scene_refs}
         if len(ids) != len(self.entities):
             raise ValueError("scene_edit_duplicate_entity_id")
+        choice_ids = [choice.entity_id for choice in self.asset_choices]
+        if len(choice_ids) != len(set(choice_ids)):
+            raise ValueError("scene_edit_duplicate_asset_choice")
+        if any(choice.entity_id not in ids for choice in self.asset_choices):
+            raise ValueError("scene_edit_asset_choice_unknown_entity")
         for relation in self.relations:
             if relation.subject not in ids:
                 raise ValueError("scene_edit_unknown_selector: " + relation.subject)
@@ -385,7 +398,7 @@ class SessionControlIntent(BaseModel):
 
 class BrainTurn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    protocol_version: Literal["task_understanding.v2", "task_understanding.v3"] = "task_understanding.v3"
+    protocol_version: Literal["task_understanding.v2", "task_understanding.v3", "task_understanding.v3.1"] = "task_understanding.v3"
     status: TurnStatus
     turn_kind: TurnKind
     instruction: str

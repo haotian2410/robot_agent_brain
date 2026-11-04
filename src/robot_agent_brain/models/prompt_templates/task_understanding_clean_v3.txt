@@ -6,7 +6,7 @@
 
 不要因为当前机器人能力、资产库或几何约束而删除、替换、缩小或改变用户明确表达的对象、数量、关系和操作。能力、资产、场景引用、几何和执行可行性由 Python 后续阶段判断。
 
-资产名称必须从请求末尾注入的当前 OLS 资产词表中选择规范 `semantic_name`。不要输出词表之外的名称、数字 ID 或本地路径；如果多个真实资产都可能匹配，保留明确标签并请求澄清。词表中的 `mug` 与未来可能存在的 `cup` 是不同资产，只有词表真实列出时才可输出。
+资产名称必须从请求中的当前 OLS `asset_catalog` 选择。每个新增或替换实体必须在 `scene_edit.asset_choices` 中给出且仅给出一个目录 `asset_key`；Python 会按同一 revision 校验。不要输出词表之外的名称、数字 ID 或本地路径。词表中的 `mug` 与 `cup` 是不同资产，不能自行互换；只有目录真实列出时才可选择。
 
 只输出一个 JSON 对象，不要输出 Markdown、代码围栏、解释或 JSON 外文字。
 
@@ -16,7 +16,7 @@
 
 ```json
 {
-  "protocol_version": "task_understanding.v3",
+  "protocol_version": "task_understanding.v3.1",
   "status": "accepted",
   "turn_kind": "scene_edit",
   "arm_usage": "unspecified",
@@ -188,6 +188,7 @@
 {
   "scene_basis": "current",
   "entities": [],
+  "asset_choices": [],
   "relations": [],
   "operations": []
 }
@@ -273,6 +274,11 @@ table、desk、desktop、桌子、桌面、台面
       {"entity_id": "basket", "semantic_name": "basket", "category": "container", "count": 1},
       {"entity_id": "apple", "semantic_name": "apple", "category": "fruit", "count": 1},
       {"entity_id": "banana", "semantic_name": "banana", "category": "fruit", "count": 1}
+    ],
+    "asset_choices": [
+      {"entity_id": "basket", "asset_key": "model:4"},
+      {"entity_id": "apple", "asset_key": "model:1"},
+      {"entity_id": "banana", "asset_key": "model:2"}
     ],
     "relations": [],
     "operations": [
@@ -445,7 +451,7 @@ left_of、right_of、front_of、behind、above、below、near、on、inside
 - `near`：靠近参照物；不要填写距离；
 - `left_of/right_of/front_of/behind`：相对于普通物体的位置；
 - “桌面右侧”是桌面内部 `placement_region=right_half`；
-- “桌子右边”是桌外相对位置，不要自动解释成桌面右侧。
+- “桌子右边”按本期桌面工作域解释为桌面 `right_half`，不生成桌外地面关系。
 
 `scene_edit.relations` 只用于操作前的选择条件；操作要放置到哪里，必须写在 operation 的 `relation/reference` 中。
 
@@ -544,8 +550,8 @@ left_of、right_of、front_of、behind、above、below、near、on、inside
 8. 不生成 object_id、XYZ、关节、轨迹、固定规避动作或资产信息。
 
 最小合法 scene_edit 示例（字段使用 canonical entity_id/semantic_name）：
-{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit"}],"relations":[],"operations":[{"operation":"add","target":"apple","relation":null,"reference":null}]}}
-{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"banana","semantic_name":"banana","category":"fruit"},{"entity_id":"basket","semantic_name":"basket","category":"container"}],"relations":[],"operations":[{"operation":"move_relative","target":"banana","relation":"right_of","reference":"basket"}]}}
-{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"basket","semantic_name":"basket","category":"container"},{"entity_id":"apple","semantic_name":"apple","category":"fruit"},{"entity_id":"banana","semantic_name":"banana","category":"fruit"}],"relations":[],"operations":[{"operation":"add","target":"basket","relation":null,"reference":null},{"operation":"add","target":"apple","relation":null,"reference":null},{"operation":"add","target":"banana","relation":null,"reference":null}]}}
+{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit"}],"asset_choices":[{"entity_id":"apple","asset_key":"model:1"}],"relations":[],"operations":[{"operation":"add","target":"apple","relation":null,"reference":null}]}}
+{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"banana","semantic_name":"banana","category":"fruit"},{"entity_id":"basket","semantic_name":"basket","category":"container"}],"asset_choices":[],"relations":[],"operations":[{"operation":"move_relative","target":"banana","relation":"right_of","reference":"basket"}]}}
+{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"basket","semantic_name":"basket","category":"container"},{"entity_id":"apple","semantic_name":"apple","category":"fruit"},{"entity_id":"banana","semantic_name":"banana","category":"fruit"}],"asset_choices":[{"entity_id":"basket","asset_key":"model:4"},{"entity_id":"apple","asset_key":"model:1"},{"entity_id":"banana","asset_key":"model:2"}],"relations":[],"operations":[{"operation":"add","target":"basket","relation":null,"reference":null},{"operation":"add","target":"apple","relation":null,"reference":null},{"operation":"add","target":"banana","relation":null,"reference":null}]}}
 {"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"banana","semantic_name":"banana","category":"fruit"}],"relations":[],"operations":[{"operation":"translate","target":"banana","direction":"right","distance_m":0.02,"coordinate_frame":"object_local","relation":null,"reference":null}]}}
 {"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit"},{"entity_id":"basket","semantic_name":"basket","category":"container"}],"relations":[],"operations":[{"operation":"move_relative","target":"apple","relation":"left_of","reference":"basket"}]}}

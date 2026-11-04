@@ -58,11 +58,15 @@ class QwenHTTPProvider:
         self.last_raw_text: dict[str, str] = {}
         self.asset_catalog_prompt = ""
         self.asset_catalog_sha256 = None
+        self.asset_catalog_snapshot = None
         if asset_catalog is not None:
             self.set_asset_catalog(asset_catalog)
 
-    def set_asset_catalog(self, assets) -> None:
-        self.asset_catalog_prompt, self.asset_catalog_sha256 = build_asset_catalog_prompt(assets)
+    def set_asset_catalog(self, assets, aliases=None) -> None:
+        from .prompts import _snapshot_for_assets
+        self.asset_catalog_snapshot = _snapshot_for_assets(assets, aliases=aliases)
+        self.asset_catalog_prompt, self.asset_catalog_sha256 = build_asset_catalog_prompt(
+            self.asset_catalog_snapshot, aliases=aliases, snapshot=self.asset_catalog_snapshot)
 
     def _redact(self, text):
         return text.replace(self.api_key, "[REDACTED]") if self.api_key else text
@@ -153,7 +157,9 @@ class QwenHTTPProvider:
             # detection contract (for example, a reversed bbox).  This is a
             # model-output schema problem, not transport failure, and must be
             # distinguishable in the task report/UI.
-            if stage == "vision_grounding" and isinstance(exc, ValidationError):
+            if isinstance(exc, QwenProviderError) and exc.code != "provider_error":
+                code = exc.code
+            elif stage == "vision_grounding" and isinstance(exc, ValidationError):
                 code = "vision_output_schema_invalid"
             else:
                 code = "semantic_protocol_error" if text.startswith(semantic_prefixes) else "provider_error"
@@ -181,19 +187,73 @@ class QwenHTTPProvider:
         return self._call(
             "task_understanding",
             TASK_UNDERSTANDING_PROMPT + self.asset_catalog_prompt,
-            prompt_payload({"instruction": request.instruction}),
+            prompt_payload(self._understanding_payload(request)),
             task_understanding_v3_wire_schema(),
             lambda value: _task_intent_from_v3(value, request.instruction),
         )
 
     def understand_turn(self, request: TaskUnderstandingRequest):
         def parse(value):
-            value = _repair_explicit_replace(value, request.instruction)
-            value = _repair_explicit_selector_clarification(value, request.instruction)
-            return parse_qwen_turn(value, request.instruction)
+            # Old replay fixtures may opt into the narrow formatting adapter,
+            # but live v3.1 requests must be interpreted exactly as emitted.
+            # In particular, do not rewrite cup/mug or invent replacement
+            # entities after the catalog has been supplied.
+            if request.asset_catalog is None:
+                value = _repair_explicit_replace(value, request.instruction)
+                value = _repair_explicit_selector_clarification(value, request.instruction)
+            turn = parse_qwen_turn(value, request.instruction)
+            if request.asset_catalog is not None:
+                self._validate_live_asset_choices(value, request)
+            return turn
         prompt = TASK_UNDERSTANDING_PROMPT + self.asset_catalog_prompt
         return self._call("task_understanding", prompt,
-                          prompt_payload({"instruction": request.instruction}), task_understanding_v3_wire_schema(), parse)
+                          prompt_payload(self._understanding_payload(request)), task_understanding_v3_wire_schema(), parse)
+
+    def _understanding_payload(self, request: TaskUnderstandingRequest) -> dict[str, Any]:
+        """Serialize the complete first-stage request, not just user text."""
+        catalog = request.asset_catalog or self.asset_catalog_snapshot
+        value = request.model_dump(mode="json", exclude_none=True)
+        if catalog is not None:
+            value["asset_catalog"] = catalog.model_dump(mode="json")
+        return value
+
+    @staticmethod
+    def _validate_live_asset_choices(value: dict[str, Any], request: TaskUnderstandingRequest) -> None:
+        """Validate model-selected OLS keys against the exact turn snapshot."""
+        # Old replay/mocked bodies often omit protocol_version entirely.  Keep
+        # those fixtures on the explicit compatibility path; a real v3.1
+        # response is required to carry exact catalog choices.
+        if not isinstance(value, dict) or value.get("protocol_version") != "task_understanding.v3.1":
+            return
+        if value.get("turn_kind") != "scene_edit" or value.get("status", "accepted") != "accepted":
+            return
+        payload = value.get("scene_edit")
+        if not isinstance(payload, dict):
+            return
+        choices = payload.get("asset_choices") or []
+        if not isinstance(choices, list):
+            raise QwenProviderError("scene_edit.asset_choices must be an array", code="provider_output_schema_invalid")
+        by_entity = {}
+        for index, item in enumerate(choices):
+            if not isinstance(item, dict) or not isinstance(item.get("entity_id"), str) or not isinstance(item.get("asset_key"), str):
+                raise QwenProviderError(f"scene_edit.asset_choices[{index}] is invalid", code="provider_output_schema_invalid")
+            entity_id, key = item["entity_id"], item["asset_key"]
+            if entity_id in by_entity:
+                raise QwenProviderError(f"duplicate asset choice: {entity_id}", code="provider_output_schema_invalid")
+            if not request.asset_catalog.contains_model(key):
+                raise QwenProviderError(f"asset_key_not_in_catalog:{key}", code="asset_catalog_key_invalid")
+            by_entity[entity_id] = key
+        required = []
+        for op in payload.get("operations") or []:
+            if not isinstance(op, dict):
+                continue
+            if op.get("operation") == "add":
+                required.append(op.get("target"))
+            elif op.get("operation") == "replace":
+                required.append(op.get("replacement_entity"))
+        missing = [item for item in required if item and item not in by_entity]
+        if missing:
+            raise QwenProviderError("missing asset choice for: " + ",".join(missing), code="asset_choice_missing")
 
     def plan(self, request: SkillPlanningRequest) -> SkillPlanLLMOutput:
         content = {**request.context.model_dump(mode="json"), "skills": request.skill_catalog}
@@ -278,10 +338,13 @@ def _repair_explicit_replace(value: dict[str, Any], instruction: str) -> dict[st
     raw_name = match.group(1).strip(" ，,。.!！?？\t\n")
     if not raw_name:
         return value
-    aliases = {"苹果": "apple", "香蕉": "banana", "篮子": "basket", "托盘": "tray",
-               "杯子": "mug", "马克杯": "mug", "cup": "mug", "coffee cup": "mug", "coffee_cup": "mug",
-               "apple": "apple", "banana": "banana", "basket": "basket", "tray": "tray", "mug": "mug"}
-    semantic_name = aliases.get(raw_name.casefold(), aliases.get(raw_name, raw_name))
+    # Legacy replay compatibility only: without a live catalog, retain the
+    # small historical vocabulary used by recorded fixtures.  Live turns never
+    # enter this adapter path; their exact asset_key must come from OLS.
+    semantic_name = {
+        "苹果": "apple", "香蕉": "banana", "篮子": "basket", "托盘": "tray",
+        "apple": "apple", "banana": "banana", "basket": "basket", "tray": "tray",
+    }.get(raw_name.casefold(), raw_name)
     entities = list(scene_edit.get("entities") or [])
     replacement_id = None
     for entity in entities:
@@ -321,18 +384,15 @@ def _repair_explicit_selector_clarification(value: dict[str, Any], instruction: 
     if not match:
         return value
     reference_raw, relation_raw, subject_raw, color_raw = (part.strip() for part in match.groups())
-    aliases = {
-        "苹果": "apple", "香蕉": "banana", "篮子": "basket", "托盘": "tray",
-        "杯子": "mug", "马克杯": "mug", "cup": "mug", "coffee cup": "mug", "coffee_cup": "mug",
-        "apple": "apple", "banana": "banana", "basket": "basket", "tray": "tray", "mug": "mug",
-    }
     colors = {
         "蓝": "blue", "蓝色": "blue", "红": "red", "红色": "red",
         "绿": "green", "绿色": "green", "黄": "yellow", "黄色": "yellow",
         "白": "white", "白色": "white", "黑": "black", "黑色": "black",
     }
-    reference = aliases.get(reference_raw.casefold())
-    subject = aliases.get(subject_raw.casefold())
+    legacy_aliases = {"苹果": "apple", "香蕉": "banana", "篮子": "basket", "托盘": "tray",
+                      "apple": "apple", "banana": "banana", "basket": "basket", "tray": "tray"}
+    reference = legacy_aliases.get(reference_raw.casefold(), reference_raw)
+    subject = legacy_aliases.get(subject_raw.casefold(), subject_raw)
     color = colors.get(color_raw.casefold(), color_raw)
     if reference is None or subject is None or not color:
         return value

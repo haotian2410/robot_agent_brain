@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from ..semantics.motion_evidence import _extract_motion_spans, resolve_motion_evidence
 from typing import Any, Protocol, Literal
 from ..contracts.robot_setup import RobotSetupRequest
@@ -11,6 +12,8 @@ from ..contracts.spatial import RelationScope, SpatialRelation, SpatialRelationT
 from ..contracts.task_intent import Direction, MotionScale, Operation, PlacementTarget, QuantityMode, TaskEntity, TaskIntent, TaskType
 from ..errors import BrainError
 from ..semantics.scene_references import CanonicalReference, RefScope, SceneReferenceCatalog
+from ..contracts.asset_catalog import AssetCatalogSnapshot
+from ..contracts.workspace import WorkspaceSemanticPolicy
 
 
 def task_understanding_wire_schema():
@@ -40,13 +43,18 @@ def task_understanding_v3_wire_schema():
     defs = schema.get("$defs", {})
     for name in ("SceneEditWire", "SceneQueryWire"):
         if name in defs:
-            _require_schema_fields(defs[name], *defs[name].get("properties", {}))
+            # ``asset_choices`` is required by live v3.1 validation when a
+            # catalog snapshot is present, but remains optional in the wire
+            # schema for replay/v3 compatibility.  The provider-side validator
+            # then gives a precise ``asset_choice_missing`` error.
+            required = [key for key in defs[name].get("properties", {}) if key != "asset_choices"]
+            _require_schema_fields(defs[name], *required)
     # The operation fields which are semantically optional must still be
     # emitted as explicit nulls.  This is important for JSON-schema decoding:
     # relation/reference pairing is checked by Python, not guessed by Qwen.
     edit = defs.get("SceneEditIntent")
     if edit is not None:
-        _require_schema_fields(edit, "relation", "reference", "direction", "distance_m",
+        _require_schema_fields(edit, "asset_choices", "relation", "reference", "direction", "distance_m",
                                "motion_scale", "coordinate_frame", "axis", "angle_deg",
                                "placement_hint", "placement_region")
     return schema
@@ -55,6 +63,12 @@ def task_understanding_v3_wire_schema():
 class TaskUnderstandingRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     instruction: str = Field(min_length=1)
+    # These fields are immutable per turn.  They are optional only for legacy
+    # replay/fake providers; live Qwen requests are populated by BrainPipeline.
+    protocol_version: Literal["task_understanding.v3.1"] = "task_understanding.v3.1"
+    asset_catalog: AssetCatalogSnapshot | None = None
+    workspace: WorkspaceSemanticPolicy = Field(default_factory=WorkspaceSemanticPolicy)
+    scene_context: dict[str, Any] = Field(default_factory=dict)
 
 
 class TaskUnderstandingProvider(Protocol):
@@ -124,6 +138,13 @@ class TaskEntityWire(TaskEntity):
         return value
 
 
+class AssetChoiceWire(BaseModel):
+    """A model-library identity selected for one new/replacement entity."""
+    model_config = ConfigDict(extra="forbid")
+    entity_id: str = Field(min_length=1)
+    asset_key: str = Field(pattern=r"^model:[0-9]+$")
+
+
 class RobotOperationWire(BaseModel):
     """Canonical v3 operation emitted for ``robot_task`` turns.
 
@@ -177,6 +198,7 @@ class SceneEditWire(BaseModel):
     model_config = ConfigDict(extra="forbid")
     scene_basis: Literal["current", "original"] = "current"
     entities: list[TaskEntityWire] = Field(min_length=1)
+    asset_choices: list[AssetChoiceWire] = Field(default_factory=list)
     relations: list[SpatialRelation] = Field(default_factory=list)
     operations: list[SceneEditIntent] = Field(min_length=1)
 
@@ -185,6 +207,11 @@ class SceneEditWire(BaseModel):
         entity_ids = {entity.entity_id for entity in self.entities}
         if len(entity_ids) != len(self.entities):
             raise ValueError("scene_edit_duplicate_entity_id")
+        choice_ids = [choice.entity_id for choice in self.asset_choices]
+        if len(choice_ids) != len(set(choice_ids)):
+            raise ValueError("scene_edit_duplicate_asset_choice")
+        if any(choice.entity_id not in entity_ids for choice in self.asset_choices):
+            raise ValueError("scene_edit_asset_choice_unknown_entity")
         for relation in self.relations:
             if relation.subject not in entity_ids:
                 raise ValueError("scene_edit_unknown_selector: " + relation.subject)
@@ -226,7 +253,7 @@ class TaskParseOutput(BaseModel):
     # Responses emitted by the historical envelope are v2 unless the model
     # explicitly opts into the canonical v3 envelope.  Keeping this marker on
     # the adapter output makes migration metrics truthful for non-scene turns.
-    protocol_version: Literal["task_understanding.v2", "task_understanding.v3"] = "task_understanding.v2"
+    protocol_version: Literal["task_understanding.v2", "task_understanding.v3", "task_understanding.v3.1"] = "task_understanding.v3.1"
     arm_usage: Literal["unspecified", "both_required"] = "unspecified"
     hold_constraints: list[TaskHoldConstraint] = Field(default_factory=list)
     status: TurnStatus = TurnStatus.ACCEPTED
@@ -345,7 +372,7 @@ class TaskParseWireOutput(BaseModel):
     synthetic table entity.
     """
     model_config = ConfigDict(extra="forbid")
-    protocol_version: Literal["task_understanding.v2", "task_understanding.v3"] = "task_understanding.v3"
+    protocol_version: Literal["task_understanding.v2", "task_understanding.v3", "task_understanding.v3.1"] = "task_understanding.v3.1"
     arm_usage: Literal["unspecified", "both_required"] = "unspecified"
     hold_constraints: list[TaskHoldConstraint] = Field(default_factory=list)
     status: TurnStatus = TurnStatus.ACCEPTED
@@ -602,26 +629,15 @@ def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str)
 
 
 def _surface_side_ambiguity(instruction: str) -> str | None:
-    """Return a clarification for ``桌子左/右侧`` without a support context.
+    """Tabletop mode treats bare table-side wording as a tabletop region."""
+    return None
 
-    The distinction between ``桌面右侧`` (a table region) and ``桌子右边``
-    (an external relative placement) is a protocol rule, not a model guess.
-    Apply it before accepting a model payload so a Qwen response that silently
-    changes the wording to ``on table`` cannot commit a different operation.
-    """
-    text = instruction.casefold().replace(" ", "")
-    if "桌面" in text or "地面" in text or "地上" in text:
-        return None
-    direction = None
-    for needle, display in (("左侧", "左侧"), ("右侧", "右侧"), ("左边", "左侧"), ("右边", "右侧"),
-                            ("前方", "前方"), ("后方", "后方")):
-        if "桌子" + needle in text or "桌" + needle in text:
-            direction = display
-            break
-    if direction is None:
-        return None
-    surface = "桌面" + direction
-    return f"“桌子{direction}”未说明是在{surface}还是桌外地面。请明确说“{surface}”或补充支撑面。"
+
+def _legacy_surface_side_ambiguity(instruction: str) -> str | None:
+    """Compatibility diagnostic for recorded pre-v3.1 replay fixtures."""
+    if re.search(r"桌(?:子|面)?\s*(?:左|右)(?:侧|边)", instruction or "") and "桌面" not in (instruction or ""):
+        return "请明确是桌面左侧还是桌面右侧。"
+    return None
 
 
 def _wire_scene_edit(value: SceneEditWire | dict[str, Any], instruction: str | None = None) -> SceneEditPlan:
@@ -683,6 +699,7 @@ def _wire_scene_edit(value: SceneEditWire | dict[str, Any], instruction: str | N
         plan = SceneEditPlan.model_validate({
             "scene_basis": wire.scene_basis, "entities": entities,
             "relations": relations, "operations": operations, "scene_refs": scene_refs,
+            "asset_choices": [choice.model_dump(mode="json") for choice in wire.asset_choices],
         })
     except ValidationError as exc:
         errors = exc.errors()
@@ -817,6 +834,16 @@ def _open_close_reference_missing(value, error):
 
 def parse_qwen_turn(value, instruction: str) -> BrainTurn:
     """Parse live model output with narrow, fail-closed clarification recovery."""
+    # v3.1 live requests carry an explicit tabletop WorkspaceSemanticPolicy and
+    # therefore treat bare "桌子左/右边" as a tabletop region.  Older replay
+    # envelopes retain their historical ambiguity diagnostic for compatibility.
+    if (isinstance(value, dict) and value.get("protocol_version") in {"task_understanding.v2", "task_understanding.v3"}
+            and value.get("turn_kind") == "scene_edit"):
+        legacy_question = _legacy_surface_side_ambiguity(instruction)
+        if legacy_question:
+            return BrainTurn(status=TurnStatus.CLARIFICATION_REQUIRED,
+                             turn_kind=TurnKind.SCENE_EDIT, instruction=instruction,
+                             clarification_question=legacy_question)
     # Some constrained decoders put a query's explicit selector in the robot
     # root ``relations`` slot.  Canonicalize that one narrow shape into the
     # typed scene_query payload before Pydantic validation.  We do not invent
@@ -865,13 +892,6 @@ def parse_qwen_turn(value, instruction: str) -> BrainTurn:
                              turn_kind=TurnKind.SCENE_QUERY if value.get("turn_kind") == "scene_query" else TurnKind.SCENE_EDIT,
                              instruction=instruction,
                              clarification_question="请说明相对于哪个物体或位置判断最近/最远，不能猜测缺失的参照物。")
-    if (isinstance(value, dict) and value.get("status", "accepted") == "accepted"
-            and value.get("turn_kind") == TurnKind.SCENE_EDIT.value):
-        ambiguity = _surface_side_ambiguity(instruction)
-        if ambiguity:
-            return BrainTurn(status=TurnStatus.CLARIFICATION_REQUIRED,
-                             turn_kind=TurnKind.SCENE_EDIT, instruction=instruction,
-                             clarification_question=ambiguity)
     if isinstance(value, dict) and value.get("status") in {
         TurnStatus.CLARIFICATION_REQUIRED.value, TurnStatus.UNSUPPORTED_TASK.value,
     }:

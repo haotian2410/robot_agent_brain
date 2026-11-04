@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 
 from ..contracts.asset_library import AssetGeometry, BrainAssetView, geometry_from_ols_aabb
+from ..contracts.asset_catalog import AssetCatalogSnapshot, CatalogAsset
 from ..scene.colors import color_tags
 
 
@@ -150,3 +151,22 @@ class FinalModelsLibraryAdapter:
             view.model_dump(mode="json", exclude={"metadata_path", "physical_properties", "grasp_properties"})
             for view in sorted(self._assets.values(), key=lambda item: (item.asset_type, item.library_asset_id))],
                 "geometry_cache_metadata": self.geometry_cache_metadata}
+
+    def catalog_snapshot(self, *, aliases=None, registered_profiles=None) -> AssetCatalogSnapshot:
+        """Expose the complete read-only OLS directory without private state access."""
+        alias_map = {str(k).casefold(): str(v).casefold() for k, v in (aliases or {}).items()}
+        models, robots = [], []
+        canonical_names = {view.semantic_name.casefold() for view in self._assets.values()}
+        for view in sorted(self._assets.values(), key=lambda item: (item.asset_type, item.library_asset_id)):
+            aliases_for_name = tuple(sorted({key for key, value in alias_map.items()
+                                               if value == view.semantic_name.casefold() and key not in canonical_names}))
+            item = CatalogAsset(
+                asset_key=f"{view.asset_type}:{view.library_asset_id}", name=view.semantic_name,
+                display_name=view.semantic_name, aliases=aliases_for_name,
+                tags=tuple(view.tags), category=view.category, asset_type=view.asset_type,
+                metadata_ref=view.metadata_ref, selectable_for_add=view.asset_type == "model",
+                availability_reason=None if view.asset_type == "model" else "robot_platform_only",
+                scalable=view.scalable, scale_range=view.scale_range)
+            (models if view.asset_type == "model" else robots).append(item)
+        return AssetCatalogSnapshot.from_items(models, robots,
+                                               registered_profiles=registered_profiles or ())

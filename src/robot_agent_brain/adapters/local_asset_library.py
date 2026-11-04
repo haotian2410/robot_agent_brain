@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 
 from ..contracts.asset_library import AssetGeometry, BrainAssetView
+from ..contracts.asset_catalog import AssetCatalogSnapshot, CatalogAsset
 from ..scene.colors import color_tags
 
 
@@ -129,3 +130,18 @@ class LocalAssetLibraryAdapter:
             raise ValueError("asset_category_unavailable")
         return [value.model_copy(deep=True) for value in self._assets.values()
                 if value.category is not None and value.category.casefold() == category.strip().casefold()]
+
+    def catalog_snapshot(self, *, aliases=None, registered_profiles=None) -> AssetCatalogSnapshot:
+        alias_map = {str(k).casefold(): str(v).casefold() for k, v in (aliases or {}).items()}
+        models = []
+        canonical_names = {view.semantic_name.casefold() for view in self._assets.values()}
+        for view in sorted(self._assets.values(), key=lambda item: item.library_asset_id):
+            models.append(CatalogAsset(
+                asset_key=f"model:{view.library_asset_id}", name=view.semantic_name,
+                display_name=view.semantic_name,
+                aliases=tuple(sorted({key for key, value in alias_map.items()
+                                      if value == view.semantic_name.casefold() and key not in canonical_names})),
+                tags=tuple(view.tags), category=view.category, asset_type="model",
+                metadata_ref=view.metadata_ref, selectable_for_add=True,
+                scalable=view.scalable, scale_range=view.scale_range))
+        return AssetCatalogSnapshot.from_items(models, [], registered_profiles=registered_profiles or ())

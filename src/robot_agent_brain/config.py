@@ -137,16 +137,22 @@ class BrainConfig(BaseModel):
         if self.asset_library_root is not None:
             if (Path(self.asset_library_root) / "models" / "model_index.json").is_file():
                 from .adapters.final_models_library import FinalModelsLibraryAdapter
-                return FinalModelsLibraryAdapter(self.asset_library_root, self.asset_geometry_cache,
+                adapter = FinalModelsLibraryAdapter(self.asset_library_root, self.asset_geometry_cache,
                     self.asset_category_index, library_ref_prefix=self.library_ref_prefix)
+                adapter.catalog_aliases = self.load_semantic_aliases()
+                return adapter
             if self.asset_geometry_cache is None:
                 raise ValueError("asset_geometry_cache_required")
             from .adapters.local_asset_library import LocalAssetLibraryAdapter
-            return LocalAssetLibraryAdapter(self.asset_library_root, self.asset_geometry_cache,
+            adapter = LocalAssetLibraryAdapter(self.asset_library_root, self.asset_geometry_cache,
                 self.asset_category_index, library_ref_prefix=self.library_ref_prefix)
+            adapter.catalog_aliases = self.load_semantic_aliases()
+            return adapter
         from .adapters.demo_asset_library import DemoAssetLibrary
         if self.assets is not None:
-            return DemoAssetLibrary(json.loads(Path(self.assets).read_text(encoding="utf-8")))
+            adapter = DemoAssetLibrary(json.loads(Path(self.assets).read_text(encoding="utf-8")))
+            adapter.catalog_aliases = self.load_semantic_aliases()
+            return adapter
         data = json.loads(files("robot_agent_brain.resources").joinpath("assets.json").read_text(encoding="utf-8"))
         return DemoAssetLibrary(data)
 

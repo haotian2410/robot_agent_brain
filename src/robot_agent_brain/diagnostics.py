@@ -54,7 +54,8 @@ def configuration_summary(config, assets, defaults):
                                                if config.default_robot_driver is not None else None),
             "defaults_sha256":fingerprint(defaults.model_dump(mode="json")),
             "understanding_prompt_sha256":fingerprint(TASK_UNDERSTANDING_PROMPT),
-            "asset_catalog_sha256": build_asset_catalog_prompt(assets)[1]}
+            "asset_catalog_sha256": build_asset_catalog_prompt(
+                assets, aliases=config.load_semantic_aliases())[1]}
 
 
 def redact(value, secret=None):
