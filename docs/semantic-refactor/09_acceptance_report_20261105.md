@@ -23,7 +23,7 @@ fixture 上完成，T03/T04/T05 共 26 条表达全部通过独立场景 oracle�
 | Brain | `127.0.0.1:8500`，`brain-web/2` |
 | Gateway | `127.0.0.1:8099`，`brain-web/2` |
 | OLS catalog | 34 model、13 robot、7 scene |
-| catalog revision | `sha256:c53749b10d5a054289414101e8777b4c58fe52066704e46aab8ff96ba1f064cc` |
+| catalog revision | `sha256:1b3577ba9998e53e46e2cc6815a6f07a384a32dfe30a105f869ef4abec4869c9` |
 | camera | Brain 选择顶视 `camera_id=5`，证据中为 `explicit_overhead_semantic` |
 | 执行边界 | `executed=false`；未调用 Control、IK、MuJoCo 或真实轨迹 |
 
