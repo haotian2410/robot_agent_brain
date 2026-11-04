@@ -421,6 +421,7 @@ def compile_semantic_matrix_v2(matrix: str | Path, *, kind: str = "generated_edi
                             "assertion_profile": variant["expected_json_value"].get(
                                 "assertion_profile", variant.get("equivalence_group")),
                             "expected_assertions": variant["expected_json_value"],
+                            "catalog_scenario": variant.get("catalog_scenario"),
                             "catalog_revision": catalog_revision,
                             "seed_algorithm": "sha256(brain-semantic-matrix.v2|root|axis|stable-ids)",
                         }
@@ -428,6 +429,7 @@ def compile_semantic_matrix_v2(matrix: str | Path, *, kind: str = "generated_edi
                         manifest_rows.append({"session": name, "case_id": case_id, "variant_id": variant["variant_id"],
                                               "parent_variant_id": item["parent_variant_id"], "asset_seed": asset_seed,
                                               "asset_role_mapping": role_map, "source_row": variant["_row"],
+                                              "catalog_scenario": variant.get("catalog_scenario"),
                                               "expected_outcome": variant["expected_outcome"]})
     manifest = {"schema": "brain-semantic-matrix.v2", "schema_version": 2, "matrix_version": 2,
                 "kind": kind, "matrix": str(Path(matrix).resolve()),

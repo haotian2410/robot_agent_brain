@@ -38,7 +38,7 @@ _RESULT_COLUMNS = [
     "semantic_classification", "evidence_status",
     "oracle_status", "oracle_checks", "oracle_errors", "actual_outcome",
     "catalog_revision", "variant_id", "equivalence_group", "fixture_id", "asset_seed",
-    "parent_run_id", "parent_scene_digest",
+    "parent_run_id", "parent_scene_digest", "catalog_scenario",
 ]
 
 
@@ -107,7 +107,7 @@ def _write_results_workbook(root: Path, rows: list[dict]) -> Path | None:
             json.dumps(row.get("oracle_errors", []), ensure_ascii=False), row.get("actual_outcome", row.get("outcome", "")),
             row.get("catalog_revision", ""), row.get("variant_id", ""), row.get("equivalence_group", ""),
             row.get("fixture_id", ""), row.get("asset_seed", ""), row.get("parent_run_id", ""),
-            row.get("parent_scene_digest", ""),
+            row.get("parent_scene_digest", ""), row.get("catalog_scenario", ""),
         ]
         sheet.append(values)
         current = sheet.max_row
@@ -530,6 +530,7 @@ class ServiceBatchRunner:
                               "expected_scene_change": session_spec.expected_scene_change,
                               "assertion_profile": session_spec.assertion_profile,
                               "expected_assertions": session_spec.expected_assertions,
+                              "catalog_scenario": getattr(session_spec, "catalog_scenario", None),
                               "variant_id": session_spec.variant_id, "equivalence_group": session_spec.equivalence_group,
                               "parent_variant_id": session_spec.parent_variant_id,
                               "fixture_id": session_spec.fixture_id, "asset_seed": session_spec.asset_seed,
@@ -568,9 +569,12 @@ class ServiceBatchRunner:
                          "expected_scene_change": session_spec.expected_scene_change,
                          "assertion_profile": session_spec.assertion_profile,
                          "expected_assertions": session_spec.expected_assertions,
+                         "catalog_scenario": getattr(session_spec, "catalog_scenario", None),
                          "variant_id": session_spec.variant_id, "equivalence_group": session_spec.equivalence_group,
                          "parent_variant_id": session_spec.parent_variant_id,
-                         "fixture_id": session_spec.fixture_id, "asset_seed": session_spec.asset_seed,
+                               "fixture_id": session_spec.fixture_id,
+                               "catalog_scenario": getattr(session_spec, "catalog_scenario", None),
+                               "asset_seed": session_spec.asset_seed,
                          "catalog_revision": getattr(session_spec, "catalog_revision", None),
                          "seed_algorithm": getattr(session_spec, "seed_algorithm", None),
                          "parent_run_id": getattr(session_spec, "parent_run_id", None),

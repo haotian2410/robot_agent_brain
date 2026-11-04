@@ -39,3 +39,17 @@ def test_v2_compilation_does_not_use_legacy_length_slice(tmp_path):
     assert manifest["session_count"] == 115
     output = json.loads((tmp_path / "compiled.json").read_text())
     assert len(output["sessions"]) == 115
+
+
+def test_v2_catalog_scenarios_survive_compilation_for_isolated_contract_cases():
+    """T19's isolated OLS scenarios must not be discarded as metadata."""
+    document, manifest = compile_semantic_matrix_v2(
+        WORKBOOK, asset_roles=ROLES, asset_catalog=CATALOG, seed=20261103,
+        strict_counts=True)
+    t19 = [item for item in document["sessions"] if item.get("test_id") == "T19"]
+    assert {item.get("catalog_scenario") for item in t19} == {
+        "mug_only", "mug_and_cup", "mug_removed_cup_present",
+        "mug_only_no_handle_compatible_asset",
+    }
+    manifest_t19 = [item for item in manifest["rows"] if item.get("case_id") == "T19"]
+    assert all("catalog_scenario" in item for item in manifest_t19)

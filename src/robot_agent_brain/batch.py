@@ -65,6 +65,10 @@ class BatchSession(BaseModel):
     expected_scene_change: str | None = None
     assertion_profile: str | None = None
     expected_assertions: dict = Field(default_factory=dict)
+    # Isolated catalog/OLS scenario used by semantic-matrix contract cases
+    # (for example T19 mug-only versus cup+mug). This is provenance for the
+    # runner and does not alter the production asset catalog or scene.
+    catalog_scenario: str | None = None
     # Immutable compiler provenance copied from the semantic-matrix manifest.
     # Keeping it on each session makes a service result self-contained even
     # when the manifest is moved separately from the evidence directory.
