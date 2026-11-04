@@ -44,6 +44,12 @@ def test_runtime_prompt_is_single_clean_v3_source():
     assert "task_understanding.v3" in TASK_UNDERSTANDING_PROMPT
 
 
+def test_runtime_prompt_binds_vague_scene_motion_to_python_scale_policy():
+    assert "motion_scale=small" in TASK_UNDERSTANDING_PROMPT
+    assert "一点/稍微/轻微/一下" in TASK_UNDERSTANDING_PROMPT
+    assert "机器人任务仍不能凭空猜测执行距离" in TASK_UNDERSTANDING_PROMPT
+
+
 def test_v3_schema_requires_route_and_all_payload_slots():
     schema = task_understanding_v3_wire_schema()
     assert set(schema["required"]) == set(schema["properties"])

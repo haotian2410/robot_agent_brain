@@ -5,12 +5,15 @@ from dataclasses import dataclass
 from ..contracts.task_intent import Direction, MotionScale
 
 _DIRECTION_PATTERNS = (
-    (r"(?:向|往|朝)\s*左\s*(?:移(?:动)?|挪)|左移", Direction.LEFT),
-    (r"(?:向|往|朝)\s*右\s*(?:移(?:动)?|挪)|右移", Direction.RIGHT),
-    (r"(?:向|往|朝)\s*前\s*(?:移(?:动)?|挪)|前移", Direction.FRONT),
-    (r"(?:向|往|朝)\s*后\s*(?:移(?:动)?|挪)|后移", Direction.BACK),
-    (r"(?:向|往|朝)\s*上\s*(?:移(?:动)?|挪)|上移", Direction.UP),
-    (r"(?:向|往|朝)\s*下\s*(?:移(?:动)?|挪)|下移", Direction.DOWN),
+    # Allow the tabletop amplitude cue between direction and verb, e.g.
+    # “向右稍微挪一点”.  The cue is still parsed separately as
+    # ``motion_scale`` below; this regex only binds it to the same clause.
+    (r"(?:向|往|朝)\s*左\s*(?:稍微|轻微|一点|一些|很多|大幅|一下)*\s*(?:移(?:动)?|挪)|左移", Direction.LEFT),
+    (r"(?:向|往|朝)\s*右\s*(?:稍微|轻微|一点|一些|很多|大幅|一下)*\s*(?:移(?:动)?|挪)|右移", Direction.RIGHT),
+    (r"(?:向|往|朝)\s*前\s*(?:稍微|轻微|一点|一些|很多|大幅|一下)*\s*(?:移(?:动)?|挪)|前移", Direction.FRONT),
+    (r"(?:向|往|朝)\s*后\s*(?:稍微|轻微|一点|一些|很多|大幅|一下)*\s*(?:移(?:动)?|挪)|后移", Direction.BACK),
+    (r"(?:向|往|朝)\s*上\s*(?:稍微|轻微|一点|一些|很多|大幅|一下)*\s*(?:移(?:动)?|挪)|上移", Direction.UP),
+    (r"(?:向|往|朝)\s*下\s*(?:稍微|轻微|一点|一些|很多|大幅|一下)*\s*(?:移(?:动)?|挪)|下移", Direction.DOWN),
     # Fixed tabletop convention: east/right, west/left, north/front,
     # south/back. These are extracted as evidence, not guessed by Qwen.
     (r"(?:向|往|朝)?\s*东\s*(?:移(?:动)?|挪)|东移", Direction.RIGHT),

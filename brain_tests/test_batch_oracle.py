@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from robot_agent_brain.batch_oracle import evaluate_turn
 
 
@@ -43,6 +45,34 @@ def test_oracle_detects_query_mutating_scene():
                           result={"outcome": "answered", "executed": False})
     assert value["status"] == "failed_assertion"
     assert "scene_changed_when_unchanged_expected" in value["errors"]
+
+
+def test_oracle_keeps_model_and_robot_namespaces_separate():
+    table = _obj(10, "table")
+    baseball = _obj(11, "baseball", 0.2, 0.1)
+    baseball["components"][1]["properties"] = {
+        "path": "$LIBRARY_SERVER/3", "type": "model"
+    }
+    camera = _obj(12, "wrist_camera_d435i", 0.0, 0.0)
+    camera["components"][1]["properties"] = {
+        "path": "$LIBRARY_SERVER/3", "type": "robot"
+    }
+    before = _scene([table, baseball, camera])
+    after = _scene(deepcopy([table, baseball, camera]))
+    after["objects"][1]["components"].append({
+        "component_type": "MeshRenderer",
+        "properties": {"forceOverrideColor": "#0000FF"},
+    })
+    value = evaluate_turn(
+        expected={"operation": "update_properties", "target_role": "object_a",
+                  "color": "blue", "preserve_instance": True},
+        expected_outcome="scene_updated", before_scene=before, after_scene=after,
+        result={"outcome": "scene_updated", "executed": False},
+        role_mapping={"object_a": {"semantic_name": "baseball",
+                                    "metadata_ref": "$LIBRARY_SERVER/3",
+                                    "type": "model"}},
+    )
+    assert value["status"] == "passed", value
 
 
 def test_oracle_classifies_expected_clarification_without_scene_change():

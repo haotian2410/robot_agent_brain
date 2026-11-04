@@ -394,6 +394,24 @@ update
 
 没有距离和幅度词时，不要猜数值；需要时返回 `clarification_required`。
 
+对于**场景编辑**，下列词本身就是用户给出的幅度，不需要追问具体厘米数：
+“一点/稍微/轻微/一下”使用 `motion_scale=small`；“一些/适度”使用
+`motion_scale=medium`；“很多/大幅”使用 `motion_scale=large`。只有完全没有
+方向或没有任何距离/幅度线索时才澄清。该规则只适用于直接修改桌面场景；
+机器人任务仍不能凭空猜测执行距离。
+
+例如“把苹果向右稍微挪一点”应输出：
+
+```json
+{
+  "operation": "translate",
+  "target": "apple",
+  "direction": "right",
+  "motion_scale": "small",
+  "coordinate_frame": "world"
+}
+```
+
 ### 旋转
 
 在固定的桌面编辑域中，用户只说“向左/向右转”“转四分之一圈”或“转半圈”

@@ -102,20 +102,38 @@ def _role_asset(role_mapping: dict | None, role: str | None) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _role_asset_type(role_mapping: dict | None, role: str | None) -> str | None:
+    """Return the expected metadata namespace for a role.
+
+    OLS model and robot references intentionally share numeric IDs.  The
+    matrix catalog historically omitted ``type`` for model entries, so the
+    oracle treats an omitted value as the catalog's default ``model`` rather
+    than matching a robot with the same ``$LIBRARY_SERVER/<id>`` path.
+    """
+    asset = _role_asset(role_mapping, role)
+    if not asset:
+        return None
+    value = asset.get("type") or asset.get("asset_type")
+    return str(value).casefold() if value else "model"
+
+
 def _find_by_role(scene_objects: dict[str, dict], role: str | None,
                   role_mapping: dict | None, *, exclude: set[str] | None = None) -> list[tuple[str, dict]]:
     name = _role_name(role_mapping, role)
     asset = _role_asset(role_mapping, role)
     metadata_ref = asset.get("metadata_ref")
+    metadata_type = _role_asset_type(role_mapping, role)
     exclude = exclude or set()
     result = []
     for oid, obj in scene_objects.items():
         if oid in exclude:
             continue
-        ref, _ = _metadata(obj)
-        if metadata_ref and ref == metadata_ref:
+        ref, kind = _metadata(obj)
+        # Match both namespace and path.  A model:3 baseball must not be
+        # confused with robot:3 wrist/overhead cameras in the same scene.
+        if metadata_ref and ref == metadata_ref and (metadata_type is None or kind == metadata_type):
             result.append((oid, obj))
-        elif name and _semantic(obj) == name:
+        elif name and _semantic(obj) == name and (metadata_type is None or kind in {metadata_type, None}):
             result.append((oid, obj))
     return result
 
@@ -394,4 +412,3 @@ def evaluate_turn(*args, expected: dict | None = None, expected_outcome: str | N
             "before_digest": digest(_dump(before_scene)) if before_scene is not None else None,
             "after_digest": digest(_dump(after_scene)) if after_scene is not None else None,
             "changed": changed, "details": {"before_object_ids": sorted(before), "after_object_ids": sorted(after)}}
-
