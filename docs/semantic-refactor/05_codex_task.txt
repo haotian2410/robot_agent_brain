@@ -1,0 +1,27 @@
+请先完整阅读 docs/semantic-refactor/01_refactor_plan.md 和 06_test_runbook.md，
+再以当前工作树核对与审查基线 main@1fc9fe9 的差异，实施本包；不要覆盖未提交工作。
+
+本轮只做三件事：
+1. 每个turn的第一阶段Qwen请求带完整、有效的OLS目录与桌面上下文，
+   让Qwen从目录选新建/替换资产，Python按同revision的asset_key精确校验。
+   删除live路径固定cup→mug等名称改写；新增cup后应能选cup。
+2. 普通操作统一为主桌面工作域；tabletop_edit模式下省略桌面不再澄清桌外。
+   东=右、北=前；右上=东北、右下=东南。保留碰撞、支撑、范围、原子回滚、
+   original/current和机器人Profile保护；换机械臂仍是robot_config。
+3. 实现brain-semantic-matrix.v2：一行一个功能，完整句子语义变体与资产seed分离。
+   采用本包Excel/JSON的20功能行、115条表达、27项不变量。
+   每行能继承任一前序行或独立fixture；固定/seed/all父变体可追踪；
+   每个变体从相同基线fork，不能拼接后靠长度切片或累积修改。
+
+按方案C0→C7分提交实现，先回归后改代码。新表格不是旧v1可直接执行格式，
+须先补importer/compiler/campaign。不得改生产OLS资产或共享Scene v1字段。
+不要给Qwen泄露测试expected或隐藏asset-role答案。
+不执行Control、IK、MuJoCo和真实机械臂，不自动推送。
+
+验收必须保留raw response、catalog revision、选中资产、parent/baseline、
+角色实例映射、独立oracle、首败与重试、安全拒绝前后Scene证据。
+先运行 python docs/semantic-refactor/validate_spec.py 检查规范；
+这不代表业务测试通过。真实Qwen/OLS不可用时明确未验证。
+
+最终交付：修改文件与提交、兼容说明、实际测试命令和计数、失败/未验证项、
+首五行所有变体与mug/cup目录演进证据。不要继续靠增加硬编码词表来修复。

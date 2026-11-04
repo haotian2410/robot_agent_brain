@@ -48,6 +48,8 @@ def parser():
     compile_cmd.add_argument("--asset-root")
     compile_cmd.add_argument("--asset-catalog")
     compile_cmd.add_argument("--schema-version", type=int, default=1)
+    compile_cmd.add_argument("--matrix-version", type=int, default=None)
+    compile_cmd.add_argument("--run-profile", default="default")
     compile_cmd.add_argument("--config")
     campaign = commands.add_parser("batch-campaign", help="Run a success-gated generated/edit matrix campaign")
     campaign.add_argument("--matrix", required=True)
@@ -59,6 +61,9 @@ def parser():
     campaign.add_argument("--task-timeout", type=float, default=300)
     campaign.add_argument("--allow-missing-screenshots", action="store_true")
     campaign.add_argument("--output-dir", default="var/batch-campaigns")
+    campaign.add_argument("--matrix-version", type=int, default=None)
+    campaign.add_argument("--run-profile", default="default")
+    campaign.add_argument("--asset-catalog")
     schema = commands.add_parser("schemas")
     schema.add_argument("--output-dir", default="var/schemas")
     serve = commands.add_parser("serve", help="Local WebEditor Agent; plans only, no Control")
@@ -75,6 +80,14 @@ def main(argv=None):
     args = parser().parse_args(argv)
     try:
         if args.command == "batch-compile":
+            if args.matrix_version == 2:
+                from .batch_matrix_v2 import compile_semantic_matrix_v2
+                document, manifest = compile_semantic_matrix_v2(
+                    args.matrix, kind=args.kind, asset_roles=args.asset_roles,
+                    asset_catalog=args.asset_catalog, seed=args.seed, output=args.output,
+                    strict_counts=True, run_profile=args.run_profile)
+                print(args.output)
+                return 0
             from .batch_matrix import compile_from_cli
             output = compile_from_cli(matrix=args.matrix, kind=args.kind, asset_roles=args.asset_roles,
                                       seed=args.seed, output=args.output, asset_root=args.asset_root,
@@ -83,6 +96,17 @@ def main(argv=None):
             print(output)
             return 0
         if args.command == "batch-campaign":
+            if args.matrix_version == 2:
+                from .batch_campaign_v2 import run_semantic_campaign
+                result, output = run_semantic_campaign(
+                    matrix=args.matrix, asset_roles=args.asset_roles,
+                    asset_catalog=args.asset_catalog, seed=args.seed,
+                    agent_url=args.agent_url, gateway_url=args.gateway_url,
+                    browser_id=args.browser_id, task_timeout=args.task_timeout,
+                    screenshot_required=not args.allow_missing_screenshots,
+                    output_dir=args.output_dir, run_profile=args.run_profile)
+                print(json.dumps({"stages": len(result["stages"]), "output_dir": str(output)}, ensure_ascii=False))
+                return 0 if all(item.get("status", "").startswith(("passed", "skipped")) for item in result["stages"]) else 4
             from .batch_campaign import run_campaign
             result, output = run_campaign(matrix=args.matrix, asset_roles=args.asset_roles, seed=args.seed,
                                           agent_url=args.agent_url, gateway_url=args.gateway_url,

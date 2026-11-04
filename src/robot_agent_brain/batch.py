@@ -47,6 +47,15 @@ class BatchSession(BaseModel):
     # v2 matrix metadata.  These fields are optional so hand-written v1 JSON
     # keeps the same small contract.
     test_id: str | None = None
+    variant_id: str | None = None
+    equivalence_group: str | None = None
+    parent_case_id: str | None = None
+    parent_variant_id: str | None = None
+    fixture_id: str | None = None
+    asset_seed: int | None = None
+    repeat_index: int | None = None
+    expected_json: dict = Field(default_factory=dict)
+    precondition: str | None = None
     parent_test_id: str | None = None
     coverage_tag: str | None = None
     scene_basis: str | None = None

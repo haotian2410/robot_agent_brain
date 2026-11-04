@@ -11,6 +11,13 @@ Excel 是维护入口，编译后才交给批处理器。v1 文件和 JSON 继�
 
 ## OLS 资产词表
 
+本仓库还随 `docs/semantic-refactor/02_semantic_test_matrix.xlsx` 提供
+`brain-semantic-matrix.v2` 的权威语义回归包。它使用 `matrix`（20 行功能）+
+`variants`（115 条完整自然语言表达）双工作表；这份包与历史的
+`generated_edit_matrix_v2.xlsx`/`known_scene_matrix_v2.xlsx` 入口并存，不能把
+旧表的 `sample_count` 当作新包的变体数量。用 `--matrix-version 2` 时必须使用
+该双工作表格式，编译器会做 20/115/27 的结构检查。
+
 运行 `scripts/build_batch_asset_catalog.py` 从当前 OLS `model_index.json` 和模型元数据生成 `config/batch_asset_catalog.json`。表格使用 `asset_key`，不填写数字 ID、路径或 URDF 文件名。编译 manifest 会记录实际 `semantic_name`、标签、类别、MetadataRef 和来源行号。
 
 Brain 首轮任务理解会把当前 OLS 的规范资产名、标签、类别和普通/容器/表面/被动范围注入 Qwen。Qwen 必须从词表选择；Python 仍做最终校验。OLS 升级后必须重新生成目录和重新编译矩阵。

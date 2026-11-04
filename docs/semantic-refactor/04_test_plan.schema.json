@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schema", "counts", "first_five", "status"],
+  "properties": {
+    "schema": {"const": "brain-semantic-matrix.v2"},
+    "source_workbook": {"type": "string"},
+    "counts": {
+      "type": "object",
+      "required": ["feature_rows", "expressions", "regression_invariants"],
+      "properties": {
+        "feature_rows": {"type": "integer", "const": 20},
+        "expressions": {"type": "integer", "const": 115},
+        "regression_invariants": {"type": "integer", "const": 27}
+      },
+      "additionalProperties": false
+    },
+    "first_five": {"type": "array", "const": ["T01", "T02", "T03", "T04", "T05"]},
+    "status": {"enum": ["not_run", "running", "passed", "failed", "blocked"]}
+  },
+  "additionalProperties": true
+}

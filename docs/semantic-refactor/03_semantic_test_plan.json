@@ -1,0 +1,19 @@
+{
+  "schema": "brain-semantic-matrix.v2",
+  "source_workbook": "02_semantic_test_matrix.xlsx",
+  "counts": {"feature_rows": 20, "expressions": 115, "regression_invariants": 27},
+  "first_five": ["T01", "T02", "T03", "T04", "T05"],
+  "run_profiles": {
+    "independent_first_five": "T01-T05 are compiled as independent fixtures; no parent prefix.",
+    "all": "Expand every enabled variant and parent branch without truncation.",
+    "seed": "Choose one deterministic parent variant using the supplied seed."
+  },
+  "status": "not_run",
+  "acceptance": [
+    "first-stage task understanding receives the current OLS catalog snapshot",
+    "scene edits remain tabletop-only",
+    "asset choices are namespaced model keys",
+    "failed or clarified edits do not change scene identity",
+    "robot outputs remain executed=false"
+  ]
+}
