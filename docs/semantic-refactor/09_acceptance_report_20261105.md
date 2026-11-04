@@ -1,6 +1,6 @@
 # Semantic Refactor C0–C7 验收报告（2026-11-05）
 
-> 报告使用的源代码基线为 `a6d6ef4`，远端同步基线为 `c64f57a`（本轮按要求未自动推送）。
+> 报告使用的源代码基线为 `58c82c1`，远端同步基线为 `c64f57a`（本轮按要求未自动推送）。
 > 文中历史段落若出现旧 SHA，
 > 仅表示当时的证据快照，不代表当前代码版本。
 
@@ -11,7 +11,7 @@ C0–C6 的代码、结构化校验和自动回归已完成；C7 的首五行真
 fixture 上完成，T03/T04/T05 共 26 条表达全部通过独立场景 oracle。完整 20 行、
 115 条表达的真实 Qwen/Gateway 验收尚未完成，不能据此宣称整个矩阵通过。
 
-源代码基线：`a6d6ef4`；远端同步基线：`c64f57a`。generated campaign
+源代码基线：`58c82c1`；远端同步基线：`c64f57a`。generated campaign
 的服务运行证据以 `50da3d1` 语义代码基线记录，后续提交仅补充证据分类、hash 和文档。
 
 ## 运行基线
@@ -216,6 +216,9 @@ conda run --no-capture-output -n robot_agent_integ \
 
 批量服务前置检查也已收紧：Qwen 非 `ready`、OLS `asset_detail.matched` 为假、已有活动/排队任务，
 或活动浏览器没有 Camera 时，在创建批量 session 前直接返回阻塞错误；不会继续执行并生成半套证据。
+`58c82c1` 增加了“资产状态字段缺失也视为不可用”的 fail-closed 规则：只有明确的
+`asset_detail.matched=true` 才能开始批量 session；该变化已通过对应单元回归，
+但尚未单独执行真实故障注入联调。
 
 ## 未验证、阻塞和边界
 
