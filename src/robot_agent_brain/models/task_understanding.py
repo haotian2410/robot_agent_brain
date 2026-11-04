@@ -591,6 +591,7 @@ def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str)
         return value
     text = instruction.casefold()
     region = None
+    center = False
     for phrases, candidate in (
         (("左上角", "左上方"), "left_front"),
         (("右上角", "右上方"), "right_front"),
@@ -600,6 +601,23 @@ def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str)
         if any(phrase in text for phrase in phrases):
             region = candidate
             break
+    if region is None:
+        for phrases, candidate in (
+            (("东北角", "东北方", "右上"), "right_front"),
+            (("西北角", "西北方", "左上"), "left_front"),
+            (("东南角", "东南方", "右下"), "right_back"),
+            (("西南角", "西南方", "左下"), "left_back"),
+            (("右侧", "右边", "东侧", "东边"), "right_half"),
+            (("左侧", "左边", "西侧", "西边"), "left_half"),
+            (("前侧", "前方", "北侧", "北边"), "front_half"),
+            (("后侧", "后方", "南侧", "南边"), "back_half"),
+        ):
+            if any(phrase in text for phrase in phrases):
+                region = candidate
+                break
+    if region is None and any(phrase in text for phrase in ("中间", "正中央", "中心位置")):
+        center = True
+        region = "center"
     if region is None:
         return value
     operations = []
@@ -617,8 +635,8 @@ def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str)
             continue
         item["relation"] = "on"
         item["reference"] = item.get("reference") or "table"
-        item["placement_region"] = region
-        item["placement_hint"] = item.get("placement_hint") or "any"
+        item["placement_region"] = None if center else region
+        item["placement_hint"] = "center" if center else (item.get("placement_hint") or "any")
         item.pop("direction", None)
         item.pop("coordinate_frame", None)
         changed = True

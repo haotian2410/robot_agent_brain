@@ -67,3 +67,24 @@ def test_future_cup_name_is_not_attached_as_mug_alias():
     mug = next(item for item in snapshot.models if item.name == "mug")
     cup = next(item for item in snapshot.models if item.name == "cup")
     assert mug.asset_key != cup.asset_key and "cup" not in mug.aliases
+
+
+def test_live_table_side_words_canonicalize_to_tabletop_regions():
+    from robot_agent_brain.models.task_understanding import parse_qwen_turn
+
+    value = {
+        "protocol_version": "task_understanding.v3.1", "status": "accepted",
+        "turn_kind": "scene_edit", "clarification_question": None,
+        "scene_edit": {
+            "scene_basis": "current",
+            "entities": [{"entity_id": "apple", "semantic_name": "apple", "category": "fruit"}],
+            "asset_choices": [{"entity_id": "apple", "asset_key": "model:1"}],
+            "relations": [],
+            "operations": [{"operation": "add", "target": "apple", "relation": "on", "reference": "table"}],
+        },
+        "scene_query": None, "session_control": None, "robot_setup_request": None,
+        "entities": [], "operations": [], "relations": [],
+    }
+    turn = parse_qwen_turn(value, "在桌子左侧增加一个苹果")
+    assert turn.scene_edit.operations[0].placement_region == "left_half"
+    assert turn.status.value == "accepted"
