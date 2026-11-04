@@ -92,27 +92,42 @@ class SceneLayoutPolicy:
         obj_min, obj_max = world_bounds(object_model, WorldTransform((0, 0, 0), world.linear))
         obj_center = tuple((obj_min[i] + obj_max[i]) / 2 for i in range(3))
         half_x, half_y = (obj_max[0] - obj_min[0]) / 2, (obj_max[1] - obj_min[1]) / 2
-        low_x, high_x = ref_min[0] + half_x, ref_max[0] - half_x
-        low_y, high_y = ref_min[1] + half_y, ref_max[1] - half_y
-        if workspace_min is not None and workspace_max is not None:
-            low_x, high_x = max(low_x, workspace_min[0] + half_x), min(high_x, workspace_max[0] - half_x)
-            low_y, high_y = max(low_y, workspace_min[1] + half_y), min(high_y, workspace_max[1] - half_y)
-        if low_x > high_x or low_y > high_y:
+        # Keep the feasible tabletop bounds separate from the workspace
+        # bounds.  A centered placement is a hard geometric constraint: if
+        # the actual table center is outside the configured workspace, reject
+        # it instead of silently moving the object to the clipped workspace
+        # midpoint.  Ordinary ``any`` placement may still use the clipped
+        # bounds for deterministic grid search.
+        table_low_x, table_high_x = ref_min[0] + half_x, ref_max[0] - half_x
+        table_low_y, table_high_y = ref_min[1] + half_y, ref_max[1] - half_y
+        if table_low_x > table_high_x or table_low_y > table_high_y:
             return []
         mid_x, mid_y = (ref_min[0] + ref_max[0]) / 2, (ref_min[1] + ref_max[1]) / 2
         if region in {"left_half", "left_front", "left_back"}:
-            high_x = min(high_x, mid_x)
+            table_high_x = min(table_high_x, mid_x)
         if region in {"right_half", "right_front", "right_back"}:
-            low_x = max(low_x, mid_x)
+            table_low_x = max(table_low_x, mid_x)
         if region in {"front_half", "left_front", "right_front"}:
-            low_y = max(low_y, mid_y)
+            table_low_y = max(table_low_y, mid_y)
         if region in {"back_half", "left_back", "right_back"}:
-            high_y = min(high_y, mid_y)
-        if low_x > high_x or low_y > high_y:
+            table_high_y = min(table_high_y, mid_y)
+        if table_low_x > table_high_x or table_low_y > table_high_y:
             return []
         if center_only:
-            points = [((low_x + high_x) / 2, (low_y + high_y) / 2)]
+            point = ((table_low_x + table_high_x) / 2, (table_low_y + table_high_y) / 2)
+            if workspace_min is not None and workspace_max is not None:
+                if not (workspace_min[0] + half_x <= point[0] <= workspace_max[0] - half_x
+                        and workspace_min[1] + half_y <= point[1] <= workspace_max[1] - half_y):
+                    return []
+            points = [point]
         else:
+            low_x, high_x = table_low_x, table_high_x
+            low_y, high_y = table_low_y, table_high_y
+            if workspace_min is not None and workspace_max is not None:
+                low_x, high_x = max(low_x, workspace_min[0] + half_x), min(high_x, workspace_max[0] - half_x)
+                low_y, high_y = max(low_y, workspace_min[1] + half_y), min(high_y, workspace_max[1] - half_y)
+            if low_x > high_x or low_y > high_y:
+                return []
             # center, then a stable low-discrepancy grid.  This order keeps
             # ordinary single-object placement centered and spreads batches.
             points = []

@@ -168,6 +168,23 @@ def test_corner_add_is_normalized_to_on_region_before_scene_edit_validation():
     assert operation.direction is None
 
 
+def test_object_relative_add_without_reference_is_clarification_not_table_guess():
+    value = envelope(protocol_version="task_understanding.v3.1", scene_edit={
+        "scene_basis": "current",
+        "entities": [
+            {"entity_id": "banana", "semantic_name": "banana", "category": "fruit"},
+            {"entity_id": "apple", "semantic_name": "apple", "category": "fruit"},
+        ],
+        "relations": [],
+        "operations": [{"operation": "add", "target": "banana", "relation": "right_of",
+                         "reference": None}],
+    })
+    turn = parse_qwen_turn(value, "在苹果右侧增加一个香蕉")
+    assert turn.status.value == "clarification_required"
+    assert "参照物" in (turn.clarification_question or "")
+    assert "苹果" in (turn.clarification_question or "")
+
+
 @pytest.mark.parametrize(("instruction", "region"), [
     ("在桌面左前角增加一个苹果", "left_front"),
     ("在桌面右前角增加一个苹果", "right_front"),

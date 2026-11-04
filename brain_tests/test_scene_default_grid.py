@@ -100,6 +100,36 @@ def test_surface_grid_has_multiple_xy_candidates_and_region_filter():
     assert len(center) == 1
 
 
+def test_center_uses_table_geometry_center_not_workspace_clip_midpoint():
+    policy = SceneLayoutPolicy()
+    # The table center is x=.525 while the workspace is asymmetric around it.
+    reference = WorldTransform((.525, 0., 0.), ((1., 0., 0.), (0., 1., 0.), (0., 0., 1.)))
+    asset = BrainAssetView(library_asset_id=1, metadata_ref="$LIBRARY_SERVER/1", semantic_name="table",
+                           category="surface", dimensions_m=(1.5, 1., .1),
+                           local_aabb_min_m=(-.75, -.5, 0.), local_aabb_max_m=(.75, .5, .1))
+    object_asset = BrainAssetView(library_asset_id=2, metadata_ref="$LIBRARY_SERVER/2", semantic_name="apple",
+                                  category="fruit", dimensions_m=(.2, .2, .1),
+                                  local_aabb_min_m=(-.1, -.1, 0.), local_aabb_max_m=(.1, .1, .1))
+    center = policy.surface_candidates(reference, asset, object_asset, reference, center_only=True,
+                                      workspace_min=(.16, -.45), workspace_max=(.70, .45))
+    assert len(center) == 1
+    assert center[0].position[0] == pytest.approx(.525)
+
+
+def test_center_is_rejected_when_actual_table_center_is_outside_workspace():
+    policy = SceneLayoutPolicy()
+    reference = WorldTransform((0., 0., 0.), ((1., 0., 0.), (0., 1., 0.), (0., 0., 1.)))
+    asset = BrainAssetView(library_asset_id=1, metadata_ref="$LIBRARY_SERVER/1", semantic_name="table",
+                           category="surface", dimensions_m=(1.5, 1., .1),
+                           local_aabb_min_m=(-.75, -.5, 0.), local_aabb_max_m=(.75, .5, .1))
+    object_asset = BrainAssetView(library_asset_id=2, metadata_ref="$LIBRARY_SERVER/2", semantic_name="apple",
+                                  category="fruit", dimensions_m=(.2, .2, .1),
+                                  local_aabb_min_m=(-.1, -.1, 0.), local_aabb_max_m=(.1, .1, .1))
+    center = policy.surface_candidates(reference, asset, object_asset, reference, center_only=True,
+                                      workspace_min=(.16, -.45), workspace_max=(.70, .45))
+    assert center == []
+
+
 def test_web_config_contains_scene_add_defaults():
     config = BrainConfig.load("config/webeditor.json")
     assert config.default_scene_edit_assets["basket"] == "$LIBRARY_SERVER/4"

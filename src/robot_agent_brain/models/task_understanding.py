@@ -663,6 +663,67 @@ def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str)
     return {**value, "scene_edit": {**scene_edit, "operations": operations}}
 
 
+def _missing_scene_edit_reference_question(value: dict[str, Any], instruction: str) -> str | None:
+    """Return a clarification for object-relative placement without a reference.
+
+    The tabletop policy makes a bare ``右侧``/``左上角`` a table region, but
+    it must not turn ``在苹果右侧增加香蕉`` into ``on table`` when the model
+    omitted the object reference.  Use the user's text and the declared
+    entities only to distinguish these two cases; never invent a reference.
+    """
+    if not isinstance(value, dict) or value.get("turn_kind") != TurnKind.SCENE_EDIT.value:
+        return None
+    payload = value.get("scene_edit")
+    if not isinstance(payload, dict):
+        return None
+    entities = payload.get("entities")
+    if not isinstance(entities, list):
+        entities = value.get("entities") if isinstance(value.get("entities"), list) else []
+    text = (instruction or "").casefold()
+    # Explicit tabletop wording is safe to normalize to a table region.
+    table_words = ("桌", "桌面", "台面", "table", "desktop", "work table")
+    has_table = any(word in text for word in table_words)
+    directional = {"left_of", "right_of", "front_of", "behind"}
+    # The wire deliberately carries canonical English semantic names while
+    # user instructions are commonly Chinese.  This small, stable vocabulary
+    # is only used to detect an omitted reference; it is not an asset resolver
+    # and cannot choose a model or scene object.
+    language_aliases = {
+        "apple": ("apple", "苹果"), "banana": ("banana", "香蕉"),
+        "baseball": ("baseball", "棒球"), "basket": ("basket", "篮子"),
+        "tray": ("tray", "托盘"), "mug": ("mug", "cup", "杯子", "马克杯"),
+        "table": ("table", "桌子", "桌面", "台面"),
+    }
+    for raw in payload.get("operations") or []:
+        if not isinstance(raw, dict) or raw.get("operation") != "add":
+            continue
+        if raw.get("relation") not in directional or raw.get("reference"):
+            continue
+        if has_table:
+            continue
+        target = str(raw.get("target") or "").casefold()
+        target_terms = set(language_aliases.get(target, (target,)))
+        mentions_other = []
+        for entity in entities:
+            if not isinstance(entity, dict):
+                continue
+            names = [entity.get("entity_id"), entity.get("semantic_name"), entity.get("name")]
+            terms = []
+            for name in names:
+                if not isinstance(name, str) or not name.strip():
+                    continue
+                terms.extend(language_aliases.get(name.casefold(), (name,)))
+            if any(term.casefold() in text and term.casefold() not in {item.casefold() for item in target_terms}
+                   for term in terms):
+                mentions_other.append(next(term for term in terms
+                                           if term.casefold() in text
+                                           and term.casefold() not in {item.casefold() for item in target_terms}))
+        if mentions_other:
+            return (f"请说明相对于哪个物体放置{target or '目标物体'}，"
+                    f"当前缺少参照物（例如“{mentions_other[0]}的右侧”），不能猜测为桌面位置。")
+    return None
+
+
 def _surface_side_ambiguity(instruction: str) -> str | None:
     """Tabletop mode treats bare table-side wording as a tabletop region."""
     return None
@@ -751,6 +812,11 @@ def _wire_scene_edit(value: SceneEditWire | dict[str, Any], instruction: str | N
 
 
 def _parse_scene_edit_wire(value: dict[str, Any], instruction: str) -> BrainTurn:
+    missing_reference = _missing_scene_edit_reference_question(value, instruction)
+    if missing_reference:
+        return BrainTurn(status=TurnStatus.CLARIFICATION_REQUIRED,
+                         turn_kind=TurnKind.SCENE_EDIT, instruction=instruction,
+                         clarification_question=missing_reference)
     value = _normalize_scene_edit_layout_output(value, instruction)
     try:
         wire = TaskParseWireOutput.model_validate(value)
