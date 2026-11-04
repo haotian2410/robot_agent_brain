@@ -1,6 +1,11 @@
 """Contract tests for the single clean task-understanding v3 wire."""
 
+import json
+import re
+from pathlib import Path
+
 import pytest
+from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from robot_agent_brain.errors import BrainError
@@ -66,6 +71,65 @@ def test_v3_schema_requires_route_and_all_payload_slots():
         "query_type", "entities", "relations", "target", "reference",
         "predicate", "evidence_source"
     }
+
+
+def test_prompt_json_examples_validate_against_their_wire_subschemas():
+    """Validate complete examples and typed snippets against the live schema.
+
+    The prompt contains one complete envelope plus deliberately smaller
+    examples for entities, operations, and nested route payloads.  Those
+    snippets are not provider envelopes, but they must still use the same
+    live field names/enums; otherwise a prompt edit can silently reintroduce
+    the legacy ``id/name/type`` contract.
+    """
+    prompt_path = Path(__file__).parents[1] / "src/robot_agent_brain/models/prompt_templates/task_understanding_clean_v3.txt"
+    blocks = [json.loads(value) for value in re.findall(
+        r"```json\s*\n(.*?)```", prompt_path.read_text(encoding="utf-8"), re.S)]
+    assert len(blocks) >= 22
+    schema = task_understanding_v3_wire_schema()
+
+    def validator(definition):
+        return Draft202012Validator({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$ref": f"#/$defs/{definition}", "$defs": schema["$defs"],
+        })
+
+    # The first block is the complete top-level envelope.
+    validator_root = Draft202012Validator(schema)
+    validator_root.validate(blocks[0])
+    for index in (1, 2, 3):
+        validator("TaskEntityWire").validate(blocks[index])
+
+    # The robot example is a route fragment: validate each typed member.
+    for entity in blocks[4]["entities"]:
+        validator("TaskEntityWire").validate(entity)
+    for operation in blocks[4]["operations"]:
+        validator("RobotOperationWire").validate(operation)
+
+    # Block 6 is a field-shape scaffold with empty arrays, not an accepted
+    # turn payload (SceneEditWire intentionally requires at least one entity
+    # and operation).  Validate its exact keys and validate the executable
+    # nested examples below with the required null fields filled explicitly.
+    assert set(blocks[5]) == {"scene_basis", "entities", "asset_choices", "relations", "operations"}
+    scene_operation_defaults = {
+        "relation": None, "reference": None, "direction": None,
+        "distance_m": None, "motion_scale": None, "coordinate_frame": "world",
+        "axis": None, "angle_deg": None, "placement_hint": None,
+        "placement_region": None,
+    }
+    for index in (6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19):
+        operation = dict(scene_operation_defaults)
+        operation.update(blocks[index])
+        validator("SceneEditIntent").validate(operation)
+
+    for index in (8, 20):
+        payload = blocks[index].get("scene_edit", blocks[index])
+        payload = dict(payload)
+        payload["operations"] = [
+            {**scene_operation_defaults, **operation} for operation in payload["operations"]
+        ]
+        validator("SceneEditWire").validate(payload)
+    validator("SceneQueryWire").validate(blocks[21])
 
 
 def test_scene_payloads_are_structured_wire_models():
