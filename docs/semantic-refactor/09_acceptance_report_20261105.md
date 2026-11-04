@@ -7,8 +7,8 @@ C0–C6 的代码、结构化校验和自动回归已完成；C7 的首五行真
 fixture 上完成，T03/T04/T05 共 26 条表达全部通过独立场景 oracle。完整 20 行、
 115 条表达的真实 Qwen/Gateway 验收尚未完成，不能据此宣称整个矩阵通过。
 
-当前本地 HEAD：`05f8c20`（包含本报告前的 oracle 和模糊移动修复）。远端
-`origin/main` 仍为 `22e7b09`；本报告新增的 `05f8c20` 没有自动推送。
+当前本地 HEAD：`3539451`，远端 `origin/main` 同步为 `3539451`。本次后续
+校验只产生本地未提交的 v2 编译器/测试/文档改动；未自动推送。
 
 ## 运行基线
 
@@ -35,7 +35,7 @@ fixture 上完成，T03/T04/T05 共 26 条表达全部通过独立场景 oracle�
 | C2 首阶段上下文 | 已验证 | 每轮请求携带完整 `asset_catalog`、`workspace`、`scene_context`，并使用同一 revision |
 | C3 资产选择 | 已验证 | v3.1 `asset_choices` 校验 key、规范名、可新增性和 catalog revision；不把 cup 永久改写成 mug |
 | C4 固定桌面语义 | 已验证 | live v3.1 桌子左右归一到桌面区域；不生成桌外地面关系；几何保护、回滚保留 |
-| C5 矩阵编译 | 已验证 | 官方校验得到 20 行、115 表达、27 不变量；v2 生成/known 两种 kind 均输出 schema v2 |
+| C5 矩阵编译 | 已验证 | 官方校验得到 20 行、115 表达、27 不变量；v2 生成/known 两种 kind 均输出 schema v2；`--schema-version 2` 不再回退到 v1 |
 | C6 父快照与分支隔离 | 已验证 | campaign 只接受父 run 全部 turn `classification=passed` 且 digest/角色满足子行要求 |
 
 结构化校验命令：
@@ -68,6 +68,13 @@ robot-brain batch-compile --matrix-version 2 \
 两份输出均为 schema v2、115 sessions。注意：官方 workbook 当前没有为
 `known_scene` 行提供具体场景路径，因此该编译成功只证明 schema/展开逻辑，
 不证明七个预设场景已经完成真实运行。
+
+编译入口边界复核：`examples/matrices/generated_edit_matrix_v2.xlsx` 和
+`examples/matrices/known_scene_matrix_v2.xlsx` 只有历史 `matrix`/`README`
+结构，使用 v2 reader 会明确返回
+`semantic_matrix_v2_sheet_missing:matrix,variants`，不会再由旧
+`compile_matrix` 以 `schema_version=2` 静默解释。正式 v2 维护入口仍是上述
+`docs/semantic-refactor/02_semantic_test_matrix.xlsx`。
 
 ## C7 真实验收
 
@@ -145,8 +152,17 @@ conda run --no-capture-output -n robot_agent_integ robot-brain batch \
 conda run --no-capture-output -n robot_agent_integ pytest -q
 ```
 
-全量 pytest 退出码为 0；专项 oracle、motion evidence、scene default grid、
-clean v3 prompt 测试均通过。`git diff --check` 通过。
+本轮全量 pytest 退出码为 0；v2 reader/compiler、CLI 分派、角色类别校验、
+专项 oracle、motion evidence、scene default grid、clean v3 prompt 测试均通过。
+`git diff --check` 通过。另有：
+
+```text
+conda run --no-capture-output -n robot_agent_integ \
+  python docs/semantic-refactor/validate_spec.py
+```
+
+输出 `status=valid`、`feature_rows=20`、`expressions=115`、
+`regression_invariants=27`、首五行为 `T01..T05`。
 
 ## 未验证、阻塞和边界
 
@@ -163,6 +179,11 @@ clean v3 prompt 测试均通过。`git diff --check` 通过。
 5. **真实机器人执行、Control、IK、MuJoCo、双臂规划**：按范围明确跳过；所有
    计划结果必须保持 `executed=false`。
 
+本轮新增的 v2 结构证据目录（临时目录，不是生产资产）为：
+`/tmp/semantic-v2-check.8BVZha/`。其中 generated/known 两份编译输出各有
+115 sessions，manifest 记录 `case_count=20`、`variant_count=115`、
+`invariant_count=27`。该目录不包含真实 C7 全量浏览器运行结果。
+
 ## 资产与安全边界
 
 - 没有修改生产 OLS、原始 OBJ/MTL/PNG/URDF 或压缩包。
@@ -170,4 +191,3 @@ clean v3 prompt 测试均通过。`git diff --check` 通过。
 - 澄清、安全拒绝和失败不提交场景、不增加版本、不生成 Commands。
 - 真实截图通过 Gateway `captureScene` 获取；证据中的截图带完整场景身份和
   `camera_id=5`，不使用旧缓存伪造。
-

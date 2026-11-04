@@ -226,10 +226,42 @@ def _asset_for_role(role: str, catalog: dict[str, dict[str, Any]], roles: dict[s
                     case_id: str, sample: int, exclude_names: set[str] | None = None) -> dict[str, Any] | None:
     spec = roles.get(role) if isinstance(roles, dict) else None
     candidates = list(spec.get("candidates", [])) if isinstance(spec, dict) else []
+    kind = str(spec.get("kind", "")).casefold() if isinstance(spec, dict) else ""
+
+    def kind_matches(item: dict[str, Any]) -> bool:
+        """Keep role constraints authoritative at compile time.
+
+        The old compiler checked ``kind`` against the category index, while
+        the v2 compiler initially only matched semantic names.  That allowed
+        a malformed role file to select a table as ``object_a`` or a fruit as
+        ``surface_1`` and then report a misleading semantic test result.  The
+        catalog is the only source of category truth; unknown categories are
+        rejected for constrained roles rather than guessed.
+        """
+        if item.get("type", item.get("asset_type", "model")) != "model":
+            return False
+        category = str(item.get("category") or "").casefold()
+        if kind == "surface":
+            # The configured primary table is intentionally a passive
+            # platform asset.  It is valid as a support role even though it
+            # must never be generated as an ordinary object.
+            return category in {"surface", "support_surface", "table"}
+        if item.get("passive_or_platform"):
+            return False
+        if kind == "container":
+            return category == "container"
+        if kind == "pickable":
+            # Pickable role samples may include ordinary containers (a basket
+            # can itself be manipulated), but never the support surface.  This
+            # mirrors the historical role contract without hard-coding model
+            # names or treating an unknown category as a surface.
+            return category not in {"surface", "support_surface", "table", "furniture"}
+        return True
+
     if not catalog:
         return {"asset_key": candidates[0] if candidates else role, "display_name": candidates[0] if candidates else role, "semantic_name": candidates[0] if candidates else role}
     matching = [item for key, item in sorted(catalog.items())
-                if item.get("semantic_name") in candidates and not item.get("passive_or_platform")]
+                if item.get("semantic_name") in candidates and kind_matches(item)]
     exclude_names = exclude_names or set()
     distinct = [item for item in matching
                 if str(item.get("semantic_name", "")).casefold() not in exclude_names]
@@ -397,7 +429,8 @@ def compile_semantic_matrix_v2(matrix: str | Path, *, kind: str = "generated_edi
                                               "parent_variant_id": item["parent_variant_id"], "asset_seed": asset_seed,
                                               "asset_role_mapping": role_map, "source_row": variant["_row"],
                                               "expected_outcome": variant["expected_outcome"]})
-    manifest = {"schema": "brain-semantic-matrix.v2", "kind": kind, "matrix": str(Path(matrix).resolve()),
+    manifest = {"schema": "brain-semantic-matrix.v2", "schema_version": 2, "matrix_version": 2,
+                "kind": kind, "matrix": str(Path(matrix).resolve()),
                 "run_profile": run_profile, "seed": seed,
                 "asset_seed_algorithm": "sha256(brain-semantic-matrix.v2|root|asset|case_id|sample)[:8]",
                 "case_count": len(spec["cases"]),

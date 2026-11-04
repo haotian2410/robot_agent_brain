@@ -82,7 +82,13 @@ def main(argv=None):
     args = parser().parse_args(argv)
     try:
         if args.command == "batch-compile":
-            if args.matrix_version == 2:
+            # ``--matrix-version`` is the explicit v2 switch.  Keep
+            # ``--schema-version 2`` as an equivalent spelling because the
+            # original public examples documented that flag.  Never route a
+            # v2 workbook through the historical v1 importer: doing so can
+            # silently truncate variants and treats the variants column as a
+            # bag of values instead of complete expressions.
+            if args.matrix_version == 2 or args.schema_version == 2:
                 from .batch_matrix_v2 import compile_semantic_matrix_v2
                 document, manifest = compile_semantic_matrix_v2(
                     args.matrix, kind=args.kind, asset_roles=args.asset_roles,

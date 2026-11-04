@@ -2,12 +2,17 @@
 
 ## 目标
 
-v2 用两份 Excel 维护场景编辑和已知场景测试：
+本仓库的正式 `brain-semantic-matrix.v2` 维护入口是：
 
-- `examples/matrices/generated_edit_matrix_v2.xlsx`：从空/引导桌面生成对象，再验证位置、旋转、颜色、移动、关系和回滚。
-- `examples/matrices/known_scene_matrix_v2.xlsx`：针对 OLS 预设场景做查询、连续编辑、原始场景和能力边界验证。
+- `docs/semantic-refactor/02_semantic_test_matrix.xlsx`：20 个功能行、115 条完整表达、27 条回归断言。
 
-Excel 是维护入口，编译后才交给批处理器。v1 文件和 JSON 继续保留。
+它同时描述生成/编辑、查询、原始场景、目录演进和机器人 profile 边界；`kind=generated_edit|known_scene` 只是执行层选择，不是两套不同的语义真值。Excel 是维护入口，编译后才交给批处理器。v1 文件继续保留。
+
+仓库中 `examples/matrices/generated_edit_matrix_v2.xlsx` 和
+`examples/matrices/known_scene_matrix_v2.xlsx` 是历史两表样例，只有旧的
+`matrix`/`README` 结构，不是本规范的 v2 workbook。它们不会被 v2 importer
+接受，也不能使用旧 `compile_matrix` 冒充 v2；如需迁移，必须补齐本规范的
+`variants`、回归断言和其它说明 sheet，或直接维护正式 workbook。
 
 ## OLS 资产词表
 
@@ -57,9 +62,16 @@ python scripts/build_batch_asset_catalog.py \
   --root /home/cscvlab/lht/webeditor_runtime/ObjectLibraryServer-1.0.7-dev-a6bc69a/data \
   --output config/batch_asset_catalog.json
 
-robot-brain batch-compile --matrix examples/matrices/generated_edit_matrix_v2.xlsx \
-  --kind generated_edit --asset-catalog config/batch_asset_catalog.json \
-  --schema-version 2 --seed 20261103 --output examples/batch_sessions_generated_v2.json
+robot-brain batch-compile --matrix docs/semantic-refactor/02_semantic_test_matrix.xlsx \
+  --kind generated_edit --asset-roles docs/semantic-refactor/07_asset_roles_template.json \
+  --asset-catalog config/batch_asset_catalog.json \
+  --matrix-version 2 --seed 20261103 --output var/semantic-v2/generated.json
+
+# `--schema-version 2` 是同一 v2 分派的兼容写法；不会回退到 v1。
+robot-brain batch-compile --matrix docs/semantic-refactor/02_semantic_test_matrix.xlsx \
+  --kind known_scene --asset-roles docs/semantic-refactor/07_asset_roles_template.json \
+  --asset-catalog config/batch_asset_catalog.json \
+  --schema-version 2 --seed 20261103 --output var/semantic-v2/known.json
 ```
 
 已知场景同样使用 `--kind known_scene`。编译失败必须指出 sheet/行/列；不得生成不完整 JSON。编译 manifest 中的 `covered_asset_keys` 和 `uncovered_asset_keys` 用于检查覆盖率。
