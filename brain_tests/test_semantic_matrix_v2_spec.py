@@ -100,6 +100,10 @@ def test_expected_json_deep_schema_accepts_route_operation_shapes():
     _validate_expected_contract({
         "route": "robot_task", "operation": "place", "executed": False,
     }, "plan_ready", row)
+    _validate_expected_contract({
+        "route": "scene_edit", "operations": [{"operation": "rotate", "target_role": "object_a",
+                                                   "axis": "z", "angle_deg": 90}],
+    }, "scene_updated", row)
 
 
 @pytest.mark.parametrize(
@@ -115,6 +119,8 @@ def test_expected_json_deep_schema_accepts_route_operation_shapes():
         ({"route": "scene_query", "query_type": "selection", "target_role": "object_a",
           "selection": "nearest"}, "answered", "selection_requires_reference_role"),
         ({"route": "robot_task", "operation": "place", "executed": True}, "plan_ready", "plan_ready_requires_executed=false"),
+        ({"route": "scene_edit", "operations": [{"operation": "replace", "target_role": "object_a"}]},
+         "scene_updated", "replacement_role_missing"),
     ],
 )
 def test_expected_json_deep_schema_rejects_malformed_nested_contract(payload, outcome, message):

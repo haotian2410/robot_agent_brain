@@ -123,11 +123,19 @@ def _validate_operation_token(value: Any, row: dict[str, Any], index: int) -> No
     operation = value.get("operation", value.get("type"))
     if not isinstance(operation, str) or operation not in SCENE_EDIT_OPERATIONS:
         _contract_error(row, f"{path}.operation_invalid")
-    for name in ("target_role", "reference_role", "replacement_role"):
-        if name in value and value[name] is not None and (not isinstance(value[name], str) or not value[name].strip()):
-            _contract_error(row, f"{path}.{name}_type=string")
-    if "count" in value and (not isinstance(value["count"], int) or isinstance(value["count"], bool) or value["count"] < 1):
-        _contract_error(row, f"{path}.count_type=positive_integer")
+    # Object-form operations are the extensible representation for new
+    # matrices.  Reuse the route-specific validator so nested entries receive
+    # the same operation, relation, geometry and scalar checks as a top-level
+    # operation.  Drop a nested ``operations`` key to avoid recursive oracle
+    # contracts; one matrix variant represents one atomic expectation.
+    nested = dict(value)
+    nested.pop("operations", None)
+    nested["operation"] = operation
+    nested["route"] = "scene_edit"
+    try:
+        _validate_expected_contract(nested, "scene_updated", row)
+    except BatchMatrixError as exc:
+        raise BatchMatrixError(f"{exc}:at={path}") from exc
 
 
 def _validate_expected_contract(expected: dict[str, Any], outcome: str, row: dict[str, Any]) -> None:
