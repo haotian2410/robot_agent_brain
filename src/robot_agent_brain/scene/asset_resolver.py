@@ -19,7 +19,36 @@ class AssetResolver:
         self.category_aliases = {k.strip().casefold(): v.strip().casefold() for k, v in (category_aliases or {}).items()}
         self.default_refs = {k.strip().casefold(): v for k, v in (default_refs or {}).items()}
 
-    def resolve(self, entity, *, infer_category=False, allow_default=False, allow_color_override=False):
+    def _resolve_asset_key(self, asset_key: str):
+        """Resolve the exact model selected by the v3 catalog snapshot.
+
+        The wire key is deliberately namespaced (``model:<id>``), while each
+        adapter owns its metadata-ref prefix.  Looking up the matching catalog
+        entry keeps that prefix out of prompts and avoids semantic-name
+        re-resolution when OLS contains same-name variants.
+        """
+        if not isinstance(asset_key, str) or not asset_key.startswith("model:"):
+            raise ValueError("asset_catalog_key_invalid: " + str(asset_key))
+        snapshot = self.catalog.catalog_snapshot(aliases={}) if hasattr(self.catalog, "catalog_snapshot") else None
+        item = next((row for row in (snapshot.models if snapshot is not None else ())
+                     if row.asset_key == asset_key), None)
+        if item is None:
+            raise ValueError("asset_catalog_key_invalid: " + asset_key)
+        try:
+            return self.catalog.resolve(item.metadata_ref, asset_type="model")
+        except (LookupError, ValueError) as exc:
+            raise ValueError("asset_catalog_key_unresolvable: " + asset_key) from exc
+
+    def resolve(self, entity, *, infer_category=False, allow_default=False, allow_color_override=False,
+                asset_key=None):
+        if asset_key is not None:
+            model = self._resolve_asset_key(asset_key)
+            if entity.color and not entity.tags:
+                return AssetBinding(model, [f"source=asset_catalog: {asset_key}"], ColorResolver.resolve(entity.color))
+            if entity.tags:
+                if not matches_features(model, entity):
+                    raise ValueError("asset_feature_missing: " + entity.semantic_name)
+            return AssetBinding(model, [f"source=asset_catalog: {asset_key}"])
         name = entity.semantic_name.strip().casefold()
         name = self.aliases.get(name, name)
         category = entity.category.strip().casefold()

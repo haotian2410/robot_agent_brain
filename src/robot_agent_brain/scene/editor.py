@@ -67,6 +67,7 @@ class SceneEditor:
         selected_targets = {}
         all_operations = []
         assumptions = []
+        asset_choices = {choice.entity_id: choice.asset_key for choice in intent.asset_choices}
         for edit in intent.operations:
             if edit.operation == "update_properties":
                 if set(edit.properties) != {"color"}:
@@ -97,7 +98,8 @@ class SceneEditor:
                 reference = references[0]
             entity = next(item for item in intent.entities if item.entity_id == edit.target)
             if edit.operation == "add":
-                operations, add_assumptions = self._add(edit, entity, current, preview.next_scene_object_id, reference, defaults)
+                operations, add_assumptions = self._add(edit, entity, current, preview.next_scene_object_id, reference, defaults,
+                                                        asset_key=asset_choices.get(entity.entity_id))
                 assumptions.extend(add_assumptions)
             else:
                 matches = ([SceneIndex(current).object(i) for i in selected_targets[edit.target]]
@@ -106,7 +108,8 @@ class SceneEditor:
                 selected_targets[edit.target] = [obj.object_id_in_scene for obj in matches]
                 if edit.operation == "replace":
                     replacement = next(e for e in intent.entities if e.entity_id == edit.replacement_entity)
-                    operations = self._replace(matches, replacement, current, preview.next_scene_object_id)
+                    operations = self._replace(matches, replacement, current, preview.next_scene_object_id,
+                                               asset_key=asset_choices.get(replacement.entity_id))
                 else:
                     operations = self._modify(edit, matches, reference, current)
             patch = ScenePatch(scene_id=current.scene_id, base_scene_version=current.scene_version, operations=operations)
@@ -246,10 +249,11 @@ class SceneEditor:
                    or bounds[1][i] > configured.workspace_max[i] + 1e-9 for i in (0, 1)):
                 raise ValueError("scene_edit_workspace_exceeded")
 
-    def _replace(self, matches, entity, scene, next_id):
+    def _replace(self, matches, entity, scene, next_id, *, asset_key=None):
         if len(matches) != entity.count or entity.all_available:
             raise ValueError("scene_replace_cardinality_mismatch")
-        model = AssetResolver(self.assets, aliases=self.aliases, category_aliases=self.category_aliases).resolve(entity).model
+        model = AssetResolver(self.assets, aliases=self.aliases, category_aliases=self.category_aliases).resolve(
+            entity, asset_key=asset_key).model
         if getattr(model, "asset_type", None) == "robot":
             raise ValueError("scene_replace_robot_unsupported")
         index, facts = SceneIndex(scene), self._facts(self.scale_defaults)
@@ -471,10 +475,10 @@ class SceneEditor:
         return ScenePatchOperation(action="upsert_component", object_id_in_scene=identifier,
             component=SceneComponent(component_type="Transform", properties=properties))
 
-    def _add(self, edit, entity, scene, next_id, reference, defaults):
+    def _add(self, edit, entity, scene, next_id, reference, defaults, *, asset_key=None):
         binding = AssetResolver(self.assets, aliases=self.aliases, category_aliases=self.category_aliases,
                                 default_refs=self.default_scene_edit_assets).resolve(
-                                    entity, allow_default=True, allow_color_override=True)
+                                    entity, allow_default=True, allow_color_override=True, asset_key=asset_key)
         model = binding.model
         count = entity.count
         if entity.all_available:
