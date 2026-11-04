@@ -280,7 +280,7 @@ class ServiceBatchRunner:
         if agent.get("qwen") != "ready":
             raise RuntimeError("batch_qwen_unavailable")
         asset_detail = agent.get("asset_detail")
-        if isinstance(asset_detail, dict) and asset_detail.get("matched") is not True:
+        if not isinstance(asset_detail, dict) or asset_detail.get("matched") is not True:
             raise RuntimeError("batch_assets_unavailable")
         tasks = agent.get("tasks") or {}
         if tasks.get("active_task_id") is not None or int(tasks.get("queued") or 0) != 0:
