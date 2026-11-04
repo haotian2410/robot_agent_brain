@@ -31,7 +31,52 @@ INVARIANT_COLUMNS = ("test_id", "priority", "module", "name", "input", "assertio
 ALLOWED_POLICIES = {"none", "fixed", "seed", "all"}
 ALLOWED_OUTCOMES = {"scene_updated", "answered", "clarification_required", "safe_rejection",
                     "plan_ready", "capability_unsupported", "blocked", "semantic_accepted", "robot_setup_updated"}
+ALLOWED_EXPECTED_ROUTES = {"scene_edit", "scene_query", "robot_task", "robot_config"}
 V2_PLACEHOLDERS = {"object_a", "object_b", "placement_1", "placement_2", "surface_1"}
+
+
+def _validate_expected_contract(expected: dict[str, Any], outcome: str, row: dict[str, Any]) -> None:
+    """Validate the small, machine-readable oracle contract in each variant.
+
+    ``expected_json`` is intentionally not a provider payload: it describes
+    the assertion an oracle must make.  Still, accepting an arbitrary object
+    makes a typo in a workbook indistinguishable from a real test.  Validate
+    the route-specific discriminator and the minimum fields needed by the
+    corresponding oracle while leaving feature-specific assertion keys open.
+    """
+    route = expected.get("route")
+    if route is None:
+        if outcome == "clarification_required" and expected.get("actionable_payload_absent") is not True:
+            raise BatchMatrixError(
+                f"semantic_matrix_v2_expected_contract_invalid:variants!expected_json{row['_row']}:"
+                "clarification_requires_actionable_payload_absent=true")
+        if outcome not in {"clarification_required", "semantic_accepted"}:
+            raise BatchMatrixError(
+                f"semantic_matrix_v2_expected_contract_invalid:variants!expected_json{row['_row']}:route_missing")
+        return
+    if route not in ALLOWED_EXPECTED_ROUTES:
+        raise BatchMatrixError(
+            f"semantic_matrix_v2_expected_contract_invalid:variants!expected_json{row['_row']}:route={route}")
+    if route == "scene_edit":
+        operation = expected.get("operation")
+        operations = expected.get("operations")
+        if operation is None and not (isinstance(operations, list) and operations):
+            raise BatchMatrixError(
+                f"semantic_matrix_v2_expected_contract_invalid:variants!expected_json{row['_row']}:"
+                "scene_edit_requires_operation_or_operations")
+        if operation is not None and not isinstance(operation, str):
+            raise BatchMatrixError(
+                f"semantic_matrix_v2_expected_contract_invalid:variants!expected_json{row['_row']}:operation_type")
+    elif route == "scene_query":
+        if not isinstance(expected.get("query_type"), str) or not isinstance(expected.get("target_role"), str):
+            raise BatchMatrixError(
+                f"semantic_matrix_v2_expected_contract_invalid:variants!expected_json{row['_row']}:"
+                "scene_query_requires_query_type_and_target_role")
+    elif route == "robot_config":
+        if expected.get("mode") not in {"single", "dual"} or expected.get("profile_registered") is not True:
+            raise BatchMatrixError(
+                f"semantic_matrix_v2_expected_contract_invalid:variants!expected_json{row['_row']}:"
+                "robot_config_requires_registered_profile")
 
 
 def _openpyxl():
@@ -142,6 +187,7 @@ def read_semantic_matrix_v2(path: str | Path, *, strict_counts: bool = False) ->
             raise BatchMatrixError(f"semantic_matrix_v2_expected_json_invalid:variants!expected_json{item['_row']}") from exc
         if not isinstance(expected, dict):
             raise BatchMatrixError(f"semantic_matrix_v2_expected_json_object:variants!expected_json{item['_row']}")
+        _validate_expected_contract(expected, expected_outcome, item)
         item = {**item, "case_id": case_id, "variant_id": variant_id,
                 "instruction_template": template, "expected_json_value": expected,
                 "expected_outcome": expected_outcome}

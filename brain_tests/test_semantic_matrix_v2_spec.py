@@ -1,7 +1,10 @@
 import json
 from pathlib import Path
 
-from robot_agent_brain.batch_matrix_v2 import compile_semantic_matrix_v2, read_semantic_matrix_v2
+import pytest
+
+from robot_agent_brain.batch_matrix_v2 import (BatchMatrixError, _validate_expected_contract,
+                                               compile_semantic_matrix_v2, read_semantic_matrix_v2)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,3 +56,20 @@ def test_v2_catalog_scenarios_survive_compilation_for_isolated_contract_cases():
     }
     manifest_t19 = [item for item in manifest["rows"] if item.get("case_id") == "T19"]
     assert all("catalog_scenario" in item for item in manifest_t19)
+
+
+def test_expected_json_route_contract_rejects_shallow_oracle_typos():
+    row = {"_row": 17}
+    with pytest.raises(BatchMatrixError, match="scene_edit_requires_operation"):
+        _validate_expected_contract({"route": "scene_edit"}, "scene_updated", row)
+    with pytest.raises(BatchMatrixError, match="scene_query_requires_query_type"):
+        _validate_expected_contract({"route": "scene_query", "query_type": "count"}, "answered", row)
+    with pytest.raises(BatchMatrixError, match="route_missing"):
+        _validate_expected_contract({"scene_unchanged": True}, "safe_rejection", row)
+
+
+def test_expected_json_route_contract_keeps_clarification_and_catalog_cases_open():
+    _validate_expected_contract({"actionable_payload_absent": True, "required_missing_slot": "reference"},
+                                "clarification_required", {"_row": 18})
+    _validate_expected_contract({"allowed_catalog_names": ["mug"], "selected_asset_key_in_request": True},
+                                "semantic_accepted", {"_row": 19})
