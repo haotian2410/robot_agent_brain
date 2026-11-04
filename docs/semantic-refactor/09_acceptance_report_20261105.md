@@ -1,6 +1,7 @@
 # Semantic Refactor C0–C7 验收报告（2026-11-05）
 
-> 报告使用的源代码基线为 `ee4baa0`，文档最新提交为 `1579325`，已同步到远端 `main`。
+> 报告使用的源代码基线为 `a81f9de`；文档此前提交 `1579325` 已同步到远端 `main`，本次
+> 代码/证据补充尚未再次推送。
 > 文中历史段落若出现旧 SHA，
 > 仅表示当时的证据快照，不代表当前代码版本。
 
@@ -11,7 +12,7 @@ C0–C6 的代码、结构化校验和自动回归已完成；C7 的首五行真
 fixture 上完成，T03/T04/T05 共 26 条表达全部通过独立场景 oracle。完整 20 行、
 115 条表达的真实 Qwen/Gateway 验收尚未完成，不能据此宣称整个矩阵通过。
 
-源代码基线：`ee4baa0`；远端文档基线：`1579325`。generated campaign
+源代码基线：`a81f9de`；远端文档基线：`1579325`。generated campaign
 的服务运行证据以 `50da3d1` 语义代码基线记录，后续提交仅补充证据分类、hash 和文档。
 
 ## 运行基线
@@ -82,9 +83,9 @@ robot-brain batch-compile --matrix-version 2 \
 
 ## C7 真实验收
 
-### 当前 HEAD 的 generated campaign 证据
+### `ee4baa0` 代码基线的 generated campaign 证据
 
-当前 HEAD 运行的 generated campaign 证据目录：
+此前在 `ee4baa0` 代码基线上运行的 generated campaign 证据目录：
 
 ```text
 /tmp/semantic-c7-full.X3PAbX/campaign-20261105-044141-20261105-641ab6ea/
@@ -114,6 +115,19 @@ robot-brain batch-compile --matrix-version 2 \
 本次实际执行 70 个 turn：58 个完整通过、7 个协议/运行时失败、5 个断言失败、
 3 个截图证据阻塞；另外 9 个根 stage 因缺少隔离 fixture 阻塞。此统计不等于
 115 条表达全部通过。
+
+### 当前 HEAD 的 run-profile 与空场景预检复测
+
+在 `a81f9de` 上重新执行了 `independent_first_five` campaign：
+
+```text
+/tmp/semantic-c7-emptyfix-20261105-055705/campaign-20261105-055706-20261103-c41e0182/
+```
+
+T01、T06 的空场景首轮可以进入真实服务；T02–T05 因官方包未提供
+`single_a_corner`/`single_a_center` fixture，按 runbook 标记为 `blocked_fixture`，
+没有把它们误报成语义失败。该复测同时验证了两个修复：campaign 与编译器使用同一个
+run profile 父依赖图；空场景在 Brain bootstrap 前没有 Camera 时不被批量启动预检错误阻塞。
 
 ### 首五行完整表达
 
