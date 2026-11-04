@@ -41,7 +41,14 @@ class BrainApplication:
                 planner_max_completion_tokens=self.config.planner_max_completion_tokens)
         self.provider = provider
         if hasattr(provider, "set_asset_catalog"):
-            provider.set_asset_catalog(self.assets, aliases=aliases,
+            # Semantic aliases remain available to the deterministic scene
+            # resolver (and to old replay fixtures), but they are not part of
+            # the live OLS vocabulary.  In particular a historical
+            # ``cup -> mug`` entry must not make Qwen believe that two
+            # different OLS assets are interchangeable.  The model receives
+            # the complete canonical catalog and can choose ``cup`` whenever
+            # that asset is actually published by OLS.
+            provider.set_asset_catalog(self.assets, aliases={},
                                        registered_profiles=list(self.config.robot_profiles.profiles))
         if self.config.vision and (platform_factory is LocalScenePlatform or not hasattr(provider, "detect")):
             raise BrainError("vision_requires_rendering_platform", "configuration",
@@ -120,14 +127,17 @@ class BrainApplication:
         self.pipeline.grounder.category_aliases = self.pipeline.category_aliases
         self.pipeline.scene_editor.aliases = aliases
         self.pipeline.scene_editor.category_aliases = self.pipeline.category_aliases
+        # Keep live catalog snapshots canonical; ``aliases`` is only for
+        # legacy grounding/replay and must not rewrite one OLS asset name into
+        # another in the Qwen prompt.
         self.pipeline.asset_catalog = self.assets.catalog_snapshot(
-            aliases=aliases, registered_profiles=list(self.config.robot_profiles.profiles))
+            aliases={}, registered_profiles=list(self.config.robot_profiles.profiles))
         self.bootstrapper.assets = self.assets
         self.bootstrapper.resolver.catalog = self.assets
         self.bootstrapper.resolver.aliases = dict(aliases)
         self.codec.assets = self.assets
         if hasattr(self.provider, "set_asset_catalog"):
-            self.provider.set_asset_catalog(self.assets, aliases=aliases,
+            self.provider.set_asset_catalog(self.assets, aliases={},
                                             registered_profiles=list(self.config.robot_profiles.profiles))
         return True
 

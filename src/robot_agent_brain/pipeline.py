@@ -100,7 +100,12 @@ class BrainPipeline:
         if aliases is not None:
             self.aliases = aliases
         self.registered_profiles = tuple(sorted(set(registered_profiles or ())))
-        self.asset_catalog = (assets.catalog_snapshot(aliases=self.aliases,
+        # The live provider must see canonical OLS names, not the legacy
+        # resolver alias table.  Passing that table here used to expose the
+        # historical ``cup -> mug`` mapping and defeated catalog-driven
+        # asset selection.  Keep ``self.aliases`` for deterministic grounding
+        # of existing scene instances and old replay inputs only.
+        self.asset_catalog = (assets.catalog_snapshot(aliases={},
                                                       registered_profiles=self.registered_profiles)
                               if hasattr(assets, "catalog_snapshot") else None)
         from .contracts.workspace import WorkspaceSemanticPolicy
@@ -117,6 +122,64 @@ class BrainPipeline:
         self.vision_provider = vision_provider
         self.vision_fallback = VisionFallbackGrounder()
         self.domain_policy = TaskDomainPolicy()
+
+    def _understanding_scene_context(self, scene):
+        """Build the bounded, read-only scene context sent to Qwen.
+
+        The first-stage model must receive more than an object count when a
+        turn refers to an existing object (or to the primary tabletop).  Keep
+        this summary semantic and path-free: geometry, mesh data and absolute
+        metadata paths remain Python-only.  Object IDs are included solely as
+        stable selectors in the input context; the prompt still forbids the
+        model from inventing or emitting them in its semantic payload.
+        """
+        if scene is None:
+            # A missing session scene is a bootstrap request.  The configured
+            # tabletop policy supplies the primary support that the bootstrap
+            # stage will materialize; an uploaded *empty* SceneConfig below is
+            # deliberately different and has no implicit table.
+            return {
+                "basis": "bootstrap",
+                "primary_table_available": True,
+                "primary_table_object_id": None,
+                "object_count": 0,
+                "objects": [],
+                "catalog_revision": self.asset_catalog.revision if self.asset_catalog is not None else None,
+            }
+
+        index = SceneIndex(scene)
+        table_aliases = {"table", "desk", "desktop", "work_table", "coffee_table", "桌子", "桌面", "台面"}
+        objects = []
+        table_ids = []
+        for item in sorted(scene.objects, key=lambda value: value.object_id_in_scene):
+            oid = item.object_id_in_scene
+            semantic = index.semantic(oid)
+            transform = index.transform(oid)
+            renderer = index.properties(oid, "MeshRenderer")
+            semantic_name = semantic.semantic_name if semantic is not None else ""
+            category = semantic.category if semantic is not None else ""
+            canonical_name = self.aliases.get(semantic_name.casefold(), semantic_name.casefold())
+            is_table = (canonical_name in table_aliases
+                        or category.casefold() in {"surface", "support_surface", "table"})
+            if is_table:
+                table_ids.append(oid)
+            objects.append({
+                "object_id": oid,
+                "object_name": item.object_name_in_scene,
+                "semantic_name": semantic_name,
+                "category": category,
+                "support": semantic.support if semantic is not None else None,
+                "parent": transform.parent if transform is not None else None,
+                "color_override": renderer.forceOverrideColor if renderer is not None else None,
+            })
+        return {
+            "basis": "current",
+            "primary_table_available": len(table_ids) == 1,
+            "primary_table_object_id": table_ids[0] if len(table_ids) == 1 else None,
+            "object_count": len(scene.objects),
+            "objects": objects,
+            "catalog_revision": self.asset_catalog.revision if self.asset_catalog is not None else None,
+        }
 
     def _validate_robot_platform(self, scene, robot_profile=None):
         """Guard the legacy single-arm exporter against platform mismatch.
@@ -186,7 +249,7 @@ class BrainPipeline:
         # Updating the provider prompt and the request together prevents a new
         # catalog from being used to interpret an old response (or vice versa).
         if hasattr(self.assets, "catalog_snapshot"):
-            current_catalog = self.assets.catalog_snapshot(aliases=self.aliases,
+            current_catalog = self.assets.catalog_snapshot(aliases={},
                                                           registered_profiles=self.registered_profiles)
             if self.asset_catalog is None or current_catalog.revision != self.asset_catalog.revision:
                 self.asset_catalog = current_catalog
@@ -203,12 +266,7 @@ class BrainPipeline:
             # introduced in this turn. Do not reject it before understanding.
             deferred_reference_error = exc
             provider_instruction = instruction
-        scene_context = {
-            "basis": "current" if scene is not None else "bootstrap",
-            "primary_table_available": bool(scene is not None),
-            "object_count": len(scene.objects) if scene is not None else 0,
-            "catalog_revision": self.asset_catalog.revision if self.asset_catalog is not None else None,
-        }
+        scene_context = self._understanding_scene_context(scene)
         request = TaskUnderstandingRequest(instruction=provider_instruction,
                                            asset_catalog=self.asset_catalog,
                                            workspace=self.workspace_context,

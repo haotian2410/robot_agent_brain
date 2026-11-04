@@ -145,6 +145,12 @@ def _check_expectation(session_spec, result: dict, state: dict) -> tuple[str, st
         ok = actual in {"failed", "rejected", "safe_rejection", "clarification_required"}
     elif expected == "query_answered":
         ok = actual in {"answered", "query_answered"}
+    elif expected == "semantic_accepted":
+        # ``semantic_accepted`` is a matrix-layer label.  The service may
+        # expose the accepted turn as a scene update, answer, or an explicit
+        # accepted outcome depending on the route; all are valid only when
+        # the task did not fail and no payload error was returned.
+        ok = actual in {"accepted", "scene_updated", "answered", "robot_setup_updated"}
     else:
         ok = actual == expected or (expected == "success" and actual not in {"failed", "clarification_required", "unsupported"})
     allowed = set(session_spec.expected_error_codes or [])
@@ -397,6 +403,14 @@ class ServiceBatchRunner:
                               "expected_error_codes": session_spec.expected_error_codes,
                               "expected_scene_change": session_spec.expected_scene_change,
                               "assertion_profile": session_spec.assertion_profile,
+                              "variant_id": session_spec.variant_id, "equivalence_group": session_spec.equivalence_group,
+                              "parent_variant_id": session_spec.parent_variant_id,
+                              "fixture_id": session_spec.fixture_id, "asset_seed": session_spec.asset_seed,
+                              "parent_run_id": getattr(session_spec, "parent_run_id", None),
+                              "parent_scene_path": getattr(session_spec, "parent_scene_path", None),
+                              "parent_scene_digest": getattr(session_spec, "parent_scene_digest", None),
+                              "baseline_digest": getattr(session_spec, "baseline_digest", None),
+                              "role_bindings": getattr(session_spec, "role_bindings", {}) or {},
                               "browserID": browser_id, "turns": len(session_spec.instructions)}
             (session_root / "session.json").write_text(json.dumps(session_record, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -414,6 +428,14 @@ class ServiceBatchRunner:
                          "expected_error_codes": session_spec.expected_error_codes,
                          "expected_scene_change": session_spec.expected_scene_change,
                          "assertion_profile": session_spec.assertion_profile,
+                         "variant_id": session_spec.variant_id, "equivalence_group": session_spec.equivalence_group,
+                         "parent_variant_id": session_spec.parent_variant_id,
+                         "fixture_id": session_spec.fixture_id, "asset_seed": session_spec.asset_seed,
+                         "parent_run_id": getattr(session_spec, "parent_run_id", None),
+                         "parent_scene_path": getattr(session_spec, "parent_scene_path", None),
+                         "parent_scene_digest": getattr(session_spec, "parent_scene_digest", None),
+                         "baseline_digest": getattr(session_spec, "baseline_digest", None),
+                         "role_bindings": getattr(session_spec, "role_bindings", {}) or {},
                          "browserID": browser_id, "status": status, "turns": rows}
                 if error is not None:
                     value["error"] = error
@@ -507,7 +529,14 @@ class ServiceBatchRunner:
                         outcome = result.get("outcome", "failed")
                         assertion_result, assertion_error = _check_expectation(session_spec, result, state)
                         screenshot_ok = screenshot.get("status") == "captured" or not self.screenshot_required
-                        ok = bool(state.get("terminal")) and outcome not in {"failed"} and screenshot_ok
+                        # A safe rejection or a correct clarification is a
+                        # passing matrix result when it matches the row's
+                        # expected outcome.  The old implementation rejected
+                        # every ``outcome=failed`` before consulting the
+                        # expectation, making T17/T18 impossible to pass.
+                        semantic_ok = (assertion_result == "passed" if session_spec.expected_outcome
+                                       else outcome not in {"failed"})
+                        ok = bool(state.get("terminal")) and semantic_ok and screenshot_ok
                         if assertion_result == "failed":
                             ok = False
                         if result.get("executed", False) is not False:
@@ -531,7 +560,17 @@ class ServiceBatchRunner:
                                "expected_error_codes": session_spec.expected_error_codes,
                                "expected_scene_change": session_spec.expected_scene_change,
                                "assertion_profile": session_spec.assertion_profile,
-                               "assertion_result": assertion_result}
+                               "assertion_result": assertion_result,
+                               "variant_id": session_spec.variant_id,
+                               "equivalence_group": session_spec.equivalence_group,
+                               "parent_variant_id": session_spec.parent_variant_id,
+                               "fixture_id": session_spec.fixture_id,
+                               "asset_seed": session_spec.asset_seed,
+                               "parent_run_id": getattr(session_spec, "parent_run_id", None),
+                               "parent_scene_path": getattr(session_spec, "parent_scene_path", None),
+                               "parent_scene_digest": getattr(session_spec, "parent_scene_digest", None),
+                               "baseline_digest": getattr(session_spec, "baseline_digest", None),
+                               "role_bindings": getattr(session_spec, "role_bindings", {}) or {}}
                         if assertion_error:
                             row["assertion_error"] = assertion_error
                         results.append(row)

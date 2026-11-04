@@ -963,6 +963,26 @@ def parse_qwen_turn(value, instruction: str) -> BrainTurn:
             return BrainTurn(status=TurnStatus.CLARIFICATION_REQUIRED,
                              turn_kind=TurnKind.ROBOT_TASK, instruction=instruction,
                              clarification_question="请说明对应的门/抽屉把手或明确参照物，不能仅指定要打开的门。")
+        # Keep the historical robot envelope available for old replay files
+        # and direct test providers.  The v3.1 prompt uses the canonical
+        # ``entity_id``/``semantic_name``/``operation`` fields and is parsed
+        # by the strict wire model below; pre-v3.1 payloads use ``id``/``name``
+        #/``type`` and must not be rejected merely because the live scene
+        # routes were tightened.  This is the explicit compatibility boundary
+        # promised by the v2 -> v3 migration.
+        canonical_robot = any(isinstance(item, dict) and "operation" in item
+                              for item in (value.get("operations") or [])) \
+            or any(isinstance(item, dict) and ("entity_id" in item or "semantic_name" in item)
+                   for item in (value.get("entities") or []))
+        if value.get("protocol_version") != "task_understanding.v3.1" and not canonical_robot:
+            try:
+                return TaskParseOutput.model_validate(value).to_brain_turn(instruction)
+            except (ValidationError, ValueError) as exc:
+                if _open_close_reference_missing(value, exc):
+                    return BrainTurn(status=TurnStatus.CLARIFICATION_REQUIRED,
+                                     turn_kind=TurnKind.ROBOT_TASK, instruction=instruction,
+                                     clarification_question="请说明对应的门/抽屉把手或明确参照物，不能仅指定要打开的门。")
+                raise
         return _parse_robot_task_wire(value, instruction)
 
     # Scene edits use the staged wire -> normalize path.  In particular,

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ VARIANT_COLUMNS = (
     "instruction_template", "expected_outcome", "expected_json", "precondition",
     "catalog_scenario", "notes", "status",
 )
+INVARIANT_COLUMNS = ("test_id", "priority", "module", "name", "input", "assertion")
 ALLOWED_POLICIES = {"none", "fixed", "seed", "all"}
 ALLOWED_OUTCOMES = {"scene_updated", "answered", "clarification_required", "safe_rejection",
                     "plan_ready", "capability_unsupported", "blocked", "semantic_accepted", "robot_setup_updated"}
@@ -54,7 +56,7 @@ def _required(headers: dict[str, int], columns: tuple[str, ...], sheet: str):
         raise BatchMatrixError(f"semantic_matrix_v2_columns_missing:{sheet}:{','.join(missing)}")
 
 
-def _read_rows(ws, sheet: str, required: tuple[str, ...]) -> list[dict[str, Any]]:
+def _read_rows(ws, sheet: str, required: tuple[str, ...], *, enabled_column: bool = True) -> list[dict[str, Any]]:
     positions = _headers(ws, sheet)
     _required(positions, required, sheet)
     rows = []
@@ -63,7 +65,7 @@ def _read_rows(ws, sheet: str, required: tuple[str, ...]) -> list[dict[str, Any]
             continue
         item = {name: values[index] if index < len(values) else None for name, index in positions.items()}
         item["_row"] = row_number
-        if not _enabled(item.get("enabled")):
+        if enabled_column and not _enabled(item.get("enabled")):
             continue
         rows.append(item)
     return rows
@@ -76,8 +78,34 @@ def read_semantic_matrix_v2(path: str | Path, *, strict_counts: bool = False) ->
     book = _openpyxl().load_workbook(source, read_only=True, data_only=True)
     if "matrix" not in book.sheetnames or "variants" not in book.sheetnames:
         raise BatchMatrixError("semantic_matrix_v2_sheet_missing:matrix,variants")
+    if strict_counts:
+        required_sheets = {"说明", "基线与角色", "方向契约", "回归断言",
+                           "运行配置", "结果模板", "源码依据"}
+        missing_sheets = sorted(required_sheets - set(book.sheetnames))
+        if missing_sheets:
+            raise BatchMatrixError("semantic_matrix_v2_sheet_missing:" + ",".join(missing_sheets))
     matrix = _read_rows(book["matrix"], "matrix", MATRIX_COLUMNS)
     variants = _read_rows(book["variants"], "variants", VARIANT_COLUMNS)
+    if "回归断言" not in book.sheetnames:
+        raise BatchMatrixError("semantic_matrix_v2_sheet_missing:回归断言")
+    # The supplied workbook keeps the invariant sheet reader-facing Chinese
+    # headers.  Normalize them here; matrix/variants intentionally use stable
+    # English contract names.
+    invariant_sheet = book["回归断言"]
+    invariant_headers = _headers(invariant_sheet, "回归断言")
+    invariant_aliases = {
+        "模块": "module", "测试名称": "name", "构造输入": "input",
+        "必须满足的断言": "assertion",
+    }
+    invariant_rows = _read_rows(invariant_sheet, "回归断言",
+                                 ("test_id", "priority", "模块", "测试名称", "构造输入", "必须满足的断言"),
+                                 enabled_column=False)
+    invariants = []
+    for item in invariant_rows:
+        normalized = dict(item)
+        for source_name, target_name in invariant_aliases.items():
+            normalized[target_name] = normalized.pop(source_name)
+        invariants.append(normalized)
     cases = {str(row["case_id"]).strip(): row for row in matrix}
     if len(cases) != len(matrix):
         raise BatchMatrixError("semantic_matrix_v2_duplicate_case_id")
@@ -85,6 +113,8 @@ def read_semantic_matrix_v2(path: str | Path, *, strict_counts: bool = False) ->
         raise BatchMatrixError(f"semantic_matrix_v2_case_count:{len(matrix)}:expected=20")
     if strict_counts and len(variants) != 115:
         raise BatchMatrixError(f"semantic_matrix_v2_variant_count:{len(variants)}:expected=115")
+    if strict_counts and len(invariants) != 27:
+        raise BatchMatrixError(f"semantic_matrix_v2_invariant_count:{len(invariants)}:expected=27")
     expected_first = ["T01", "T02", "T03", "T04", "T05"]
     if [str(row["case_id"]).strip() for row in matrix[:5]] != expected_first:
         raise BatchMatrixError("semantic_matrix_v2_first_five_must_be_T01_T05")
@@ -130,6 +160,10 @@ def read_semantic_matrix_v2(path: str | Path, *, strict_counts: bool = False) ->
             raise BatchMatrixError(f"semantic_matrix_v2_parent_missing:matrix!parent_case_id{row['_row']}:{parent}")
         if parent == case_id:
             raise BatchMatrixError(f"semantic_matrix_v2_parent_self:matrix!parent_case_id{row['_row']}")
+        if parent == "NONE" and policy != "none":
+            raise BatchMatrixError(f"semantic_matrix_v2_parent_policy_without_parent:matrix!parent_variant_policy{row['_row']}:{policy}")
+        if parent != "NONE" and policy == "none":
+            raise BatchMatrixError(f"semantic_matrix_v2_parent_policy_missing:matrix!parent_variant_policy{row['_row']}")
         row["case_id"] = case_id
         row["parent_case_id"] = None if parent == "NONE" else parent
         row["parent_variant_policy"] = policy
@@ -148,6 +182,9 @@ def read_semantic_matrix_v2(path: str | Path, *, strict_counts: bool = False) ->
             raise BatchMatrixError(f"semantic_matrix_v2_positive_counts:matrix!asset_samples{row['_row']}")
         if _cell(row.get("variant_selection")) not in {"all", "enabled"}:
             raise BatchMatrixError(f"semantic_matrix_v2_variant_selection_invalid:matrix!variant_selection{row['_row']}")
+    invariant_ids = [str(item.get("test_id") or "").strip() for item in invariants]
+    if any(not value for value in invariant_ids) or len(invariant_ids) != len(set(invariant_ids)):
+        raise BatchMatrixError("semantic_matrix_v2_duplicate_or_empty_invariant_id")
     # Detect cycles in the case DAG.
     visiting, visited = set(), set()
     def visit(case_id: str):
@@ -163,6 +200,7 @@ def read_semantic_matrix_v2(path: str | Path, *, strict_counts: bool = False) ->
     for case_id in cases:
         visit(case_id)
     return {"path": str(source), "cases": matrix, "variants": variants,
+            "invariants": invariants, "invariant_count": len(invariants),
             "cases_by_id": cases, "variants_by_id": variant_by_id,
             "variants_by_case": variants_by_case, "counts": {"cases": len(matrix), "variants": len(variants)}}
 
@@ -172,27 +210,65 @@ def _stable_index(seed: int, *parts: str, size: int) -> int:
     return int.from_bytes(digest[:8], "big") % size
 
 
-def _asset_for_role(role: str, catalog: dict[str, dict[str, Any]], roles: dict[str, Any], *, seed: int, case_id: str, sample: int) -> dict[str, Any] | None:
+def _derived_seed(seed: int, *parts: str) -> int:
+    """Derive a reproducible axis seed without consuming global PRNG state.
+
+    Matrix v2 deliberately keeps the three axes (asset choice, expression and
+    repeat) independent.  A process-local ``random.Random`` would make adding
+    a row change every later choice, so all derivation is based on stable IDs.
+    """
+    digest = hashlib.sha256(("brain-semantic-matrix.v2|" + str(seed) + "|" +
+                             "|".join(str(part) for part in parts)).encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big")
+
+
+def _asset_for_role(role: str, catalog: dict[str, dict[str, Any]], roles: dict[str, Any], *, seed: int,
+                    case_id: str, sample: int, exclude_names: set[str] | None = None) -> dict[str, Any] | None:
     spec = roles.get(role) if isinstance(roles, dict) else None
     candidates = list(spec.get("candidates", [])) if isinstance(spec, dict) else []
     if not catalog:
         return {"asset_key": candidates[0] if candidates else role, "display_name": candidates[0] if candidates else role, "semantic_name": candidates[0] if candidates else role}
     matching = [item for key, item in sorted(catalog.items())
                 if item.get("semantic_name") in candidates and not item.get("passive_or_platform")]
+    exclude_names = exclude_names or set()
+    distinct = [item for item in matching
+                if str(item.get("semantic_name", "")).casefold() not in exclude_names]
+    if distinct:
+        matching = distinct
     if not matching:
-        # A role with no global candidate can still be filled by any ordinary model.
-        matching = [item for key, item in sorted(catalog.items()) if not item.get("passive_or_platform")]
-    if not matching:
-        return None
+        # Falling back to an arbitrary ordinary model makes a broken role
+        # definition look like a valid semantic test and changes the oracle.
+        # v2 requires the catalog/role contract to fail at compile time.
+        raise BatchMatrixError(f"semantic_matrix_v2_role_candidates_missing:{role}:{','.join(candidates)}")
     return matching[_stable_index(seed, case_id, role, str(sample), size=len(matching))]
 
 
-def _role_mapping(case: dict[str, Any], catalog, roles, seed: int, sample: int) -> dict[str, dict[str, Any]]:
+def _role_mapping(case: dict[str, Any], catalog, roles, seed: int, sample: int,
+                  inherited: dict[str, dict[str, Any]] | None = None) -> dict[str, dict[str, Any]]:
+    """Resolve roles while retaining identities inherited from the parent case.
+
+    A child may introduce a new role (T02 adds ``object_b``), but it must not
+    silently redraw ``object_a``.  This is important for language variants:
+    all expressions in a branch must operate on the exact same asset and
+    physical baseline.
+    """
     result = {}
+    inherited = inherited or {}
     for role_col in ("role_a", "role_b", "placement_1", "placement_2", "surface_1"):
         role = _cell(case.get(role_col))
         if role:
-            result[role] = _asset_for_role(role, catalog, roles, seed=seed, case_id=str(case["case_id"]), sample=sample)
+            if role in inherited:
+                result[role] = deepcopy(inherited[role])
+            else:
+                # The two operation slots are intended to denote distinct
+                # objects.  Exclude an already selected semantic name when a
+                # different candidate exists, while allowing a one-candidate
+                # catalog to remain explicit rather than fabricating an asset.
+                exclude = ({str(item.get("semantic_name", "")).casefold() for item in result.values()}
+                           if role in {"object_b", "placement_2"} else set())
+                result[role] = _asset_for_role(role, catalog, roles, seed=seed,
+                                               case_id=str(case["case_id"]), sample=sample,
+                                               exclude_names=exclude)
     return {key: value for key, value in result.items() if value is not None}
 
 
@@ -225,17 +301,59 @@ def compile_semantic_matrix_v2(matrix: str | Path, *, kind: str = "generated_edi
         raise BatchMatrixError(f"semantic_matrix_v2_kind_invalid:{kind}")
     roles = json.loads(Path(asset_roles).read_text(encoding="utf-8")) if asset_roles else {}
     catalog = load_asset_catalog(asset_catalog) if asset_catalog else {}
-    if run_profile == "independent_first_five":
+    catalog_payload = json.dumps(catalog, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    catalog_revision = "sha256:" + hashlib.sha256(catalog_payload.encode("utf-8")).hexdigest()
+    # Profiles alter execution topology only; never mutate the reader's source
+    # rows in place because callers may reuse ``spec`` for a second compile.
+    if run_profile in {"independent_first_five", "center_empty"}:
         for case in spec["cases"]:
             if str(case["case_id"]) in {"T01", "T02", "T03", "T04", "T05"}:
-                case["parent_case_id"] = None; case["parent_variant_policy"] = "none"; case["parent_variant_id"] = None
+                case["parent_case_id"] = None
+                case["parent_variant_policy"] = "none"
+                case["parent_variant_id"] = None
+            if run_profile == "center_empty" and str(case["case_id"]) == "T02":
+                # The official T02 center expression is a positive region
+                # check, so it needs the declared empty-table baseline rather
+                # than T01's occupied center.  The campaign still records this
+                # profile decision in its manifest.
+                case["fixture_id"] = "center_empty"
     sessions, manifest_rows = [], []
+    # Matrix rows are normally topologically ordered.  Building this map by
+    # recursive resolution also makes a valid workbook robust to harmless row
+    # reordering while retaining the explicit parent DAG validation.
+    cases_by_id = {str(case["case_id"]): case for case in spec["cases"]}
+    role_maps_by_case: dict[str, list[dict[str, dict[str, Any]]]] = {}
+    asset_seeds_by_case: dict[str, list[int]] = {}
+
+    def role_maps(case_id: str) -> list[dict[str, dict[str, Any]]]:
+        if case_id in role_maps_by_case:
+            return role_maps_by_case[case_id]
+        case = cases_by_id[case_id]
+        parent_id = case.get("parent_case_id")
+        parent_maps = role_maps(str(parent_id)) if parent_id else []
+        samples = int(case["asset_samples"])
+        values = []
+        seeds = []
+        for sample in range(1, samples + 1):
+            inherited = parent_maps[(sample - 1) % len(parent_maps)] if parent_maps else None
+            # Keep the root seed visible but derive a per-sample seed that is
+            # independent of case iteration order.  Inherited roles are copied
+            # from ``inherited`` and are therefore not redrawn here.
+            sample_seed = _derived_seed(seed, "asset", case_id, str(sample))
+            values.append(_role_mapping(case, catalog, roles, sample_seed, sample,
+                                        inherited=inherited))
+            seeds.append(sample_seed)
+        role_maps_by_case[case_id] = values
+        asset_seeds_by_case[case_id] = seeds
+        return values
+
     for case in spec["cases"]:
         case_id = str(case["case_id"])
         variants = spec["variants_by_case"][case_id]
         parent_variants = _parent_variants(spec, case, seed=seed)
         for sample in range(1, int(case["asset_samples"]) + 1):
-            role_map = _role_mapping(case, catalog, roles, seed, sample)
+            role_map = role_maps(case_id)[sample - 1]
+            asset_seed = asset_seeds_by_case[case_id][sample - 1]
             for parent_variant in parent_variants:
                 parent_instruction = None if parent_variant is None else _render_v2(parent_variant["instruction_template"], role_map)
                 for variant in variants:
@@ -252,26 +370,43 @@ def compile_semantic_matrix_v2(matrix: str | Path, *, kind: str = "generated_edi
                             "equivalence_group": variant.get("equivalence_group"),
                             "parent_case_id": case.get("parent_case_id"),
                             "parent_variant_id": parent_variant.get("variant_id") if parent_variant else None,
-                            "fixture_id": case.get("fixture_id"), "asset_seed": seed,
+                            "fixture_id": case.get("fixture_id"), "asset_seed": asset_seed,
                             "repeat_index": repeat, "asset_role_mapping": role_map,
                             "expected_outcome": variant["expected_outcome"],
-                            "expected_error_codes": variant["expected_json_value"].get("error_codes", []),
+                            "expected_error_codes": variant["expected_json_value"].get(
+                                "allowed_error_codes",
+                                variant["expected_json_value"].get("error_codes", [])),
                             "expected_json": variant["expected_json_value"],
                             "precondition": variant.get("precondition"),
                             "coverage_tag": variant.get("equivalence_group"),
-                            "scene_basis": "current", "requires_visual": False,
-                            "expected_scene_change": "query_only" if variant["expected_outcome"] == "answered" else None,
-                            "assertion_profile": variant["expected_json_value"].get("assertion_profile"),
+                            "scene_basis": ("empty_bootstrap" if case.get("fixture_id") in {"workspace_empty", "center_empty"}
+                                            else "preset" if case.get("fixture_id") else "current"),
+                            "requires_visual": False,
+                            "expected_scene_change": (
+                                "changed" if variant["expected_outcome"] in {"scene_updated", "robot_setup_updated"}
+                                else "query_only" if variant["expected_outcome"] == "answered"
+                                else "unchanged"),
+                            "assertion_profile": variant["expected_json_value"].get(
+                                "assertion_profile", variant.get("equivalence_group")),
+                            "expected_assertions": variant["expected_json_value"],
                         }
                         sessions.append(item)
                         manifest_rows.append({"session": name, "case_id": case_id, "variant_id": variant["variant_id"],
-                                              "parent_variant_id": item["parent_variant_id"], "asset_seed": seed,
+                                              "parent_variant_id": item["parent_variant_id"], "asset_seed": asset_seed,
                                               "asset_role_mapping": role_map, "source_row": variant["_row"],
                                               "expected_outcome": variant["expected_outcome"]})
     manifest = {"schema": "brain-semantic-matrix.v2", "kind": kind, "matrix": str(Path(matrix).resolve()),
-                "run_profile": run_profile, "seed": seed, "case_count": len(spec["cases"]),
-                "variant_count": len(spec["variants"]), "session_count": len(sessions),
-                "rows": manifest_rows, "catalog_keys": sorted(catalog)}
+                "run_profile": run_profile, "seed": seed,
+                "asset_seed_algorithm": "sha256(brain-semantic-matrix.v2|root|asset|case_id|sample)[:8]",
+                "case_count": len(spec["cases"]),
+                "variant_count": len(spec["variants"]), "invariant_count": spec["invariant_count"],
+                "session_count": len(sessions),
+                "seed_algorithm": "sha256(brain-semantic-matrix.v2|root|axis|stable-ids)",
+                "catalog_revision": catalog_revision, "rows": manifest_rows,
+                "catalog_keys": sorted(catalog),
+                "coverage": {"enabled_variants": len(spec["variants"]),
+                             "compiled_sessions": len(sessions),
+                             "invariants": spec["invariant_count"]}}
     document = {"kind": "sessions", "schema_version": 2, "matrix_version": 2, "sessions": sessions}
     if output:
         destination = Path(output).resolve(); destination.parent.mkdir(parents=True, exist_ok=True)

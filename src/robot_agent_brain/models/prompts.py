@@ -31,6 +31,10 @@ def _snapshot_for_assets(assets, aliases=None, registered_profiles=None):
     if isinstance(assets, AssetCatalogSnapshot):
         return assets
     if hasattr(assets, "catalog_snapshot"):
+        # Generic/direct callers retain the historical resolver aliases for
+        # compatibility (and the legacy prompt unit tests).  Live Brain
+        # requests explicitly pass ``aliases={}`` from Application/Pipeline,
+        # so the authoritative Qwen catalog never inherits cup->mug silently.
         return assets.catalog_snapshot(
             aliases=aliases if aliases is not None else getattr(assets, "catalog_aliases", {}),
             registered_profiles=registered_profiles or ())

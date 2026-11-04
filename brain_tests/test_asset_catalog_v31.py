@@ -129,6 +129,61 @@ def test_future_cup_name_is_not_attached_as_mug_alias():
     assert mug.asset_key != cup.asset_key and "cup" not in mug.aliases
 
 
+def test_live_pipeline_catalog_does_not_expose_legacy_cup_mug_alias():
+    """Legacy aliases remain for grounding, never for live OLS selection.
+
+    The resolver still needs historical Chinese/English aliases to match
+    objects already present in old scenes.  A live Qwen turn, however, must
+    receive the canonical OLS vocabulary so that a future real ``cup`` asset
+    cannot be silently rewritten to ``mug``.
+    """
+    from robot_agent_brain.pipeline import BrainPipeline
+
+    config = json.loads((ROOT / "config/webeditor.json").read_text())
+    root = Path(config["asset_library_root"])
+    if not root.is_absolute():
+        root = (ROOT / "config" / root).resolve()
+    cache = Path(config["asset_geometry_cache"])
+    if not cache.is_absolute():
+        cache = (ROOT / "config" / cache).resolve()
+    categories = (ROOT / "config" / config["asset_category_index"]).resolve()
+    adapter = FinalModelsLibraryAdapter(root, geometry_cache=cache, category_index=categories,
+                                        library_ref_prefix=config["library_ref_prefix"])
+    pipeline = BrainPipeline(object(), adapter, aliases={"cup": "mug", "杯子": "mug"})
+    mug = next(item for item in pipeline.asset_catalog.models if item.name == "mug")
+    assert "cup" not in mug.aliases
+    assert "杯子" not in mug.aliases
+    # Deterministic grounding still retains the compatibility alias table.
+    assert pipeline.aliases["cup"] == "mug"
+
+
+def test_understanding_context_distinguishes_bootstrap_from_uploaded_empty_scene():
+    """The tabletop bootstrap is implicit only before a SceneConfig exists."""
+    from robot_agent_brain.pipeline import BrainPipeline
+    from robot_agent_brain.contracts.scene import SceneConfig
+
+    config = json.loads((ROOT / "config/webeditor.json").read_text())
+    root = Path(config["asset_library_root"])
+    if not root.is_absolute():
+        root = (ROOT / "config" / root).resolve()
+    cache = Path(config["asset_geometry_cache"])
+    if not cache.is_absolute():
+        cache = (ROOT / "config" / cache).resolve()
+    categories = (ROOT / "config" / config["asset_category_index"]).resolve()
+    adapter = FinalModelsLibraryAdapter(root, geometry_cache=cache, category_index=categories,
+                                        library_ref_prefix=config["library_ref_prefix"])
+    pipeline = BrainPipeline(object(), adapter)
+
+    bootstrap = pipeline._understanding_scene_context(None)
+    uploaded_empty = pipeline._understanding_scene_context(
+        SceneConfig(scene_schema_version=1, scene_id=123, scene_name="uploaded-empty", objects=[]))
+    assert bootstrap["basis"] == "bootstrap"
+    assert bootstrap["primary_table_available"] is True
+    assert uploaded_empty["basis"] == "current"
+    assert uploaded_empty["primary_table_available"] is False
+    assert uploaded_empty["objects"] == []
+
+
 def test_ols_adapter_refresh_publishes_new_catalog_atomically():
     """A changed read-only OLS index is visible on the next snapshot."""
     config = json.loads((ROOT / "config/webeditor.json").read_text())
@@ -239,3 +294,26 @@ def test_live_asset_choice_rejects_non_selectable_or_name_mismatch():
         assert "asset_not_selectable_for_scene_edit" in str(exc)
     else:
         raise AssertionError("passive models cannot be selected for a scene add")
+
+
+def test_live_catalog_request_rejects_legacy_v3_before_name_fallback():
+    from robot_agent_brain.contracts.asset_catalog import AssetCatalogSnapshot, CatalogAsset
+    from robot_agent_brain.models.qwen_http import QwenHTTPProvider, QwenProviderError
+
+    catalog = AssetCatalogSnapshot.from_items([
+        CatalogAsset(asset_key="model:1", name="mug", selectable_for_add=True),
+    ], [])
+    value = {"protocol_version": "task_understanding.v3", "status": "accepted",
+             "turn_kind": "scene_edit", "scene_edit": {
+                 "entities": [{"entity_id": "cup", "semantic_name": "cup", "category": "container"}],
+                 "operations": [{"operation": "add", "target": "cup"}],
+                 "asset_choices": [{"entity_id": "cup", "asset_key": "model:1"}],
+             }}
+    request = TaskUnderstandingRequest(instruction="增加一个杯子", asset_catalog=catalog)
+    try:
+        QwenHTTPProvider._validate_live_asset_choices(value, request)
+    except QwenProviderError as exc:
+        assert exc.code == "provider_output_schema_invalid"
+        assert "v3.1" in str(exc)
+    else:
+        raise AssertionError("live catalog requests must not fall back to the legacy v3 name resolver")

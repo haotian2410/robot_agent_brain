@@ -233,10 +233,25 @@ class QwenHTTPProvider:
     @staticmethod
     def _validate_live_asset_choices(value: dict[str, Any], request: TaskUnderstandingRequest) -> None:
         """Validate model-selected OLS keys against the exact turn snapshot."""
-        # Old replay/mocked bodies often omit protocol_version entirely.  Keep
-        # those fixtures on the explicit compatibility path; a real v3.1
-        # response is required to carry exact catalog choices.
-        if not isinstance(value, dict) or value.get("protocol_version") != "task_understanding.v3.1":
+        # A request carrying a catalog is a live v3.1 turn.  Do not silently
+        # accept the old v3 envelope here: doing so would bypass asset-choice
+        # validation and let the legacy resolver reinterpret names (for
+        # example cup -> mug) after Qwen has answered.  Replay/fake callers
+        # without a request-scoped catalog remain on the compatibility path.
+        if not isinstance(value, dict):
+            raise QwenProviderError("task_understanding response must be an object",
+                                    code="provider_output_schema_invalid")
+        protocol = value.get("protocol_version")
+        if protocol != "task_understanding.v3.1":
+            # Keep envelopes with no protocol marker working for old direct
+            # providers, but do not let an explicitly advertised v2/v3 scene
+            # edit bypass the catalog-choice contract.  That distinction is
+            # what preserves old replay compatibility without silently
+            # reintroducing the cup -> mug live fallback.
+            if protocol in {"task_understanding.v2", "task_understanding.v3"} \
+                    and value.get("turn_kind") == "scene_edit":
+                raise QwenProviderError("live task_understanding requires protocol_version=task_understanding.v3.1",
+                                        code="provider_output_schema_invalid")
             return
         if value.get("turn_kind") != "scene_edit" or value.get("status", "accepted") != "accepted":
             return

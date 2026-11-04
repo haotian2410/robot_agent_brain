@@ -25,7 +25,7 @@ def main() -> int:
     actual = {
         "feature_rows": spec["counts"]["cases"],
         "expressions": spec["counts"]["variants"],
-        "regression_invariants": 27,
+        "regression_invariants": spec["invariant_count"],
     }
     if actual != expected:
         raise SystemExit(f"semantic_test_plan_count_mismatch:{actual}!={expected}")

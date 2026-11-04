@@ -40,6 +40,7 @@ class FinalModelsLibraryAdapter:
         self.geometry_cache_metadata = cache_metadata
         categories = json.loads(Path(category_index).read_text(encoding="utf-8")) if category_index else {}
         self.categories_available = category_index is not None
+        self._passive_mechanism_keys = set()
         for kind in ("model", "robot"):
             index = json.loads((self.root / ("models" if kind == "model" else "robots") /
                                 ("model_index.json" if kind == "model" else "robot_index.json")).read_text(encoding="utf-8"))
@@ -72,6 +73,14 @@ class FinalModelsLibraryAdapter:
                         raise ValueError(f"asset_geometry_missing:{key}")
                     geometry = AssetGeometry.model_validate(cache[key])
                 tags = tuple(tag.strip().casefold() for tag in semantic.get("tag", "").split(",") if tag.strip())
+                # Models with an embedded RobotDriver are passive articulated
+                # mechanisms (drawer/cabinet/microwave/button/table), not
+                # ordinary scene-add assets.  Keep them in the complete
+                # catalog for query/capability-boundary reasoning, but mark
+                # them unavailable for a live scene_edit.add/replace choice.
+                passive_mechanism = kind == "model" and "robot_driver" in data
+                if passive_mechanism:
+                    self._passive_mechanism_keys.add(key)
                 view = BrainAssetView(
                     **geometry.model_dump(), library_asset_id=identifier,
                     metadata_ref=f"{self.prefix}{identifier}", semantic_name=name,
@@ -197,12 +206,15 @@ class FinalModelsLibraryAdapter:
         for view in sorted(self._assets.values(), key=lambda item: (item.asset_type, item.library_asset_id)):
             aliases_for_name = tuple(sorted({key for key, value in alias_map.items()
                                                if value == view.semantic_name.casefold() and key not in canonical_names}))
+            passive_mechanism = f"{view.asset_type}:{view.library_asset_id}" in self._passive_mechanism_keys
             item = CatalogAsset(
                 asset_key=f"{view.asset_type}:{view.library_asset_id}", name=view.semantic_name,
                 display_name=view.semantic_name, aliases=aliases_for_name,
                 tags=tuple(view.tags), category=view.category, asset_type=view.asset_type,
-                metadata_ref=view.metadata_ref, selectable_for_add=view.asset_type == "model",
-                availability_reason=None if view.asset_type == "model" else "robot_platform_only",
+                metadata_ref=view.metadata_ref,
+                selectable_for_add=(view.asset_type == "model" and not passive_mechanism),
+                availability_reason=("passive_mechanism_only" if passive_mechanism
+                                     else (None if view.asset_type == "model" else "robot_platform_only")),
                 scalable=view.scalable, scale_range=view.scale_range)
             (models if view.asset_type == "model" else robots).append(item)
         return AssetCatalogSnapshot.from_items(models, robots, scenes=self._scenes,

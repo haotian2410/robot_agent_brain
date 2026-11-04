@@ -8,12 +8,83 @@ simulated when a service, browser, or screenshot is unavailable.
 from __future__ import annotations
 
 import json
+import hashlib
 import time
 from pathlib import Path
 
 from .batch_matrix_v2 import compile_semantic_matrix_v2, read_semantic_matrix_v2
 from .batch_service import ServiceBatchRunner
 from .web.protocol import digest
+
+
+_BUILTIN_FIXTURES = {"workspace_empty", "center_empty"}
+
+
+def _safe_name(value: str) -> str:
+    """Match the service runner's directory-safe session name convention."""
+    import re
+    result = re.sub(r"[^A-Za-z0-9_-]+", "-", str(value)).strip("-")
+    return result[:80] or "session"
+
+
+def _fixture_path(fixture_dir, fixture_id):
+    if not fixture_id or fixture_id in _BUILTIN_FIXTURES or not fixture_dir:
+        return None
+    candidate = (Path(fixture_dir) / f"{fixture_id}.json").resolve()
+    return candidate if candidate.is_file() else None
+
+
+def _file_sha256(path: Path | None) -> str | None:
+    if path is None:
+        return None
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _last_scene_for_run(stage_root: Path, run: dict, summary: dict):
+    """Return the final scene evidence for a passed parent run.
+
+    A status string alone is not a usable parent: the child must receive a
+    real, digestable snapshot written by the service runner.  This helper also
+    avoids guessing a turn number from the compiled prefix length.
+    """
+    output_name = run.get("outputName") or run.get("output_name") or _safe_name(run.get("name", "session"))
+    session_root = stage_root / "sessions" / output_name
+    summary_path = session_root / "session_summary.json"
+    if not summary_path.is_file():
+        return None
+    try:
+        session = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if session.get("status") != "passed":
+        return None
+    turns = session.get("turns") or []
+    # A parent is qualified only when every executed turn was passed and a
+    # final scene file exists.  Skips/blocked screenshots cannot be a baseline.
+    if not turns or any(item.get("status") != "passed" for item in turns):
+        return None
+    turn_numbers = sorted(int(item.get("turn", 0) or 0) for item in turns)
+    for turn_number in reversed(turn_numbers):
+        candidate = session_root / "turns" / f"{turn_number:04d}" / "scene.json"
+        if not candidate.is_file():
+            continue
+        try:
+            scene = json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        return {
+            "path": candidate,
+            "digest": digest(scene),
+            "scene": scene,
+            "session_root": session_root,
+            "role_bindings": session.get("role_bindings") or {},
+            "output_name": output_name,
+            "turn": turn_number,
+        }
+    return None
 
 
 def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
@@ -45,12 +116,8 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
         # ``workspace_empty`` is the built-in empty-table baseline.  Every
         # other root fixture must be supplied explicitly; never run a Qwen
         # expression against an unrelated empty world and call it a pass.
-        if not parent and fixture_id and fixture_id != "workspace_empty":
-            fixture_path = None
-            if fixture_dir:
-                candidate = Path(fixture_dir) / f"{fixture_id}.json"
-                if candidate.is_file():
-                    fixture_path = candidate.resolve()
+        if not parent and fixture_id and fixture_id not in _BUILTIN_FIXTURES:
+            fixture_path = _fixture_path(fixture_dir, fixture_id)
             if fixture_path is None:
                 stages.append({"test_id": case_id, "status": "blocked_fixture",
                                "fixture_id": fixture_id, "sessions": [],
@@ -60,6 +127,7 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
             rows = [dict(item, scene=str(fixture_path)) for item in rows]
         if parent and not completed.get(parent):
             stages.append({"test_id": case_id, "status": "skipped_parent_failed",
+                           "classification": "skipped_parent_not_satisfied",
                            "parent_test_id": parent, "sessions": []})
             completed[case_id] = False
             continue
@@ -68,32 +136,32 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
             value = dict(row)
             if parent:
                 parent_rows = [item for item in completed[parent]
-                               if item.get("status") == "passed"]
+                               if item.get("status") == "passed" and item.get("parent_snapshot")]
                 if not parent_rows:
                     continue
                 wanted = row.get("parent_variant_id")
                 parent_row = next((item for item in parent_rows
                                    if not wanted or item.get("variant_id") == wanted), parent_rows[0])
-                parent_root = Path(parent_row["root"])
-                parent_name = parent_row["name"]
-                parent_turns = len(parent_row.get("instructions") or [])
-                scene_path = parent_root / "sessions" / parent_name / "turns" / f"{parent_turns:04d}" / "scene.json"
+                parent_snapshot = parent_row["parent_snapshot"]
+                scene_path = Path(parent_snapshot["path"])
                 if not scene_path.is_file():
                     continue
                 # The parent snapshot is now the setup world; execute only the
                 # child expression instead of replaying the prefix a second time.
                 value["instructions"] = [value["instructions"][-1]]
                 value["scene"] = str(scene_path)
+                parent_name = parent_row.get("name")
                 value["name"] = f"{value['name']}-from-{parent_name}"
                 value["parent_run_id"] = parent_name
                 value["parent_scene_path"] = str(scene_path)
-                try:
-                    parent_scene = json.loads(scene_path.read_text(encoding="utf-8"))
-                    value["parent_scene_digest"] = digest(parent_scene)
-                except (OSError, ValueError):
-                    value["parent_scene_digest"] = None
-                value["baseline_digest"] = value["parent_scene_digest"]
-                value["role_bindings"] = value.get("asset_role_mapping", {})
+                value["parent_scene_digest"] = parent_snapshot.get("digest")
+                value["baseline_digest"] = parent_snapshot.get("digest")
+                # Role bindings are inherited from the actual parent run.  The
+                # compiler already preserves existing roles; keeping the
+                # concrete sidecar here lets the report detect a mismatched
+                # fixture or a stale scene before a child is sent.
+                value["role_bindings"] = parent_snapshot.get("role_bindings") or value.get("asset_role_mapping", {})
+                value["parent_snapshot_turn"] = parent_snapshot.get("turn")
             else:
                 # An explicit fixture is a declared baseline, not a hidden
                 # replay of a prior Qwen turn.  The service runner may resolve
@@ -104,6 +172,7 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
             stage_rows.append(value)
         if not stage_rows:
             stages.append({"test_id": case_id, "status": "skipped_parent_scene_missing",
+                           "classification": "skipped_parent_not_satisfied",
                            "parent_test_id": parent, "sessions": []})
             completed[case_id] = False
             continue
@@ -119,18 +188,32 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
             for row in stage_rows:
                 result = next((item for item in summary.get("sessions", [])
                                if item.get("name") == row["name"]), {})
-                if result.get("status") == "passed":
-                    passed.append({**row, "status": "passed", "root": str(stage_root)})
+                status = result.get("status")
+                # Session summary is the authoritative result; additionally
+                # require a persisted final scene and successful turns before
+                # making this row available as a child baseline.
+                run = {**row, **result, "root": str(stage_root)}
+                snapshot = _last_scene_for_run(Path(stage_root), run, summary)
+                if status == "passed" and snapshot is not None:
+                    run["parent_snapshot"] = snapshot
+                    run["parent_scene_digest"] = snapshot["digest"]
+                    run["baseline_digest"] = snapshot["digest"]
+                    run["role_bindings"] = snapshot.get("role_bindings") or row.get("role_bindings") or row.get("asset_role_mapping", {})
+                    passed.append(run)
             status = "passed" if passed and len(passed) == len(stage_rows) else "failed"
             stages.append({"test_id": case_id, "parent_test_id": parent,
                            "status": status, "root": str(stage_root),
                            "fixture_id": spec["cases_by_id"][case_id].get("fixture_id"),
+                           "fixture_sha256": _file_sha256(_fixture_path(fixture_dir, fixture_id)),
                            "sessions": summary.get("sessions", []),
                            "parent_runs": [{"name": item.get("name"),
+                                            "variant_id": item.get("variant_id"),
+                                            "parent_variant_id": item.get("parent_variant_id"),
                                             "parent_scene_digest": item.get("parent_scene_digest"),
                                             "baseline_digest": item.get("baseline_digest"),
+                                            "parent_scene_path": (item.get("parent_snapshot") or {}).get("path"),
                                             "role_bindings": item.get("role_bindings", {})}
-                                           for item in stage_rows]})
+                                           for item in passed]})
             completed[case_id] = passed
         except Exception as exc:
             stages.append({"test_id": case_id, "parent_test_id": parent,
