@@ -134,27 +134,35 @@ class BrainConfig(BaseModel):
         return cls.model_validate(values)
 
     def load_assets(self):
+        def attach_catalog_aliases(adapter):
+            # An explicit semantic_aliases file is authoritative.  For
+            # built-in/demo documents without one, preserve aliases published
+            # alongside the asset document instead of silently dropping them
+            # from the live Qwen catalog.
+            aliases = (self.load_semantic_aliases() if self.semantic_aliases is not None
+                       else getattr(getattr(adapter, "metadata", None), "aliases", {}))
+            adapter.catalog_aliases = dict(aliases or {})
+            return adapter
+
         if self.asset_library_root is not None:
             if (Path(self.asset_library_root) / "models" / "model_index.json").is_file():
                 from .adapters.final_models_library import FinalModelsLibraryAdapter
                 adapter = FinalModelsLibraryAdapter(self.asset_library_root, self.asset_geometry_cache,
                     self.asset_category_index, library_ref_prefix=self.library_ref_prefix)
-                adapter.catalog_aliases = self.load_semantic_aliases()
-                return adapter
+                return attach_catalog_aliases(adapter)
             if self.asset_geometry_cache is None:
                 raise ValueError("asset_geometry_cache_required")
             from .adapters.local_asset_library import LocalAssetLibraryAdapter
             adapter = LocalAssetLibraryAdapter(self.asset_library_root, self.asset_geometry_cache,
                 self.asset_category_index, library_ref_prefix=self.library_ref_prefix)
-            adapter.catalog_aliases = self.load_semantic_aliases()
-            return adapter
+            return attach_catalog_aliases(adapter)
         from .adapters.demo_asset_library import DemoAssetLibrary
         if self.assets is not None:
             adapter = DemoAssetLibrary(json.loads(Path(self.assets).read_text(encoding="utf-8")))
-            adapter.catalog_aliases = self.load_semantic_aliases()
-            return adapter
+            return attach_catalog_aliases(adapter)
         data = json.loads(files("robot_agent_brain.resources").joinpath("assets.json").read_text(encoding="utf-8"))
-        return DemoAssetLibrary(data)
+        adapter = DemoAssetLibrary(data)
+        return attach_catalog_aliases(adapter)
 
     def bootstrap_settings(self):
         settings = {}

@@ -101,12 +101,13 @@ class BrainPipeline:
         if aliases is not None:
             self.aliases = aliases
         self.registered_profiles = tuple(sorted(set(registered_profiles or ())))
-        # The live provider must see canonical OLS names, not the legacy
-        # resolver alias table.  Passing that table here used to expose the
-        # historical ``cup -> mug`` mapping and defeated catalog-driven
-        # asset selection.  Keep ``self.aliases`` for deterministic grounding
-        # of existing scene instances and old replay inputs only.
-        self.asset_catalog = (assets.catalog_snapshot(aliases={},
+        # The live provider must see the current adapter-owned catalog data,
+        # including human-language aliases that are valid for this exact OLS
+        # revision.  ``FinalModelsLibraryAdapter`` reserves canonical names,
+        # so a future real ``cup`` asset cannot inherit the mug-only ``cup``
+        # alias.  Keep ``self.aliases`` for deterministic grounding of
+        # existing scene instances and old replay inputs only.
+        self.asset_catalog = (assets.catalog_snapshot(aliases=None,
                                                       registered_profiles=self.registered_profiles)
                               if hasattr(assets, "catalog_snapshot") else None)
         from .contracts.workspace import WorkspaceSemanticPolicy
@@ -273,7 +274,15 @@ class BrainPipeline:
         # Updating the provider prompt and the request together prevents a new
         # catalog from being used to interpret an old response (or vice versa).
         if hasattr(self.assets, "catalog_snapshot"):
-            current_catalog = self.assets.catalog_snapshot(aliases={},
+            # A live OLS adapter is read-only but can publish a new index
+            # while Brain remains running.  Refresh before taking the
+            # request-scoped snapshot so every first-stage call sees the
+            # current catalog rather than a process-start copy.  The adapter
+            # swaps atomically only after metadata/geometry validation; a
+            # stale or inconsistent publication therefore fails closed.
+            if hasattr(self.assets, "refresh_from_source"):
+                self.assets.refresh_from_source()
+            current_catalog = self.assets.catalog_snapshot(aliases=None,
                                                           registered_profiles=self.registered_profiles)
             if self.asset_catalog is None or current_catalog.revision != self.asset_catalog.revision:
                 self.asset_catalog = current_catalog

@@ -42,7 +42,8 @@ class DemoAssetLibrary:
         return self.metadata.model_dump(mode="json")
 
     def catalog_snapshot(self, *, aliases=None, registered_profiles=None) -> AssetCatalogSnapshot:
-        alias_map = {str(k).casefold(): str(v).casefold() for k, v in (aliases or {}).items()}
+        configured_aliases = getattr(self, "catalog_aliases", {}) if aliases is None else aliases
+        alias_map = {str(k).casefold(): str(v).casefold() for k, v in (configured_aliases or {}).items()}
         models = []
         canonical_names = {view.semantic_name.casefold() for view in self._views.values()}
         for view in sorted(self._views.values(), key=lambda item: item.library_asset_id):

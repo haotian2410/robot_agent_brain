@@ -1,5 +1,7 @@
 # brain-web 语义重构验收记录（2026-11-05）
 
+> 当前续验基线：`f0fc82f`（前文若出现旧提交号，仅作历史证据标记）。
+
 ## 已验证
 
 - 官方规范导入：20 个 feature row、115 条完整表达、27 条回归不变量。
@@ -7,7 +9,11 @@
 - 目录注入：当前 OLS 1.0.7 本地目录读取 34 个 model、13 个 robot、7 个 scene；模型和机器人命名空间不混用。
 - 每轮任务理解请求携带完整 `asset_catalog`、`workspace` 和 `scene_context`；请求体与 system prompt 使用同一 catalog revision。
 - v3.1 场景编辑的 `asset_choices` 现在额外校验：实体存在、规范名称与 key 一致、模型允许新增、不得有多余选择。
-- OLS 本地只读目录变化可在服务健康刷新时原子重载；新 revision 会同步到 pipeline/provider，旧 Scene 快照不会被重写。
+- OLS 本地只读目录变化可在每个理解 turn 前原子重载；别名文件和 OLS revision
+  一起进入 catalog snapshot，旧 Scene 快照不会被重写。
+- mug-only 目录可将 `杯子/cup/马克杯` 作为当前目录的 alias 数据提供给 Qwen；
+  如果后续 OLS 发布 canonical `cup`，该 token 会从 mug aliases 中移除，避免
+  把两个真实资产合并。
 - 2026-11-04 的真实 Qwen 一轮“增加一个苹果”已成功生成场景更新；该证据只代表单轮冒烟，不代表全量矩阵通过。
 
 ## 本轮自动测试
@@ -20,7 +26,9 @@ conda run --no-capture-output -n robot_agent_integ pytest -q
 
 ## 仍未宣称通过的项目
 
-- 本轮没有重新执行 115 条真实 Qwen/Gateway 浏览器用例；C7 全量真实验收仍为 `unverified`。
+- 最新 fixed campaign 已重新展开部分父子流程，但 T02/T08/T11/T15 仍有真实失败或
+  预期安全拒绝，T09/T10/T13/T14/T16–T20 缺少隔离 fixture；C7 全量真实验收仍为
+  `unverified`。证据见 `docs/semantic-refactor/09_acceptance_report_20261105.md`。
 - 远端 OLS HTTP 发生变化而本地联调目录未同步时，服务会报告目录不匹配并拒绝静默使用旧缓存；不会自动下载或修改 OLS 原始资产。
 - `cup`/`mug` 的旧兼容别名仍保留给历史 replay/旧协议；v3.1 在线路径要求 Qwen 从当前 catalog 选择精确 `asset_key`。目录同时存在 `cup` 与 `mug` 时不会把 `cup` 追加为 `mug` 别名。
 - 真实机器人执行、Control、IK、MuJoCo 和双臂规划不在本期范围。

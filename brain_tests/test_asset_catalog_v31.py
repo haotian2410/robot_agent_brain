@@ -118,26 +118,8 @@ def test_per_turn_catalog_keeps_registered_profiles_in_payload_and_revision():
     assert body["asset_catalog"]["registered_profiles"] == ["piper"]
 
 
-def test_future_cup_name_is_not_attached_as_mug_alias():
-    from robot_agent_brain.contracts.asset_catalog import AssetCatalogSnapshot, CatalogAsset
-
-    snapshot = AssetCatalogSnapshot.from_items([
-        CatalogAsset(asset_key="model:1", name="mug", aliases=("杯子",), selectable_for_add=True),
-        CatalogAsset(asset_key="model:2", name="cup", selectable_for_add=True),
-    ], [])
-    mug = next(item for item in snapshot.models if item.name == "mug")
-    cup = next(item for item in snapshot.models if item.name == "cup")
-    assert mug.asset_key != cup.asset_key and "cup" not in mug.aliases
-
-
-def test_live_pipeline_catalog_does_not_expose_legacy_cup_mug_alias():
-    """Legacy aliases remain for grounding, never for live OLS selection.
-
-    The resolver still needs historical Chinese/English aliases to match
-    objects already present in old scenes.  A live Qwen turn, however, must
-    receive the canonical OLS vocabulary so that a future real ``cup`` asset
-    cannot be silently rewritten to ``mug``.
-    """
+def test_pipeline_refreshes_live_ols_before_each_understanding_turn():
+    from robot_agent_brain.contracts.turn import BrainTurn, SessionControlIntent, TurnKind, TurnStatus
     from robot_agent_brain.pipeline import BrainPipeline
 
     config = json.loads((ROOT / "config/webeditor.json").read_text())
@@ -150,12 +132,86 @@ def test_live_pipeline_catalog_does_not_expose_legacy_cup_mug_alias():
     categories = (ROOT / "config" / config["asset_category_index"]).resolve()
     adapter = FinalModelsLibraryAdapter(root, geometry_cache=cache, category_index=categories,
                                         library_ref_prefix=config["library_ref_prefix"])
+    refreshes = []
+    adapter.refresh_from_source = lambda: refreshes.append(True) or False
+
+    class Provider:
+        def __init__(self):
+            self.requests = []
+
+        def understand_turn(self, request):
+            self.requests.append(request)
+            return BrainTurn(status=TurnStatus.ACCEPTED, turn_kind=TurnKind.SESSION_CONTROL,
+                             instruction=request.instruction,
+                             session_control=SessionControlIntent(action="pause"))
+
+    provider = Provider()
+    pipeline = BrainPipeline(provider, adapter)
+    pipeline.understand_turn("暂停")
+    pipeline.understand_turn("继续")
+    assert len(refreshes) == 2
+    assert all(request.asset_catalog is not None for request in provider.requests)
+    assert all(request.asset_catalog.revision == pipeline.asset_catalog.revision
+               for request in provider.requests)
+
+
+def test_future_cup_name_is_not_attached_as_mug_alias():
+    from robot_agent_brain.contracts.asset_catalog import AssetCatalogSnapshot, CatalogAsset
+
+    snapshot = AssetCatalogSnapshot.from_items([
+        CatalogAsset(asset_key="model:1", name="mug", aliases=("杯子",), selectable_for_add=True),
+        CatalogAsset(asset_key="model:2", name="cup", selectable_for_add=True),
+    ], [])
+    mug = next(item for item in snapshot.models if item.name == "mug")
+    cup = next(item for item in snapshot.models if item.name == "cup")
+    assert mug.asset_key != cup.asset_key and "cup" not in mug.aliases
+
+
+def test_live_pipeline_catalog_uses_revision_scoped_alias_data():
+    """Mug-only catalogs expose aliases, but never shadow a real cup asset."""
+    from robot_agent_brain.pipeline import BrainPipeline
+
+    config = json.loads((ROOT / "config/webeditor.json").read_text())
+    root = Path(config["asset_library_root"])
+    if not root.is_absolute():
+        root = (ROOT / "config" / root).resolve()
+    cache = Path(config["asset_geometry_cache"])
+    if not cache.is_absolute():
+        cache = (ROOT / "config" / cache).resolve()
+    categories = (ROOT / "config" / config["asset_category_index"]).resolve()
+    adapter = FinalModelsLibraryAdapter(root, geometry_cache=cache, category_index=categories,
+                                        library_ref_prefix=config["library_ref_prefix"])
+    adapter.catalog_aliases = {"cup": "mug", "杯子": "mug", "马克杯": "mug"}
     pipeline = BrainPipeline(object(), adapter, aliases={"cup": "mug", "杯子": "mug"})
     mug = next(item for item in pipeline.asset_catalog.models if item.name == "mug")
-    assert "cup" not in mug.aliases
-    assert "杯子" not in mug.aliases
+    assert "cup" in mug.aliases
+    assert "杯子" in mug.aliases
     # Deterministic grounding still retains the compatibility alias table.
     assert pipeline.aliases["cup"] == "mug"
+
+    # Live callers omit ``aliases`` deliberately: the adapter's
+    # revision-scoped vocabulary is injected into the Qwen prompt.  In this
+    # mug-only catalog all language forms are useful evidence for selection.
+    provider = QwenHTTPProvider("http://example/v1", "qwen-test")
+    provider.set_asset_catalog(adapter, aliases=None)
+    prompt_mug = next(item for item in provider.asset_catalog_snapshot.models if item.name == "mug")
+    assert {"cup", "杯子", "马克杯"}.issubset(set(prompt_mug.aliases))
+
+    # Simulate a later OLS publication that adds a canonical cup entry.  The
+    # canonical token is reserved and must no longer be attached to mug.
+    mug_view = next(view for key, view in adapter._assets.items()
+                    if key == "model:" + str(mug.asset_key.split(":", 1)[1]))
+    cup_view = mug_view.model_copy(update={
+        "library_asset_id": 999999,
+        "metadata_ref": "$LIBRARY_SERVER/999999",
+        "semantic_name": "cup",
+    })
+    adapter._assets["model:999999"] = cup_view
+    evolved = adapter.catalog_snapshot()
+    evolved_mug = next(item for item in evolved.models if item.name == "mug")
+    evolved_cup = next(item for item in evolved.models if item.name == "cup")
+    assert "cup" not in evolved_mug.aliases
+    assert evolved_cup.asset_key != evolved_mug.asset_key
 
 
 def test_understanding_context_distinguishes_bootstrap_from_uploaded_empty_scene():

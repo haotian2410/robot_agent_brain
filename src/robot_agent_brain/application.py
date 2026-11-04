@@ -41,14 +41,14 @@ class BrainApplication:
                 planner_max_completion_tokens=self.config.planner_max_completion_tokens)
         self.provider = provider
         if hasattr(provider, "set_asset_catalog"):
-            # Semantic aliases remain available to the deterministic scene
-            # resolver (and to old replay fixtures), but they are not part of
-            # the live OLS vocabulary.  In particular a historical
-            # ``cup -> mug`` entry must not make Qwen believe that two
-            # different OLS assets are interchangeable.  The model receives
-            # the complete canonical catalog and can choose ``cup`` whenever
-            # that asset is actually published by OLS.
-            provider.set_asset_catalog(self.assets, aliases={},
+            # The adapter owns aliases for this exact OLS revision. Passing
+            # ``None`` lets the public snapshot apply those aliases while
+            # reserving every canonical name. A mug-only package may teach
+            # Qwen that ``cup``/``杯子`` commonly refer to mug, but a later
+            # package that publishes a real canonical ``cup`` keeps the two
+            # assets distinct. The deterministic resolver retains its own
+            # compatibility alias table.
+            provider.set_asset_catalog(self.assets, aliases=None,
                                        registered_profiles=list(self.config.robot_profiles.profiles))
         if self.config.vision and (platform_factory is LocalScenePlatform or not hasattr(provider, "detect")):
             raise BrainError("vision_requires_rendering_platform", "configuration",
@@ -112,10 +112,22 @@ class BrainApplication:
         adapter = self.assets
         if not hasattr(adapter, "refresh_from_source"):
             return False
+        aliases = self.config.load_semantic_aliases() if self.config.semantic_aliases else {}
+        # Alias metadata is part of the request-scoped catalog revision. Set
+        # it before refreshing so an alias-file update is visible even when
+        # the OLS files themselves did not change.
+        if hasattr(adapter, "catalog_aliases"):
+            adapter.catalog_aliases = dict(aliases)
+        previous_catalog_revision = adapter.catalog_snapshot(
+            aliases=None, registered_profiles=list(self.config.robot_profiles.profiles)
+        ).revision
         changed = adapter.refresh_from_source()
+        current_catalog_revision = adapter.catalog_snapshot(
+            aliases=None, registered_profiles=list(self.config.robot_profiles.profiles)
+        ).revision
+        changed = changed or current_catalog_revision != previous_catalog_revision
         if not changed:
             return False
-        aliases = self.config.load_semantic_aliases() if self.config.semantic_aliases else {}
         self.config_summary = configuration_summary(self.config, self.assets, self.defaults)
         self.config_fingerprint = fingerprint(self.config_summary)
         self.pipeline.assets = self.assets
@@ -128,17 +140,16 @@ class BrainApplication:
         self.pipeline.grounder.category_aliases = self.pipeline.category_aliases
         self.pipeline.scene_editor.aliases = aliases
         self.pipeline.scene_editor.category_aliases = self.pipeline.category_aliases
-        # Keep live catalog snapshots canonical; ``aliases`` is only for
-        # legacy grounding/replay and must not rewrite one OLS asset name into
-        # another in the Qwen prompt.
+        # Keep the live snapshot tied to this adapter's current OLS revision;
+        # its collision-safe aliases are included by ``None``.
         self.pipeline.asset_catalog = self.assets.catalog_snapshot(
-            aliases={}, registered_profiles=list(self.config.robot_profiles.profiles))
+            aliases=None, registered_profiles=list(self.config.robot_profiles.profiles))
         self.bootstrapper.assets = self.assets
         self.bootstrapper.resolver.catalog = self.assets
         self.bootstrapper.resolver.aliases = dict(aliases)
         self.codec.assets = self.assets
         if hasattr(self.provider, "set_asset_catalog"):
-            self.provider.set_asset_catalog(self.assets, aliases={},
+            self.provider.set_asset_catalog(self.assets, aliases=None,
                                             registered_profiles=list(self.config.robot_profiles.profiles))
         return True
 

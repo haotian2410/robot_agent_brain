@@ -1,5 +1,8 @@
 # Semantic Refactor C0–C7 验收报告（2026-11-05）
 
+> 续验基线：当前 HEAD/远端为 `f0fc82f`。文中历史段落若出现旧 SHA，
+> 仅表示当时的证据快照，不代表当前代码版本。
+
 ## 结论摘要
 
 本报告按 `01_refactor_plan.md` 和 `06_test_runbook.md` 记录 C0–C7 的当前证据。
@@ -7,8 +10,7 @@ C0–C6 的代码、结构化校验和自动回归已完成；C7 的首五行真
 fixture 上完成，T03/T04/T05 共 26 条表达全部通过独立场景 oracle。完整 20 行、
 115 条表达的真实 Qwen/Gateway 验收尚未完成，不能据此宣称整个矩阵通过。
 
-当前本地 HEAD：`3539451`，远端 `origin/main` 同步为 `3539451`。本次后续
-校验只产生本地未提交的 v2 编译器/测试/文档改动；未自动推送。
+当前本地 HEAD：`f0fc82f`，远端 `origin/main` 同步为 `f0fc82f`。
 
 ## 运行基线
 
@@ -31,8 +33,8 @@ fixture 上完成，T03/T04/T05 共 26 条表达全部通过独立场景 oracle�
 | 阶段 | 状态 | 证据 |
 |---|---|---|
 | C0 基线与旧协议 | 已验证 | 全量 pytest 通过；旧 JSON/JSONL 入口仍保留 |
-| C1 OLS 目录与命名空间 | 已验证 | `FinalModelsLibraryAdapter` 读取 34/13/7；model/robot 数字 ID 分离 |
-| C2 首阶段上下文 | 已验证 | 每轮请求携带完整 `asset_catalog`、`workspace`、`scene_context`，并使用同一 revision |
+| C1 OLS 目录与命名空间 | 已验证（自动/静态） | `FinalModelsLibraryAdapter` 读取 34/13/7；model/robot 数字 ID 分离；每轮可原子刷新 OLS 与别名 revision |
+| C2 首阶段上下文 | 已验证（自动/静态） | 每轮请求携带完整 `asset_catalog`、`workspace`、`scene_context`，并使用同一 revision；mug-only/future-cup alias 回归通过 |
 | C3 资产选择 | 已验证 | v3.1 `asset_choices` 校验 key、规范名、可新增性和 catalog revision；不把 cup 永久改写成 mug |
 | C4 固定桌面语义 | 已验证 | live v3.1 桌子左右归一到桌面区域；不生成桌外地面关系；几何保护、回滚保留 |
 | C5 矩阵编译 | 已验证 | 官方校验得到 20 行、115 表达、27 不变量；v2 生成/known 两种 kind 均输出 schema v2；`--schema-version 2` 不再回退到 v1 |
@@ -77,6 +79,36 @@ robot-brain batch-compile --matrix-version 2 \
 `docs/semantic-refactor/02_semantic_test_matrix.xlsx`。
 
 ## C7 真实验收
+
+### 最新 fixed campaign 证据
+
+修复 `BatchSession.parent_snapshot_turn` 后的 generated campaign 证据目录：
+
+```text
+/tmp/c7-campaign-generated-fixed.KDKfhA/campaign-20261105-040433-20261105-a487d718/
+```
+
+该运行使用真实 Qwen、OLS、Brain 和 Gateway。按 stage 统计如下；失败和安全拒绝
+没有被折算成通过：
+
+| case | 结果 |
+|---|---|
+| T01 | 5/5 passed |
+| T02 | 6/12 passed；其余为 `scene_edit_layout_collision`，场景未改变 |
+| T03 | 8/8 passed |
+| T04 | 8/8 passed |
+| T05 | 10/10 passed |
+| T06 | 4/4 passed |
+| T07 | 6/6 passed |
+| T08 | 5/6 passed；“南侧”一条返回澄清，矩阵当前预期为成功 |
+| T09/T10 | `blocked_fixture` |
+| T11 | 0/5；4 条真实 Qwen 多样式 pen 澄清，1 条缺 `replacement_entity` |
+| T12 | 5/5 passed |
+| T13/T14 | `blocked_fixture` |
+| T15 | 1/4 passed；其余为真实 Qwen 澄清/路由差异 |
+| T16–T20 | `blocked_fixture` |
+
+逐轮 raw/canonical、Scene、digest、截图和 oracle 保存在上述 stage 目录。
 
 ### 首五行完整表达
 
@@ -168,8 +200,9 @@ conda run --no-capture-output -n robot_agent_integ \
 
 以下项目不能标成通过：
 
-1. **完整 115 条真实 C7**：当前只真实跑完首五行的 43 个表达中的 T03/T04/T05
-   26 条；T01/T02 的独立 fixture 与其余 T06–T20 尚未在真实 Qwen/Gateway 上完成。
+1. **完整 115 条真实 C7**：最新 fixed campaign 已覆盖部分根/子 stage，但仍有
+   失败和 fixture 阻塞；不能宣称 115 条全部通过。T02 的几何拒绝、T08 的“南侧”
+   澄清、T11/T15 的真实 Qwen差异均保留原始证据。
 2. **27 个回归不变量的真实运行**：结构和自动单测已验证，但没有把每一条都在
    真实浏览器/OLS 环境中执行并附独立证据。
 3. **Known-scene C7**：官方 known 编译成功，但 workbook 当前未给出 scene

@@ -200,12 +200,20 @@ class FinalModelsLibraryAdapter:
 
     def catalog_snapshot(self, *, aliases=None, registered_profiles=None) -> AssetCatalogSnapshot:
         """Expose the complete read-only OLS directory without private state access."""
-        alias_map = {str(k).casefold(): str(v).casefold() for k, v in (aliases or {}).items()}
+        # A live catalog may carry configured human-language aliases (for
+        # example ``杯子``/``cup`` for a mug-only OLS package).  They are data
+        # attached to this exact catalog revision, not a global replacement
+        # rule.  If a future package contains a canonical ``cup`` asset, the
+        # canonical token is reserved and must not remain an alias of ``mug``.
+        configured_aliases = getattr(self, "catalog_aliases", {}) if aliases is None else aliases
+        alias_map = {str(k).casefold(): str(v).casefold()
+                     for k, v in (configured_aliases or {}).items()}
         models, robots = [], []
         canonical_names = {view.semantic_name.casefold() for view in self._assets.values()}
         for view in sorted(self._assets.values(), key=lambda item: (item.asset_type, item.library_asset_id)):
             aliases_for_name = tuple(sorted({key for key, value in alias_map.items()
-                                               if value == view.semantic_name.casefold() and key not in canonical_names}))
+                                               if value == view.semantic_name.casefold()
+                                               and key not in canonical_names}))
             passive_mechanism = f"{view.asset_type}:{view.library_asset_id}" in self._passive_mechanism_keys
             item = CatalogAsset(
                 asset_key=f"{view.asset_type}:{view.library_asset_id}", name=view.semantic_name,
