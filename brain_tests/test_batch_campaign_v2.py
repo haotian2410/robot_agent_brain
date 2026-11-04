@@ -214,6 +214,31 @@ def test_missing_root_fixture_blocks_and_cascades_without_running_qwen(tmp_path,
     assert _FakeRunner.calls == []
 
 
+def test_independent_first_five_profile_is_applied_to_campaign_spec(tmp_path, monkeypatch):
+    """The campaign must not reintroduce workbook parents after compilation."""
+    variants = {
+        "T01": [{"variant_id": "V01", "instruction_template": "add A"}],
+        "T02": [{"variant_id": "C01", "instruction_template": "place B"}],
+        "T03": [{"variant_id": "C02", "instruction_template": "rotate A"}],
+        "T04": [{"variant_id": "C03", "instruction_template": "color A"}],
+        "T05": [{"variant_id": "C04", "instruction_template": "move A"}],
+    }
+    spec = _spec([
+        ("T01", None, "none"), ("T02", "T01", "fixed"),
+        ("T03", "T01", "fixed"), ("T04", "T01", "fixed"),
+        ("T05", "T01", "fixed"),
+    ], variants)
+    for case_id in ("T02", "T03", "T04", "T05"):
+        spec["cases_by_id"][case_id]["parent_variant_id"] = "V01"
+    _patch_campaign(monkeypatch, spec)
+    result, _ = campaign.run_semantic_campaign(
+        matrix=tmp_path / "matrix.xlsx", asset_roles=None, seed=5,
+        run_profile="independent_first_five", output_dir=tmp_path / "out",
+        screenshot_required=False)
+    assert all(item["status"] == "passed" for item in result["stages"])
+    assert len(_FakeRunner.calls) == 5
+
+
 def test_parent_snapshot_turn_is_preserved_in_batch_session_contract():
     """Campaign lineage metadata must survive strict BatchSession parsing."""
     session = BatchSession.model_validate({

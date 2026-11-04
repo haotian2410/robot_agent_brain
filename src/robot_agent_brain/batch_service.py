@@ -290,7 +290,7 @@ class ServiceBatchRunner:
             raise RuntimeError("batch_gateway_protocol_invalid")
         return {"agent": agent, "gateway": gateway}
 
-    def _resolve_browser(self):
+    def _resolve_browser(self, *, require_camera=True):
         health = self._health()
         # AgentService can retain the last Brain binding after the browser has
         # disconnected.  That ID is useful for diagnostics, but it is not a
@@ -306,7 +306,8 @@ class ServiceBatchRunner:
             # camera preflight as the automatically selected browser.  The
             # CLI flag selects an identity; it must not bypass evidence
             # requirements for screenshot-backed runs.
-            self._ensure_live_camera(self.browser_id)
+            if require_camera:
+                self._ensure_live_camera(self.browser_id)
             return self.browser_id, health
         if not live_browser:
             stale = health["agent"].get("browser_id")
@@ -316,7 +317,8 @@ class ServiceBatchRunner:
         # A connected browser is not enough for a screenshot-backed batch.  Do
         # not begin a run that will later fabricate a camera or reuse an old
         # frame; the active live world must expose at least one Camera object.
-        self._ensure_live_camera(live_browser)
+        if require_camera:
+            self._ensure_live_camera(live_browser)
         return live_browser, health
 
     def _ensure_live_camera(self, browser_id):
@@ -388,6 +390,11 @@ class ServiceBatchRunner:
         # not the source file's stale version/digest.
         if current.get("scene_id") != world.get("scene_id") or current.get("scene_name") != world.get("scene_name"):
             raise RuntimeError("batch_preset_scene_readback_mismatch")
+        # A preset is expected to provide the camera evidence used by this
+        # runner.  Empty bootstrap is the only legal exception: Brain may add
+        # the default platform/camera during the first task.
+        if self.screenshot_required:
+            self._ensure_live_camera(browser_id)
         return current
 
     def _load_empty(self, browser_id: str):
@@ -550,7 +557,12 @@ class ServiceBatchRunner:
         # prevents a later bad path/schema from partially executing an earlier
         # session against the shared live browser.
         self._preflight_input(input_path, loaded)
-        browser_id, health = self._resolve_browser()
+        # A true empty input is intentionally allowed to start without a
+        # camera.  The first Brain turn may bootstrap the default tabletop and
+        # return its camera binding; preset scenes remain camera-gated in
+        # _load_preset and all captures are still identity-checked.
+        allow_empty_bootstrap = any(not session.scene for session in loaded["sessions"])
+        browser_id, health = self._resolve_browser(require_camera=not allow_empty_bootstrap)
         root = self.output / ("batch-" + time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:8])
         root.mkdir(parents=True, exist_ok=False)
         (root / "input.json").write_text(Path(input_path).resolve().read_text(encoding="utf-8"), encoding="utf-8")

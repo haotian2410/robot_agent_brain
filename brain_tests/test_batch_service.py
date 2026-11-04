@@ -58,6 +58,17 @@ def test_explicit_browser_id_does_not_bypass_camera_preflight(tmp_path):
         runner._resolve_browser()
 
 
+def test_empty_bootstrap_can_select_connected_browser_before_camera_exists(tmp_path):
+    runner = ServiceBatchRunner(agent_url="http://agent", gateway_url="http://gateway",
+                                output_dir=tmp_path, browser_id="browser-1",
+                                screenshot_required=True)
+    runner._health = lambda: {"agent": {}, "gateway": {
+        "browser": {"connected": True, "browser_id": "browser-1"}}}
+    runner._world = lambda browser_id: {"objects": []}
+    browser, _ = runner._resolve_browser(require_camera=False)
+    assert browser == "browser-1"
+
+
 def test_batch_preflights_all_preset_scene_documents_before_browser(tmp_path):
     scenes = tmp_path / "scenes"
     scenes.mkdir()
@@ -72,7 +83,7 @@ def test_batch_preflights_all_preset_scene_documents_before_browser(tmp_path):
     runner = ServiceBatchRunner(agent_url="http://agent", gateway_url="http://gateway",
                                 output_dir=tmp_path / "out", screenshot_required=False)
     called = {"resolve": False}
-    runner._resolve_browser = lambda: called.__setitem__("resolve", True)
+    runner._resolve_browser = lambda **kwargs: called.__setitem__("resolve", True)
     with pytest.raises(RuntimeError, match="batch_preset_scene_missing:2"):
         runner.run(cases)
     assert called["resolve"] is False
@@ -101,7 +112,7 @@ def test_service_batch_activates_each_session_before_loading_its_scene(tmp_path)
     calls = []
     active = {"world": None, "session": 0}
 
-    runner._resolve_browser = lambda: ("browser-1", {"agent": {}, "gateway": {}})
+    runner._resolve_browser = lambda **kwargs: ("browser-1", {"agent": {}, "gateway": {}})
 
     def activate(browser_id, world):
         calls.append(("activate", world["scene_id"]))

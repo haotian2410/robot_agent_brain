@@ -369,6 +369,27 @@ def _parent_variants(spec, case: dict[str, Any], *, seed: int):
     return [variants[_stable_index(seed, str(case["case_id"]), "parent_variant", size=len(variants))]]
 
 
+def apply_matrix_run_profile(spec: dict[str, Any], run_profile: str) -> dict[str, Any]:
+    """Apply a named execution profile to the in-memory matrix specification.
+
+    Compilation and campaign execution must use the same effective parent DAG.
+    In particular, ``independent_first_five`` deliberately removes the
+    T01→T02..T05 dependency so those rows can be evaluated against their own
+    fixtures.  Keeping this transformation in one helper prevents the
+    compiler from emitting independent sessions while the campaign still
+    reads the unmodified workbook and skips them as failed children.
+    """
+    if run_profile in {"independent_first_five", "center_empty"}:
+        for case in spec["cases"]:
+            if str(case["case_id"]) in {"T01", "T02", "T03", "T04", "T05"}:
+                case["parent_case_id"] = None
+                case["parent_variant_policy"] = "none"
+                case["parent_variant_id"] = None
+            if run_profile == "center_empty" and str(case["case_id"]) == "T02":
+                case["fixture_id"] = "center_empty"
+    return spec
+
+
 def compile_semantic_matrix_v2(matrix: str | Path, *, kind: str = "generated_edit",
                                asset_roles: str | Path | None = None,
                                asset_catalog: str | Path | None = None,
@@ -383,18 +404,7 @@ def compile_semantic_matrix_v2(matrix: str | Path, *, kind: str = "generated_edi
     catalog_revision = "sha256:" + hashlib.sha256(catalog_payload.encode("utf-8")).hexdigest()
     # Profiles alter execution topology only; never mutate the reader's source
     # rows in place because callers may reuse ``spec`` for a second compile.
-    if run_profile in {"independent_first_five", "center_empty"}:
-        for case in spec["cases"]:
-            if str(case["case_id"]) in {"T01", "T02", "T03", "T04", "T05"}:
-                case["parent_case_id"] = None
-                case["parent_variant_policy"] = "none"
-                case["parent_variant_id"] = None
-            if run_profile == "center_empty" and str(case["case_id"]) == "T02":
-                # The official T02 center expression is a positive region
-                # check, so it needs the declared empty-table baseline rather
-                # than T01's occupied center.  The campaign still records this
-                # profile decision in its manifest.
-                case["fixture_id"] = "center_empty"
+    apply_matrix_run_profile(spec, run_profile)
     sessions, manifest_rows = [], []
     # Matrix rows are normally topologically ordered.  Building this map by
     # recursive resolution also makes a valid workbook robust to harmless row
