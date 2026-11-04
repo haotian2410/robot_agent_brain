@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import json
 import hashlib
+import re
 import time
+import uuid
 from pathlib import Path
 
-from .batch_matrix_v2 import compile_semantic_matrix_v2, read_semantic_matrix_v2
+from .batch_matrix_v2 import compile_semantic_matrix_v2, read_semantic_matrix_v2, _stable_index
 from .batch_service import ServiceBatchRunner
 from .web.protocol import digest
 
@@ -41,6 +43,76 @@ def _file_sha256(path: Path | None) -> str | None:
         return hashlib.sha256(path.read_bytes()).hexdigest()
     except OSError:
         return None
+
+
+def _sample_index(run: dict) -> int | None:
+    """Extract the compiler's stable asset-sample axis from a run name.
+
+    The sample axis is part of the campaign contract: a child using sample 2
+    must inherit the sample-2 parent baseline, rather than whichever parent
+    variant happened to be encountered first.  Older hand-written runners may
+    not use the compiler name convention; those runs return ``None`` and are
+    matched by the deterministic fallback below.
+    """
+    value = str(run.get("name") or run.get("outputName") or run.get("output_name") or "")
+    match = re.search(r"-a(\d+)(?:-r|$)", value)
+    return int(match.group(1)) if match else None
+
+
+def _eligible_parent_runs(completed: list[dict] | None) -> list[dict]:
+    """Return only parent executions with a verified, usable snapshot."""
+    values = []
+    for item in completed or []:
+        snapshot = item.get("parent_snapshot")
+        if item.get("status") != "passed" or not isinstance(snapshot, dict):
+            continue
+        if not snapshot.get("path") or not Path(snapshot["path"]).is_file():
+            continue
+        values.append(item)
+    # Never depend on execution order, Excel row order, or filesystem order
+    # when selecting a seed/all parent branch.
+    return sorted(values, key=lambda item: (
+        str(item.get("variant_id") or ""),
+        int(item.get("asset_seed") or 0),
+        str(item.get("name") or ""),
+    ))
+
+
+def _select_parent_runs(*, policy: str, row: dict, completed: list[dict] | None,
+                        seed: int, case_id: str) -> list[dict]:
+    """Select qualified parent snapshots according to the v2 contract.
+
+    ``seed`` is deliberately resolved *after* the parent stage has run.  The
+    old implementation selected a variant from the workbook before knowing
+    which parent runs passed, so one failed seeded variant incorrectly blocked
+    a child even when another qualified parent existed.  ``all`` likewise
+    expands only successful, snapshot-bearing parent runs.
+    """
+    candidates = _eligible_parent_runs(completed)
+    if not candidates:
+        return []
+    policy = str(policy or "none").casefold()
+    wanted = str(row.get("parent_variant_id") or "").strip()
+    if policy == "fixed":
+        candidates = [item for item in candidates if str(item.get("variant_id") or "") == wanted]
+    elif policy == "seed":
+        # Prefer the same asset-sample axis as the child.  If a legacy runner
+        # omitted that axis, use all qualified candidates, still in stable ID
+        # order.  Parent selection is one branch for all child variants in a
+        # sample, preserving semantic-variant comparability.
+        sample = _sample_index(row)
+        same_sample = [item for item in candidates if sample is not None and _sample_index(item) == sample]
+        pool = same_sample or candidates
+        if pool:
+            index = _stable_index(seed, case_id, "parent_variant", str(sample or 0), size=len(pool))
+            candidates = [pool[index]]
+    elif policy == "all":
+        pass
+    elif policy in {"none", ""}:
+        return []
+    else:
+        return []
+    return candidates
 
 
 def _last_scene_for_run(stage_root: Path, run: dict, summary: dict):
@@ -96,11 +168,21 @@ def _last_scene_for_run(stage_root: Path, run: dict, summary: dict):
         if recorded_digest and recorded_digest != digest(scene):
             continue
         return {
-            "path": candidate,
+            # Keep the manifest JSON-serializable.  ``Path`` was harmless
+            # while selecting a parent but caused every successful campaign
+            # to fail while writing campaign_manifest.json.
+            "path": str(candidate),
             "digest": digest(scene),
             "scene": scene,
-            "session_root": session_root,
-            "role_bindings": session.get("role_bindings") or {},
+            "session_root": str(session_root),
+            # ServiceBatchRunner stores explicit campaign sidecar bindings when
+            # present; root compiler sessions carry the same information under
+            # asset_role_mapping.  Preserve it in the parent snapshot instead
+            # of emitting an empty lineage map.
+            "role_bindings": (session.get("role_bindings")
+                               or run.get("role_bindings")
+                               or run.get("asset_role_mapping")
+                               or {}),
             "output_name": output_name,
             "turn": turn_number,
         }
@@ -115,7 +197,11 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
                           output_dir="var/batch-campaigns", run_profile="default",
                           fixture_dir=None):
     output = Path(output_dir).resolve()
-    root = output / ("campaign-" + time.strftime("%Y%m%d-%H%M%S") + "-" + str(seed))
+    # The campaign run is an evidence namespace, not a deterministic output
+    # artifact.  Include a short nonce so two invocations with the same seed
+    # in one second cannot overwrite or abort on the previous run's directory.
+    root = output / ("campaign-" + time.strftime("%Y%m%d-%H%M%S") + "-" + str(seed)
+                     + "-" + uuid.uuid4().hex[:8])
     root.mkdir(parents=True, exist_ok=False)
     if kind not in {"generated_edit", "known_scene"}:
         raise ValueError(f"semantic_campaign_kind_invalid:{kind}")
@@ -148,53 +234,75 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
                 completed[case_id] = False
                 continue
             rows = [dict(item, scene=str(fixture_path)) for item in rows]
-        if parent and not completed.get(parent):
-            stages.append({"test_id": case_id, "status": "skipped_parent_failed",
-                           "classification": "skipped_parent_not_satisfied",
-                           "parent_test_id": parent, "sessions": []})
-            completed[case_id] = False
-            continue
         stage_rows = []
-        for row in rows:
-            value = dict(row)
-            if parent:
-                parent_rows = [item for item in completed[parent]
-                               if item.get("status") == "passed" and item.get("parent_snapshot")]
-                if not parent_rows:
+        if parent:
+            # Parent selection must happen after the parent stage has run.  A
+            # workbook's ``seed`` policy is not allowed to select a failed
+            # variant before qualification, and ``all`` must expand only
+            # successful snapshot-bearing runs.
+            parent_runs = completed.get(parent) if isinstance(completed.get(parent), list) else []
+            if not _eligible_parent_runs(parent_runs):
+                stages.append({"test_id": case_id, "status": "skipped_parent_failed",
+                               "classification": "skipped_parent_not_satisfied",
+                               "parent_test_id": parent, "sessions": []})
+                completed[case_id] = False
+                continue
+
+            # Compiler output contains one row per child variant.  For a
+            # ``seed`` campaign it may contain only the workbook's provisional
+            # parent variant; rebuild the child rows from variant/sample
+            # templates after the qualified parent is known.  This keeps the
+            # compiler pure while making campaign selection evidence-driven.
+            templates = []
+            seen_templates = set()
+            for row in rows:
+                sample_key = (_sample_index(row), row.get("variant_id"), row.get("repeat_index"))
+                if sample_key in seen_templates:
                     continue
-                wanted = row.get("parent_variant_id")
-                parent_row = next((item for item in parent_rows
-                                   if not wanted or item.get("variant_id") == wanted), parent_rows[0])
-                parent_snapshot = parent_row["parent_snapshot"]
-                scene_path = Path(parent_snapshot["path"])
-                if not scene_path.is_file():
-                    continue
-                # The parent snapshot is now the setup world; execute only the
-                # child expression instead of replaying the prefix a second time.
-                value["instructions"] = [value["instructions"][-1]]
-                value["scene"] = str(scene_path)
-                parent_name = parent_row.get("name")
-                value["name"] = f"{value['name']}-from-{parent_name}"
-                value["parent_run_id"] = parent_name
-                value["parent_scene_path"] = str(scene_path)
-                value["parent_scene_digest"] = parent_snapshot.get("digest")
-                value["baseline_digest"] = parent_snapshot.get("digest")
-                # Role bindings are inherited from the actual parent run.  The
-                # compiler already preserves existing roles; keeping the
-                # concrete sidecar here lets the report detect a mismatched
-                # fixture or a stale scene before a child is sent.
-                value["role_bindings"] = parent_snapshot.get("role_bindings") or value.get("asset_role_mapping", {})
-                value["parent_snapshot_turn"] = parent_snapshot.get("turn")
-            else:
+                seen_templates.add(sample_key)
+                templates.append(row)
+            policy = spec["cases_by_id"][case_id].get("parent_variant_policy") or "none"
+            for row in templates:
+                selected = _select_parent_runs(policy=policy, row=row,
+                                               completed=parent_runs, seed=seed,
+                                               case_id=case_id)
+                for parent_row in selected:
+                    value = dict(row)
+                    parent_snapshot = parent_row["parent_snapshot"]
+                    scene_path = Path(parent_snapshot["path"])
+                    if not scene_path.is_file():
+                        continue
+                    # The parent snapshot is now the setup world; execute only
+                    # this child expression instead of replaying its prefix.
+                    value["instructions"] = [value["instructions"][-1]]
+                    value["scene"] = str(scene_path)
+                    parent_name = parent_row.get("name")
+                    value["name"] = f"{value['name']}-from-{parent_name}"
+                    value["parent_run_id"] = parent_name
+                    value["parent_variant_id"] = parent_row.get("variant_id")
+                    value["parent_scene_path"] = str(scene_path)
+                    value["parent_scene_digest"] = parent_snapshot.get("digest")
+                    value["baseline_digest"] = parent_snapshot.get("digest")
+                    # Role bindings are inherited from the actual parent run;
+                    # this prevents a child from silently redrawing object A
+                    # when the parent's selected branch differs.
+                    value["role_bindings"] = parent_snapshot.get("role_bindings") or parent_row.get("role_bindings") or value.get("asset_role_mapping", {})
+                    value["asset_role_mapping"] = value["role_bindings"]
+                    value["parent_snapshot_turn"] = parent_snapshot.get("turn")
+                    stage_rows.append(value)
+        else:
+            for row in rows:
+                value = dict(row)
                 # An explicit fixture is a declared baseline, not a hidden
                 # replay of a prior Qwen turn.  The service runner may resolve
                 # a concrete fixture path in a future campaign profile; until
-                # then retain the ID in the manifest so a missing fixture is
-                # reported as fixture evidence rather than model success.
+                # then retain the ID in the manifest so missing fixtures are
+                # reported as evidence rather than model success.
                 value["fixture_id"] = value.get("fixture_id")
-            stage_rows.append(value)
+                stage_rows.append(value)
         if not stage_rows:
-            stages.append({"test_id": case_id, "status": "skipped_parent_scene_missing",
+            stages.append({"test_id": case_id,
+                           "status": "skipped_parent_failed" if parent else "skipped_parent_scene_missing",
                            "classification": "skipped_parent_not_satisfied",
                            "parent_test_id": parent, "sessions": []})
             completed[case_id] = False
@@ -210,7 +318,7 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
             passed = []
             for row in stage_rows:
                 result = next((item for item in summary.get("sessions", [])
-                               if item.get("name") == row["name"]), {})
+                               if (item.get("name") or item.get("session") or item.get("outputName")) == row["name"]), {})
                 status = result.get("status")
                 # Session summary is the authoritative result; additionally
                 # require a persisted final scene and successful turns before
@@ -223,7 +331,22 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
                     run["baseline_digest"] = snapshot["digest"]
                     run["role_bindings"] = snapshot.get("role_bindings") or row.get("role_bindings") or row.get("asset_role_mapping", {})
                     passed.append(run)
-            status = "passed" if passed and len(passed) == len(stage_rows) else "failed"
+            # A stage can legitimately have no usable parent snapshot (for
+            # example a root row whose expected outcome is a clarification or
+            # safe rejection).  That is still a passing *test stage* when all
+            # service sessions passed their own expectation; it simply cannot
+            # feed a child.  Keep stage status and parent eligibility separate.
+            session_results = summary.get("sessions", [])
+            result_by_name = {
+                str(item.get("name") or item.get("session") or item.get("outputName")): item
+                for item in session_results
+            }
+            expected_names = {str(row.get("name")) for row in stage_rows}
+            all_sessions_passed = (
+                set(result_by_name) == expected_names
+                and all(item.get("status") == "passed" for item in result_by_name.values())
+            )
+            status = "passed" if all_sessions_passed else "failed"
             stages.append({"test_id": case_id, "parent_test_id": parent,
                            "status": status, "root": str(stage_root),
                            "fixture_id": spec["cases_by_id"][case_id].get("fixture_id"),
