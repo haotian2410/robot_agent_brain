@@ -395,6 +395,15 @@ def test_ols_adapter_refresh_publishes_new_catalog_atomically():
         assert adapter.refresh_from_source() is True
         assert adapter.catalog_snapshot().revision != before
         assert any(item.name == "test_cube" for item in adapter.catalog_snapshot().models)
+        # A later OLS publication may remove an asset as well as add one.  The
+        # next refresh must publish the exact new namespace, rather than
+        # retaining stale model keys from the previous snapshot.
+        index = json.loads(index_path.read_text())
+        index["by_id"].pop("999")
+        index["by_name"].pop("test_cube", None)
+        index_path.write_text(json.dumps(index), encoding="utf-8")
+        assert adapter.refresh_from_source() is True
+        assert "model:999" not in adapter.catalog_snapshot().model_keys()
 
 
 def test_catalog_snapshot_keeps_scene_templates_separate_from_addable_models():
