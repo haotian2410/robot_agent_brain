@@ -276,6 +276,13 @@ def _validate_expected_contract(expected: dict[str, Any], outcome: str, row: dic
                 _contract_error(row, f"selection_invalid={selection}")
             if selection in {"nearest", "farthest"} and not expected.get("reference_role") and outcome not in {"safe_rejection", "clarification_required"}:
                 _contract_error(row, "selection_requires_reference_role")
+        elif query_type == "relation" and outcome not in {"safe_rejection", "clarification_required"}:
+            _contract_field(expected, "reference_role", row, required=True)
+            predicate = expected.get("predicate", expected.get("relation"))
+            if not isinstance(predicate, str) or not predicate.strip():
+                _contract_error(row, "relation_query_requires_predicate")
+        elif query_type == "neighbors" and "reference_role" in expected and expected.get("reference_role") is not None:
+            _contract_error(row, "neighbors_query_reference_role_forbidden")
         if "selected_count" in expected and (not isinstance(expected["selected_count"], int) or isinstance(expected["selected_count"], bool) or expected["selected_count"] < 1):
             _contract_error(row, "selected_count_type=positive_integer")
     elif route == "robot_task":
