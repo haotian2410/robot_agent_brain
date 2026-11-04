@@ -165,10 +165,18 @@ class AssetChoice:
                 "type": self.asset_type, "id": self.asset_id}
 
 
-def load_asset_catalog(path: str | Path | None) -> dict[str, dict[str, Any]]:
-    """Load the derived OLS catalog keyed by stable asset_key."""
+def load_asset_catalog_document(path: str | Path | None) -> tuple[dict[str, Any], str | None]:
+    """Load a derived OLS catalog and its optional source revision.
+
+    ``assets`` is kept as the historical mapping returned to the role
+    compiler.  New catalogs may additionally publish ``catalog_revision`` (or
+    the same value under ``source``); preserving that value lets a service
+    batch reject a compile artifact made against a different OLS snapshot.
+    Catalog files produced before this field existed remain usable and fall
+    back to the deterministic assets-only digest in the v2 compiler.
+    """
     if not path:
-        return {}
+        return {}, None
     source = Path(path).resolve()
     try:
         value = json.loads(source.read_text(encoding="utf-8"))
@@ -185,7 +193,22 @@ def load_asset_catalog(path: str | Path | None) -> dict[str, dict[str, Any]]:
         if key in result:
             raise BatchMatrixError(f"batch_asset_catalog_duplicate:{key}")
         result[key] = item
-    return result
+    declared = value.get("catalog_revision")
+    if declared is None and isinstance(value.get("source"), dict):
+        declared = value["source"].get("catalog_revision")
+    if declared is not None and (not isinstance(declared, str) or
+                                 not re.fullmatch(r"sha256:[0-9a-f]{64}", declared)):
+        raise BatchMatrixError("batch_asset_catalog_revision_invalid")
+    return result, declared
+
+
+def load_asset_catalog(path: str | Path | None) -> dict[str, dict[str, Any]]:
+    """Load the derived OLS catalog keyed by stable asset_key.
+
+    Compatibility wrapper for v1 callers that only need role candidates.
+    """
+    assets, _ = load_asset_catalog_document(path)
+    return assets
 
 
 def _choice_from_catalog(key: str, catalog: dict[str, dict[str, Any]]) -> AssetChoice:

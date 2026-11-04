@@ -2,8 +2,11 @@
   "schema_version": 1,
   "source": {
     "resource_version": "ResVersion 1.0.7-dev\nbuilt at 2026-10-31T19:38:00",
-    "model_count": 34
+    "model_count": 34,
+    "catalog_revision": "sha256:1b3577ba9998e53e46e2cc6815a6f07a384a32dfe30a105f869ef4abec4869c9",
+    "catalog_revision_source": "BrainConfig.load_assets"
   },
+  "catalog_revision": "sha256:1b3577ba9998e53e46e2cc6815a6f07a384a32dfe30a105f869ef4abec4869c9",
   "assets": [
     {
       "asset_key": "apple_red",

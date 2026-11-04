@@ -303,9 +303,12 @@ JSON/Scene 文档解析及被拒对象检查。新增测试覆盖显式浏览器
 - `classification=blocked` 只表示截图/浏览器等证据条件未满足；若任务语义已经得到
   正确澄清或安全拒绝，逐轮 JSON 另有 `semantic_classification`（如
   `expected_clarification`）和 `evidence_status=blocked`，不能把两者混为模型失败。
-- 编译期 `config/batch_asset_catalog.json` revision 与运行时 OLS catalog revision
-  分开记录；当前运行时请求携带的是 OLS 当轮 revision。两者不是同一个快照，故不能
-  宣称“编译 manifest 与运行请求版本完全一致”，这属于待补的锁定证据。
+- 编译器现在读取 catalog 文件声明的 `catalog_revision`，并将其写入 manifest；批量服务
+  在 preflight 时将该 revision 与 Brain `/health` 的运行时 revision 比较，不一致或缺失
+  即 fail-closed，不会用另一套 OLS 快照继续测试。使用
+  `scripts/build_batch_asset_catalog.py --brain-config config/webeditor.json` 生成目录
+  可直接复用 Brain 的 catalog snapshot 算法。匹配锁定已由自动测试覆盖；真实服务重启后
+  的整套批量证据仍需另行采集。
 - 官方 `A01–A13/M01–M13/R01` 27 项回归断言目前只有规范结构和自动单测覆盖，
   没有逐条真实浏览器证据；报告保留为未验证，不将计数校验写成行为通过。
 - 当前 HEAD 的真实首轮 smoke 已在

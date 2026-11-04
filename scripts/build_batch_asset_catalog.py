@@ -114,8 +114,37 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", required=True, help="OLS data directory")
     parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--brain-config",
+        help=("Brain config used to derive the complete runtime catalog revision. "
+              "When omitted, the catalog remains a legacy assets-only index."),
+    )
     args = parser.parse_args()
     catalog = build_catalog(Path(args.root).resolve())
+    if args.brain_config:
+        # Use the same public adapter snapshot as the running Brain instead of
+        # inventing a second digest algorithm in this build helper.  The
+        # config is only read; neither OLS nor the derived geometry cache is
+        # modified.
+        try:
+            from robot_agent_brain.config import BrainConfig
+            config = BrainConfig.load(args.brain_config)
+            configured_root = Path(config.asset_library_root or "").resolve()
+            source_root = Path(args.root).resolve()
+            if configured_root != source_root:
+                raise SystemExit(
+                    "batch_asset_catalog_root_mismatch:"
+                    f"config={configured_root}:root={source_root}"
+                )
+            adapter = config.load_assets()
+            snapshot = adapter.catalog_snapshot(
+                aliases=None, registered_profiles=list(config.robot_profiles.profiles)
+            )
+            catalog["catalog_revision"] = snapshot.revision
+            catalog["source"]["catalog_revision"] = snapshot.revision
+            catalog["source"]["catalog_revision_source"] = "BrainConfig.load_assets"
+        except ImportError as exc:
+            raise SystemExit("batch_asset_catalog_brain_package_missing") from exc
     target = Path(args.output).resolve()
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(catalog, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

@@ -60,6 +60,7 @@ EDIT-MOVE-001(parent_test_id=EDIT-COLOR-001): 把{object_a}向右移动五厘米
 ```bash
 python scripts/build_batch_asset_catalog.py \
   --root /home/cscvlab/lht/webeditor_runtime/ObjectLibraryServer-1.0.7-dev-a6bc69a/data \
+  --brain-config config/webeditor.json \
   --output config/batch_asset_catalog.json
 
 robot-brain batch-compile --matrix docs/semantic-refactor/02_semantic_test_matrix.xlsx \
