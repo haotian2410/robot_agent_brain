@@ -88,6 +88,30 @@ def test_live_qwen_payload_contains_full_current_ols_catalog_and_scenes():
     assert "scene_name=ur5e_table_empty" in requests[0]["messages"][0]["content"]
 
 
+def test_per_turn_catalog_keeps_registered_profiles_in_payload_and_revision():
+    from robot_agent_brain.contracts.asset_catalog import AssetCatalogSnapshot, CatalogAsset
+
+    first = AssetCatalogSnapshot.from_items(
+        [CatalogAsset(asset_key="model:1", name="apple", selectable_for_add=True)], [],
+        registered_profiles=["ur5e"])
+    second = AssetCatalogSnapshot.from_items(
+        [CatalogAsset(asset_key="model:1", name="apple", selectable_for_add=True)], [],
+        registered_profiles=["piper"])
+    assert first.revision != second.revision
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=_provider_response())
+
+    provider = QwenHTTPProvider("http://example/v1", "qwen-test",
+                                transport=httpx.MockTransport(handler), asset_catalog=first)
+    provider.understand_turn(TaskUnderstandingRequest(instruction="暂停", asset_catalog=second))
+    body = json.loads(requests[0]["messages"][1]["content"])
+    assert body["asset_catalog"]["revision"] == second.revision
+    assert body["asset_catalog"]["registered_profiles"] == ["piper"]
+
+
 def test_future_cup_name_is_not_attached_as_mug_alias():
     from robot_agent_brain.contracts.asset_catalog import AssetCatalogSnapshot, CatalogAsset
 
