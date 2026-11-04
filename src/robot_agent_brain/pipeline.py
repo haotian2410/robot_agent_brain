@@ -86,7 +86,8 @@ class BrainResult(BaseModel):
 
 class BrainPipeline:
     def __init__(self, understanding, assets, scene_editor=None, vision_provider=None,
-                 skill_planning_provider=None, planner_mode="recipe", robot="ur5e", aliases=None, query_near_distance_m=.2):
+                 skill_planning_provider=None, planner_mode="recipe", robot="ur5e", aliases=None,
+                 query_near_distance_m=.2, registered_profiles=None):
         self.understanding = understanding
         self.assets = assets
         # This is the configured command/export profile, not a guess from the
@@ -98,7 +99,9 @@ class BrainPipeline:
         self.aliases = getattr(getattr(assets, "metadata", None), "aliases", {})
         if aliases is not None:
             self.aliases = aliases
-        self.asset_catalog = (assets.catalog_snapshot(aliases=self.aliases)
+        self.registered_profiles = tuple(sorted(set(registered_profiles or ())))
+        self.asset_catalog = (assets.catalog_snapshot(aliases=self.aliases,
+                                                      registered_profiles=self.registered_profiles)
                               if hasattr(assets, "catalog_snapshot") else None)
         from .contracts.workspace import WorkspaceSemanticPolicy
         self.workspace_context = WorkspaceSemanticPolicy()
@@ -183,7 +186,8 @@ class BrainPipeline:
         # Updating the provider prompt and the request together prevents a new
         # catalog from being used to interpret an old response (or vice versa).
         if hasattr(self.assets, "catalog_snapshot"):
-            current_catalog = self.assets.catalog_snapshot(aliases=self.aliases)
+            current_catalog = self.assets.catalog_snapshot(aliases=self.aliases,
+                                                          registered_profiles=self.registered_profiles)
             if self.asset_catalog is None or current_catalog.revision != self.asset_catalog.revision:
                 self.asset_catalog = current_catalog
                 if hasattr(self.understanding, "set_asset_catalog"):

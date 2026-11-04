@@ -41,7 +41,8 @@ class BrainApplication:
                 planner_max_completion_tokens=self.config.planner_max_completion_tokens)
         self.provider = provider
         if hasattr(provider, "set_asset_catalog"):
-            provider.set_asset_catalog(self.assets, aliases=aliases)
+            provider.set_asset_catalog(self.assets, aliases=aliases,
+                                       registered_profiles=list(self.config.robot_profiles.profiles))
         if self.config.vision and (platform_factory is LocalScenePlatform or not hasattr(provider, "detect")):
             raise BrainError("vision_requires_rendering_platform", "configuration",
                              "Vision requires an explicit rendering platform and a detection provider; LocalScenePlatform has no images")
@@ -61,7 +62,8 @@ class BrainApplication:
                                       skill_planning_provider=provider if hasattr(provider, "plan") else None,
                                       planner_mode=self.config.planner, robot=self.config.robot,
                                       query_near_distance_m=self.config.query_near_distance_m,
-                                      aliases=self.config.load_semantic_aliases() if self.config.semantic_aliases else None)
+                                      aliases=self.config.load_semantic_aliases() if self.config.semantic_aliases else None,
+                                      registered_profiles=list(self.config.robot_profiles.profiles))
         bootstrap = self.config.bootstrap_settings()
         self.bootstrapper = SceneBootstrapper(self.assets, self.defaults, robot=self.config.robot, seed=self.config.seed,
             table_metadata_ref=bootstrap.get("default_table_metadata_ref"),

@@ -62,11 +62,13 @@ class QwenHTTPProvider:
         if asset_catalog is not None:
             self.set_asset_catalog(asset_catalog)
 
-    def set_asset_catalog(self, assets, aliases=None) -> None:
+    def set_asset_catalog(self, assets, aliases=None, registered_profiles=None) -> None:
         from .prompts import _snapshot_for_assets
-        self.asset_catalog_snapshot = _snapshot_for_assets(assets, aliases=aliases)
+        self.asset_catalog_snapshot = _snapshot_for_assets(
+            assets, aliases=aliases, registered_profiles=registered_profiles)
         self.asset_catalog_prompt, self.asset_catalog_sha256 = build_asset_catalog_prompt(
-            self.asset_catalog_snapshot, aliases=aliases, snapshot=self.asset_catalog_snapshot)
+            self.asset_catalog_snapshot, aliases=aliases, snapshot=self.asset_catalog_snapshot,
+            registered_profiles=registered_profiles)
 
     def _redact(self, text):
         return text.replace(self.api_key, "[REDACTED]") if self.api_key else text
@@ -184,6 +186,10 @@ class QwenHTTPProvider:
         pair.  Non-robot routes are deliberately rejected because this method
         cannot represent their payloads as TaskIntent.
         """
+        if request.asset_catalog is not None and (
+                self.asset_catalog_snapshot is None
+                or request.asset_catalog.revision != self.asset_catalog_snapshot.revision):
+            self.set_asset_catalog(request.asset_catalog)
         return self._call(
             "task_understanding",
             TASK_UNDERSTANDING_PROMPT + self.asset_catalog_prompt,
@@ -193,6 +199,13 @@ class QwenHTTPProvider:
         )
 
     def understand_turn(self, request: TaskUnderstandingRequest):
+        if request.asset_catalog is not None and (
+                self.asset_catalog_snapshot is None
+                or request.asset_catalog.revision != self.asset_catalog_snapshot.revision):
+            # A direct caller may provide a fresh per-turn snapshot without
+            # going through BrainPipeline. Keep the prompt and structured body
+            # on exactly the same catalog revision.
+            self.set_asset_catalog(request.asset_catalog)
         def parse(value):
             # Old replay fixtures may opt into the narrow formatting adapter,
             # but live v3.1 requests must be interpreted exactly as emitted.

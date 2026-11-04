@@ -26,13 +26,14 @@ def prompt_payload(value) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-def _snapshot_for_assets(assets, aliases=None):
+def _snapshot_for_assets(assets, aliases=None, registered_profiles=None):
     """Obtain a public catalog snapshot; never inspect adapter private maps."""
     if isinstance(assets, AssetCatalogSnapshot):
         return assets
     if hasattr(assets, "catalog_snapshot"):
-        return assets.catalog_snapshot(aliases=aliases if aliases is not None
-                                       else getattr(assets, "catalog_aliases", {}))
+        return assets.catalog_snapshot(
+            aliases=aliases if aliases is not None else getattr(assets, "catalog_aliases", {}),
+            registered_profiles=registered_profiles or ())
     # Small legacy fakes may only expose a serialized configuration payload.
     # This fallback is intentionally read-only and is not used by production
     # adapters, which all implement catalog_snapshot().
@@ -56,9 +57,9 @@ def _snapshot_for_assets(assets, aliases=None):
     return AssetCatalogSnapshot.from_items(models, robots)
 
 
-def build_asset_catalog_prompt(assets, aliases=None, *, snapshot=None) -> tuple[str, str]:
+def build_asset_catalog_prompt(assets, aliases=None, *, snapshot=None, registered_profiles=None) -> tuple[str, str]:
     """Build deterministic path-free OLS vocabulary from one catalog revision."""
-    snapshot = snapshot or _snapshot_for_assets(assets, aliases)
+    snapshot = snapshot or _snapshot_for_assets(assets, aliases, registered_profiles)
     rows = []
     for item in (*snapshot.models, *snapshot.robots):
         rows.append({"asset_key": item.asset_key, "semantic_name": item.name,

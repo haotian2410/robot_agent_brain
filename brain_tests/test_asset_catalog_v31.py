@@ -57,6 +57,37 @@ def test_understanding_request_sends_catalog_workspace_and_scene_context():
     assert "asset_catalog" not in body or "models" in body["asset_catalog"]
 
 
+def test_live_qwen_payload_contains_full_current_ols_catalog_and_scenes():
+    config = json.loads((ROOT / "config/webeditor.json").read_text())
+    root = Path(config["asset_library_root"])
+    if not root.is_absolute():
+        root = (ROOT / "config" / root).resolve()
+    cache = Path(config["asset_geometry_cache"])
+    if not cache.is_absolute():
+        cache = (ROOT / "config" / cache).resolve()
+    categories = (ROOT / "config" / config["asset_category_index"]).resolve()
+    adapter = FinalModelsLibraryAdapter(root, geometry_cache=cache, category_index=categories,
+                                        library_ref_prefix=config["library_ref_prefix"])
+    requests = []
+
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=_provider_response())
+
+    provider = QwenHTTPProvider("http://example/v1", "qwen-test",
+                                transport=httpx.MockTransport(handler))
+    snapshot = adapter.catalog_snapshot(aliases={"杯子": "mug", "马克杯": "mug", "cup": "mug"})
+    provider.understand_turn(TaskUnderstandingRequest(
+        instruction="暂停", asset_catalog=snapshot,
+        scene_context={"basis": "bootstrap", "primary_table_available": True}))
+    body = json.loads(requests[0]["messages"][1]["content"])
+    assert len(body["asset_catalog"]["models"]) == 34
+    assert len(body["asset_catalog"]["robots"]) == 13
+    assert len(body["asset_catalog"]["scenes"]) == 7
+    assert {item["name"] for item in body["asset_catalog"]["scenes"]} >= {"ur5e_table_empty", "piper_table_twist"}
+    assert "scene_name=ur5e_table_empty" in requests[0]["messages"][0]["content"]
+
+
 def test_future_cup_name_is_not_attached_as_mug_alias():
     from robot_agent_brain.contracts.asset_catalog import AssetCatalogSnapshot, CatalogAsset
 
