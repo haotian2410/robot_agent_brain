@@ -6,6 +6,7 @@ from pathlib import Path
 import httpx
 
 from robot_agent_brain.adapters.final_models_library import FinalModelsLibraryAdapter
+from robot_agent_brain.contracts.scene import SceneComponent, SceneConfig, SceneObject
 from robot_agent_brain.models.qwen_http import QwenHTTPProvider
 from robot_agent_brain.models.task_understanding import TaskUnderstandingRequest
 
@@ -184,6 +185,49 @@ def test_understanding_context_distinguishes_bootstrap_from_uploaded_empty_scene
     assert uploaded_empty["objects"] == []
 
 
+def test_scene_context_only_advertises_configured_primary_table_identity():
+    """A tabletop surface is not a primary support unless its OLS ref is bound."""
+    from robot_agent_brain.pipeline import BrainPipeline
+
+    config = json.loads((ROOT / "config/webeditor.json").read_text())
+    root = Path(config["asset_library_root"])
+    if not root.is_absolute():
+        root = (ROOT / "config" / root).resolve()
+    cache = Path(config["asset_geometry_cache"])
+    if not cache.is_absolute():
+        cache = (ROOT / "config" / cache).resolve()
+    categories = (ROOT / "config" / config["asset_category_index"]).resolve()
+    adapter = FinalModelsLibraryAdapter(root, geometry_cache=cache, category_index=categories,
+                                        library_ref_prefix=config["library_ref_prefix"])
+    pipeline = BrainPipeline(object(), adapter,
+                             primary_table_metadata_ref=config["default_table_metadata_ref"])
+
+    def table(identifier, ref, kind="model"):
+        return SceneObject(object_id_in_scene=identifier, object_name_in_scene="table",
+            components=[
+                SceneComponent(component_type="Transform", properties={
+                    "position": [0, 0, 0], "quaternion_xyzw": [0, 0, 0, 1],
+                    "scale": [1, 1, 1], "parent": None}),
+                SceneComponent(component_type="Semantic", properties={
+                    "semantic_name": "table", "category": "surface", "support": None}),
+                SceneComponent(component_type="MetadataRef", properties={"path": ref, "type": kind}),
+            ])
+
+    wrong_ref = SceneConfig(scene_schema_version=1, scene_id=1, scene_name="wrong",
+                            objects=[table(10, "$LIBRARY_SERVER/30")])
+    assert pipeline._understanding_scene_context(wrong_ref)["primary_table_available"] is False
+
+    right_ref = SceneConfig(scene_schema_version=1, scene_id=2, scene_name="right",
+                            objects=[table(10, "$LIBRARY_SERVER/29")])
+    context = pipeline._understanding_scene_context(right_ref)
+    assert context["primary_table_available"] is True
+    assert context["primary_table_object_id"] == 10
+
+    missing_type = SceneConfig(scene_schema_version=1, scene_id=3, scene_name="missing-type",
+                               objects=[table(10, "$LIBRARY_SERVER/29", kind=None)])
+    assert pipeline._understanding_scene_context(missing_type)["primary_table_available"] is False
+
+
 def test_ols_adapter_refresh_publishes_new_catalog_atomically():
     """A changed read-only OLS index is visible on the next snapshot."""
     config = json.loads((ROOT / "config/webeditor.json").read_text())
@@ -260,6 +304,57 @@ def test_live_table_side_words_canonicalize_to_tabletop_regions():
     turn = parse_qwen_turn(value, "在桌子左侧增加一个苹果")
     assert turn.scene_edit.operations[0].placement_region == "left_half"
     assert turn.status.value == "accepted"
+
+
+def test_live_table_region_normalization_does_not_rewrite_object_relative_add():
+    from robot_agent_brain.models.task_understanding import parse_qwen_turn
+
+    value = {
+        "protocol_version": "task_understanding.v3.1", "status": "accepted",
+        "turn_kind": "scene_edit", "clarification_question": None,
+        "scene_edit": {
+            "scene_basis": "current",
+            "entities": [
+                {"entity_id": "apple", "semantic_name": "apple", "category": "fruit"},
+                {"entity_id": "banana", "semantic_name": "banana", "category": "fruit"},
+            ],
+            "asset_choices": [{"entity_id": "banana", "asset_key": "model:2"}],
+            "relations": [],
+            "operations": [{"operation": "add", "target": "banana",
+                             "relation": "left_of", "reference": "apple"}],
+        },
+        "scene_query": None, "session_control": None, "robot_setup_request": None,
+        "entities": [], "operations": [], "relations": [],
+    }
+    turn = parse_qwen_turn(value, "在苹果左侧增加一个香蕉")
+    operation = turn.scene_edit.operations[0]
+    assert operation.relation.value == "left_of"
+    assert operation.reference == "apple"
+    assert operation.placement_region is None
+
+
+def test_live_table_relative_region_is_canonicalized_to_on_region():
+    from robot_agent_brain.models.task_understanding import parse_qwen_turn
+
+    value = {
+        "protocol_version": "task_understanding.v3.1", "status": "accepted",
+        "turn_kind": "scene_edit", "clarification_question": None,
+        "scene_edit": {
+            "scene_basis": "current",
+            "entities": [{"entity_id": "apple", "semantic_name": "apple", "category": "fruit"}],
+            "asset_choices": [{"entity_id": "apple", "asset_key": "model:1"}],
+            "relations": [],
+            "operations": [{"operation": "add", "target": "apple",
+                             "relation": "left_of", "reference": "table"}],
+        },
+        "scene_query": None, "session_control": None, "robot_setup_request": None,
+        "entities": [], "operations": [], "relations": [],
+    }
+    turn = parse_qwen_turn(value, "在桌子左侧增加一个苹果")
+    operation = turn.scene_edit.operations[0]
+    assert operation.relation.value == "on"
+    assert operation.reference == "table"
+    assert operation.placement_region == "left_half"
 
 
 def test_live_asset_choice_rejects_non_selectable_or_name_mismatch():

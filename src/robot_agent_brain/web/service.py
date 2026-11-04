@@ -20,6 +20,17 @@ from .protocol import PROTOCOL_VERSION, StartTask, SessionRequest, digest, loopb
 from .task_store import TaskStore
 
 
+# Debug evidence is intentionally a bundle, not a caller-selected filesystem
+# path.  Keeping the allow-list here makes the HTTP endpoint safe even when a
+# provider writes arbitrary text into its raw response.
+_DEBUG_FILES = {
+    "brain_turn.json", "task_intent.json", "grounded_task.json", "skill_plan.json",
+    "model_calls.json", "semantic_protocol.json", "raw_model_response.json", "raw_model_response.txt",
+    "traceback.txt", "planner_context.json", "planner_skill_catalog.json",
+    "raw_skill_plan.json", "normalized_skill_plan.json", "skill_plan_validation.json",
+}
+
+
 class AgentService:
     # §5.3 keeps this reading inside the Gateway's three seconds, but an OLS catalog check walks every
     # model, robot and scene (~55 reads plus a digest each).  The verdict changes when the library
@@ -623,7 +634,7 @@ def create_http_app(service):
             names = value.get("_artifact_paths", value.get("artifacts", {}))
             if isinstance(names, dict):
                 value["artifacts"] = [{"name": name, "url": f"/tasks/{record['id']}/artifacts/{quote(name)}"}
-                                      for name in names if name in {"scene_config", "scene_patch", "commands", "query_result"}]
+                                      for name in names if name in {"scene_config", "scene_patch", "commands", "query_result", "debug"}]
         return web.json_response({**{k:v for k,v in value.items() if not k.startswith("_")},
                                  "taskID":record['id'],"sessionID":record['session']} if value else
                                  {"taskID":record["id"],"state":record["state"],"terminal":record["terminal"],
@@ -673,14 +684,36 @@ def create_http_app(service):
         record = service.tasks.get(task_id(request))
         value = record["result"] or {}
         name = request.match_info["name"]
-        if name not in {"scene_config","scene_patch","commands","query_result"}:
+        if name not in {"scene_config","scene_patch","commands","query_result","debug"}:
             raise ValueError("artifact_not_found")
         target = value.get("_artifact_paths",{}).get(name)
         if not target:
             raise ValueError("artifact_not_found")
         path = Path(target).resolve()
         allowed = service.output / record["session"] / value["request_id"]
-        if not path.is_relative_to(allowed.resolve()) or not path.is_file():
+        if not path.is_relative_to(allowed.resolve()):
+            raise ValueError("artifact_not_found")
+        if name == "debug":
+            if not path.is_dir():
+                raise ValueError("artifact_not_found")
+            bundle = {}
+            for child in sorted(path.iterdir(), key=lambda item: item.name):
+                if child.name not in _DEBUG_FILES or not child.is_file():
+                    continue
+                if child.suffix == ".json":
+                    try:
+                        bundle[child.stem] = json.loads(child.read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        bundle[child.stem] = {"unreadable": True}
+                elif child.suffix == ".txt":
+                    try:
+                        bundle[child.stem] = child.read_text(encoding="utf-8")
+                    except OSError:
+                        bundle[child.stem] = {"unreadable": True}
+            if not bundle:
+                raise ValueError("artifact_not_found")
+            return web.json_response({"taskID": record["id"], "files": bundle})
+        if not path.is_file():
             raise ValueError("artifact_not_found")
         return web.FileResponse(path, headers={"Content-Disposition":f'attachment; filename="{name}.json"'})
 

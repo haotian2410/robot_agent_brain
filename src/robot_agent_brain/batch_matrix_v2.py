@@ -389,6 +389,8 @@ def compile_semantic_matrix_v2(matrix: str | Path, *, kind: str = "generated_edi
                             "assertion_profile": variant["expected_json_value"].get(
                                 "assertion_profile", variant.get("equivalence_group")),
                             "expected_assertions": variant["expected_json_value"],
+                            "catalog_revision": catalog_revision,
+                            "seed_algorithm": "sha256(brain-semantic-matrix.v2|root|axis|stable-ids)",
                         }
                         sessions.append(item)
                         manifest_rows.append({"session": name, "case_id": case_id, "variant_id": variant["variant_id"],

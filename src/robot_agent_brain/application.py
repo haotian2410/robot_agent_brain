@@ -70,7 +70,8 @@ class BrainApplication:
                                       planner_mode=self.config.planner, robot=self.config.robot,
                                       query_near_distance_m=self.config.query_near_distance_m,
                                       aliases=self.config.load_semantic_aliases() if self.config.semantic_aliases else None,
-                                      registered_profiles=list(self.config.robot_profiles.profiles))
+                                      registered_profiles=list(self.config.robot_profiles.profiles),
+                                      primary_table_metadata_ref=self.config.default_table_metadata_ref)
         bootstrap = self.config.bootstrap_settings()
         self.bootstrapper = SceneBootstrapper(self.assets, self.defaults, robot=self.config.robot, seed=self.config.seed,
             table_metadata_ref=bootstrap.get("default_table_metadata_ref"),

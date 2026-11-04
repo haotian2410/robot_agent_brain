@@ -627,6 +627,19 @@ def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str)
             operations.append(raw)
             continue
         item = dict(raw)
+        # Region words only describe a desktop area when the reference is the
+        # tabletop itself.  Do not rewrite object-relative placement such as
+        # ``在苹果左侧增加香蕉`` into ``on table`` merely because it contains
+        # the same directional token.
+        raw_relation = item.get("relation")
+        raw_reference = str(item.get("reference") or "").casefold()
+        table_reference = raw_reference in {"table", "desk", "desktop", "work_table", "桌子", "桌面", "台面"}
+        if raw_relation not in (None, "on", "left_of", "right_of", "front_of", "behind"):
+            operations.append(raw)
+            continue
+        if raw_reference and not table_reference:
+            operations.append(raw)
+            continue
         # A numeric distance or a second motion field is not a corner
         # placement.  Leave it untouched so the normal validator reports the
         # exact forbidden field rather than silently changing user intent.

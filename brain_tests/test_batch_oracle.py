@@ -1,0 +1,53 @@
+from robot_agent_brain.batch_oracle import evaluate_turn
+
+
+def _obj(oid, name, x=0.0, y=0.0, color=None):
+    components = [
+        {"component_type": "Transform", "properties": {
+            "position": [x, y, 0.1], "quaternion_xyzw": [0, 0, 0, 1],
+            "scale": [1, 1, 1], "parent": None}},
+        {"component_type": "MetadataRef", "properties": {"path": "$LIBRARY_SERVER/1", "type": "model"}},
+        {"component_type": "Semantic", "properties": {"semantic_name": name, "category": "fruit", "support": 10}},
+    ]
+    if color:
+        components.append({"component_type": "MeshRenderer", "properties": {"forceOverrideColor": color}})
+    return {"object_id_in_scene": oid, "object_name_in_scene": name, "components": components}
+
+
+def _scene(objects):
+    return {"scene_schema_version": 1, "scene_id": 1, "scene_version": 1,
+            "scene_sub_version": 0, "scene_name": "fixture", "objects": objects}
+
+
+def test_oracle_proves_add_and_asset_role_without_using_brain_selector():
+    before = _scene([_obj(10, "table")])
+    # Make the table discoverable by the independent tabletop rule.
+    before["objects"][0]["components"][1]["properties"] = {"path": "$LIBRARY_SERVER/29", "type": "model"}
+    before["objects"][0]["components"][2]["properties"] = {"semantic_name": "table", "category": "surface", "support": None}
+    after = _scene(before["objects"] + [_obj(11, "apple", 0.2, 0.1)])
+    after["objects"][-1]["components"][1]["properties"] = {"path": "$LIBRARY_SERVER/1", "type": "model"}
+    expected = {"operation": "add", "target_role": "object_a", "count": 1,
+                "asset_selection": "catalog_member", "support": "primary_table"}
+    value = evaluate_turn(expected=expected, expected_outcome="scene_updated",
+                          before_scene=before, after_scene=after,
+                          result={"outcome": "scene_updated", "executed": False},
+                          role_mapping={"object_a": {"semantic_name": "apple", "metadata_ref": "$LIBRARY_SERVER/1"}})
+    assert value["status"] == "passed", value
+
+
+def test_oracle_detects_query_mutating_scene():
+    before = _scene([_obj(10, "apple")])
+    after = _scene([_obj(10, "apple", 0.1, 0.0)])
+    value = evaluate_turn(expected={"route": "scene_query", "scene_unchanged": True},
+                          expected_outcome="answered", before_scene=before, after_scene=after,
+                          result={"outcome": "answered", "executed": False})
+    assert value["status"] == "failed_assertion"
+    assert "scene_changed_when_unchanged_expected" in value["errors"]
+
+
+def test_oracle_classifies_expected_clarification_without_scene_change():
+    scene = _scene([_obj(10, "apple")])
+    value = evaluate_turn(expected={"required_missing_slot": "selection.reference", "scene_unchanged": True},
+                          expected_outcome="clarification_required", before_scene=scene, after_scene=scene,
+                          result={"outcome": "clarification_required", "executed": False})
+    assert value["status"] == "expected_clarification"

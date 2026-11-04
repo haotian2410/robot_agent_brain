@@ -87,7 +87,8 @@ class BrainResult(BaseModel):
 class BrainPipeline:
     def __init__(self, understanding, assets, scene_editor=None, vision_provider=None,
                  skill_planning_provider=None, planner_mode="recipe", robot="ur5e", aliases=None,
-                 query_near_distance_m=.2, registered_profiles=None):
+                 query_near_distance_m=.2, registered_profiles=None,
+                 primary_table_metadata_ref=None):
         self.understanding = understanding
         self.assets = assets
         # This is the configured command/export profile, not a guess from the
@@ -109,7 +110,8 @@ class BrainPipeline:
                                                       registered_profiles=self.registered_profiles)
                               if hasattr(assets, "catalog_snapshot") else None)
         from .contracts.workspace import WorkspaceSemanticPolicy
-        self.workspace_context = WorkspaceSemanticPolicy()
+        self.workspace_context = WorkspaceSemanticPolicy(
+            primary_table_metadata_ref=primary_table_metadata_ref)
         self.category_aliases = getattr(getattr(assets, "metadata", None), "category_aliases", {})
         self.grounder = SceneGrounder(aliases=self.aliases, category_aliases=self.category_aliases, assets=assets)
         self.motion = MotionScaleResolver(assets)
@@ -148,7 +150,13 @@ class BrainPipeline:
             }
 
         index = SceneIndex(scene)
-        table_aliases = {"table", "desk", "desktop", "work_table", "coffee_table", "桌子", "桌面", "台面"}
+        # Only the configured OLS identity is a verified primary table in a
+        # production scene.  A fallback to the canonical semantic name is
+        # retained for small in-memory/unit fixtures that intentionally do
+        # not carry a deployment configuration.  ``coffee_table`` and an
+        # arbitrary surface are never promoted to primary implicitly.
+        configured_ref = self.workspace_context.primary_table_metadata_ref
+        table_aliases = {"table", "desk", "desktop", "work_table", "桌子", "桌面", "台面"}
         objects = []
         table_ids = []
         for item in sorted(scene.objects, key=lambda value: value.object_id_in_scene):
@@ -159,8 +167,24 @@ class BrainPipeline:
             semantic_name = semantic.semantic_name if semantic is not None else ""
             category = semantic.category if semantic is not None else ""
             canonical_name = self.aliases.get(semantic_name.casefold(), semantic_name.casefold())
-            is_table = (canonical_name in table_aliases
-                        or category.casefold() in {"surface", "support_surface", "table"})
+            metadata_ref = index.metadata_ref(oid)
+            metadata_type = index.metadata_type(oid)
+            if configured_ref is not None:
+                is_table = (metadata_ref == configured_ref and metadata_type == "model"
+                            and (canonical_name in table_aliases
+                                 or category.casefold() in {"surface", "support_surface", "table"}))
+                # An explicitly configured table must also be resolvable by
+                # the read-only asset adapter; otherwise do not advertise a
+                # usable support plane to Qwen.
+                if is_table:
+                    try:
+                        self.assets.resolve(metadata_ref, asset_type="model")
+                    except Exception:
+                        is_table = False
+            else:
+                is_table = canonical_name in table_aliases and category.casefold() in {
+                    "surface", "support_surface", "table", "furniture", ""
+                }
             if is_table:
                 table_ids.append(oid)
             objects.append({

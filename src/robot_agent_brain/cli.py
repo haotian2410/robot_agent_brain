@@ -53,6 +53,7 @@ def parser():
     compile_cmd.add_argument("--config")
     campaign = commands.add_parser("batch-campaign", help="Run a success-gated generated/edit matrix campaign")
     campaign.add_argument("--matrix", required=True)
+    campaign.add_argument("--kind", choices=["generated_edit", "known_scene"], default="generated_edit")
     campaign.add_argument("--asset-roles", default="config/batch_asset_roles.json")
     campaign.add_argument("--seed", type=int, default=0)
     campaign.add_argument("--agent-url", default="http://127.0.0.1:8500")
@@ -101,6 +102,7 @@ def main(argv=None):
                 from .batch_campaign_v2 import run_semantic_campaign
                 result, output = run_semantic_campaign(
                     matrix=args.matrix, asset_roles=args.asset_roles,
+                    kind=args.kind,
                     asset_catalog=args.asset_catalog, seed=args.seed,
                     agent_url=args.agent_url, gateway_url=args.gateway_url,
                     browser_id=args.browser_id, task_timeout=args.task_timeout,

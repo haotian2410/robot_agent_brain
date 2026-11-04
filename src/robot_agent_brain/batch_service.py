@@ -18,11 +18,12 @@ from urllib.parse import urljoin
 import httpx
 
 from .batch import load_batch_input
+from .batch_oracle import evaluate_turn
 from .web.protocol import digest
 
 
 _SAFE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
-_ARTIFACTS = {"scene_config", "scene_patch", "commands", "query_result"}
+_ARTIFACTS = {"scene_config", "scene_patch", "commands", "query_result", "debug"}
 
 _RESULT_COLUMNS = [
     "用户指令", "真实浏览器场景截图", "系统返回的任务结果",
@@ -33,6 +34,10 @@ _RESULT_COLUMNS = [
     "asset_role_mapping", "parent_flow_id", "random_seed",
     "test_id", "parent_test_id", "coverage_tag", "expected_outcome", "expected_error_codes",
     "expected_scene_change", "assertion_profile", "assertion_result",
+    "expected_assertions", "classification",
+    "oracle_status", "oracle_checks", "oracle_errors", "actual_outcome",
+    "catalog_revision", "variant_id", "equivalence_group", "fixture_id", "asset_seed",
+    "parent_run_id", "parent_scene_digest",
 ]
 
 
@@ -95,6 +100,12 @@ def _write_results_workbook(root: Path, rows: list[dict]) -> Path | None:
             row.get("test_id", ""), row.get("parent_test_id", ""), row.get("coverage_tag", ""),
             row.get("expected_outcome", ""), "|".join(row.get("expected_error_codes", []) or []),
             row.get("expected_scene_change", ""), row.get("assertion_profile", ""), row.get("assertion_result", "not_checked"),
+            json.dumps(row.get("expected_assertions", {}), ensure_ascii=False), row.get("classification", ""),
+            row.get("oracle_status", "not_checked"), json.dumps(row.get("oracle_checks", []), ensure_ascii=False),
+            json.dumps(row.get("oracle_errors", []), ensure_ascii=False), row.get("actual_outcome", row.get("outcome", "")),
+            row.get("catalog_revision", ""), row.get("variant_id", ""), row.get("equivalence_group", ""),
+            row.get("fixture_id", ""), row.get("asset_seed", ""), row.get("parent_run_id", ""),
+            row.get("parent_scene_digest", ""),
         ]
         sheet.append(values)
         current = sheet.max_row
@@ -106,7 +117,8 @@ def _write_results_workbook(root: Path, rows: list[dict]) -> Path | None:
     widths = {1: 34, 2: 42, 3: 60, 4: 24, 5: 10, 6: 24, 7: 8,
               8: 16, 9: 12, 10: 14, 11: 16, 12: 70, 13: 12, 14: 24,
               15: 10, 16: 10, 17: 30, 18: 24, 19: 36, 20: 50,
-              21: 36, 22: 24, 23: 14}
+              21: 36, 22: 24, 23: 14, 24: 22, 25: 45, 26: 40, 27: 22,
+              28: 24, 29: 16, 30: 22, 31: 28, 32: 40, 33: 30, 34: 28}
     for index, width in widths.items():
         sheet.column_dimensions[chr(64 + index) if index <= 26 else "A"].width = width
     sheet.freeze_panes = "A2"
@@ -156,8 +168,59 @@ def _check_expectation(session_spec, result: dict, state: dict) -> tuple[str, st
     allowed = set(session_spec.expected_error_codes or [])
     if allowed:
         code = result.get("error_code") or (result.get("failure_reason") or {}).get("code")
+        if not code and isinstance(result.get("error"), dict):
+            code = result["error"].get("code")
         ok = ok and (code in allowed)
     return ("passed" if ok else "failed", None if ok else f"expected={expected},actual={actual}")
+
+
+def _independent_oracle(session_spec, before_scene: dict, after_scene: dict, result: dict) -> dict:
+    """Run the independent v2 oracle over complete Scene documents.
+
+    Older callers may pass only identity dictionaries; those are accepted by
+    ``evaluate_turn`` but correctly leave feature-level checks unproven.
+    """
+    expected = getattr(session_spec, "expected_assertions", {}) or {}
+    expected_outcome = getattr(session_spec, "expected_outcome", None)
+    if not expected_outcome:
+        # Hand-written v1 sessions do not carry matrix expectations.  Infer
+        # only the coarse route from the actual envelope; feature assertions
+        # remain unproven and are never synthesized from the reply text.
+        expected_outcome = "answered" if result.get("outcome") in {"answered", "query_answered"} else "scene_updated"
+    return evaluate_turn(expected=expected,
+                         expected_outcome=expected_outcome,
+                         before_scene=before_scene, after_scene=after_scene,
+                         result=result,
+                         role_mapping=getattr(session_spec, "asset_role_mapping", {}) or {})
+
+
+def _result_classification(*, session_spec, result: dict, assertion_result: str,
+                           oracle: dict, screenshot_ok: bool, ok: bool) -> str:
+    """Map a turn to the runbook's independent result vocabulary.
+
+    ``status`` remains the historical four-state field used by the existing
+    batch summaries.  This classification is additive and is intentionally
+    derived from the expectation plus independent evidence, rather than from
+    the natural-language reply alone.
+    """
+    if not screenshot_ok:
+        return "blocked"
+    if oracle.get("status") == "failed_assertion":
+        return "failed_assertion"
+    if assertion_result == "failed":
+        return "failed_protocol/runtime"
+    expected = getattr(session_spec, "expected_outcome", None)
+    if expected == "clarification_required" and ok:
+        return "expected_clarification"
+    if expected == "safe_rejection" and ok:
+        return "expected_safe_rejection"
+    if expected == "capability_unsupported" and ok:
+        return "capability_unsupported"
+    if expected == "blocked" or result.get("outcome") == "blocked":
+        return "blocked"
+    if ok:
+        return "passed"
+    return "failed_protocol/runtime"
 
 
 class ServiceBatchRunner:
@@ -367,6 +430,41 @@ class ServiceBatchRunner:
             saved[name] = str(target)
         return saved
 
+    @staticmethod
+    def _record_debug_evidence(saved_artifacts: dict, turn_root: Path) -> dict:
+        """Materialize the approved debug bundle into explicit run evidence.
+
+        The Brain HTTP endpoint returns a safe JSON bundle rather than exposing
+        its task directory.  Keep both the bundle and the two evidence names
+        used by the runbook.  If the service was started without ``debug`` we
+        record that fact instead of silently treating missing model JSON as a
+        passing parse.
+        """
+        debug_path = saved_artifacts.get("debug")
+        evidence = {"status": "not_available", "reason": "debug_artifact_not_returned"}
+        if debug_path and Path(debug_path).is_file():
+            try:
+                bundle = json.loads(Path(debug_path).read_text(encoding="utf-8"))
+            except (OSError, ValueError) as exc:
+                evidence = {"status": "invalid", "reason": str(exc)}
+            else:
+                files = bundle.get("files", {}) if isinstance(bundle, dict) else {}
+                debug_dir = turn_root / "debug"
+                debug_dir.mkdir(exist_ok=True)
+                (debug_dir / "debug_bundle.json").write_text(json.dumps(bundle, ensure_ascii=False, indent=2), encoding="utf-8")
+                for key, value in files.items():
+                    if key == "raw_model_response":
+                        (turn_root / "raw_model_response.json").write_text(
+                            value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+                    elif key in {"brain_turn", "semantic_protocol"}:
+                        (turn_root / ("canonical_payload.json" if key == "brain_turn" else "semantic_protocol.json")).write_text(
+                            json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+                evidence = {"status": "captured", "bundle": str(debug_dir / "debug_bundle.json"),
+                            "raw_model_response": str(turn_root / "raw_model_response.json") if (turn_root / "raw_model_response.json").is_file() else None,
+                            "canonical_payload": str(turn_root / "canonical_payload.json") if (turn_root / "canonical_payload.json").is_file() else None}
+        (turn_root / "debug_evidence.json").write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")
+        return evidence
+
     def run(self, input_path):
         loaded = load_batch_input(input_path)
         if loaded["kind"] != "sessions":
@@ -403,9 +501,12 @@ class ServiceBatchRunner:
                               "expected_error_codes": session_spec.expected_error_codes,
                               "expected_scene_change": session_spec.expected_scene_change,
                               "assertion_profile": session_spec.assertion_profile,
+                              "expected_assertions": session_spec.expected_assertions,
                               "variant_id": session_spec.variant_id, "equivalence_group": session_spec.equivalence_group,
                               "parent_variant_id": session_spec.parent_variant_id,
                               "fixture_id": session_spec.fixture_id, "asset_seed": session_spec.asset_seed,
+                              "catalog_revision": getattr(session_spec, "catalog_revision", None),
+                              "seed_algorithm": getattr(session_spec, "seed_algorithm", None),
                               "parent_run_id": getattr(session_spec, "parent_run_id", None),
                               "parent_scene_path": getattr(session_spec, "parent_scene_path", None),
                               "parent_scene_digest": getattr(session_spec, "parent_scene_digest", None),
@@ -416,6 +517,10 @@ class ServiceBatchRunner:
 
             def write_session_summary(status, error=None):
                 rows = [item for item in results if item.get("session") == name]
+                classification_counts = {}
+                for item in rows:
+                    classification = item.get("classification", "not_run")
+                    classification_counts[classification] = classification_counts.get(classification, 0) + 1
                 value = {"name": name, "outputName": output_name,
                          "sessionID": session_record.get("sessionID"),
                          "difficulty": session_spec.difficulty,
@@ -428,15 +533,19 @@ class ServiceBatchRunner:
                          "expected_error_codes": session_spec.expected_error_codes,
                          "expected_scene_change": session_spec.expected_scene_change,
                          "assertion_profile": session_spec.assertion_profile,
+                         "expected_assertions": session_spec.expected_assertions,
                          "variant_id": session_spec.variant_id, "equivalence_group": session_spec.equivalence_group,
                          "parent_variant_id": session_spec.parent_variant_id,
                          "fixture_id": session_spec.fixture_id, "asset_seed": session_spec.asset_seed,
+                         "catalog_revision": getattr(session_spec, "catalog_revision", None),
+                         "seed_algorithm": getattr(session_spec, "seed_algorithm", None),
                          "parent_run_id": getattr(session_spec, "parent_run_id", None),
                          "parent_scene_path": getattr(session_spec, "parent_scene_path", None),
                          "parent_scene_digest": getattr(session_spec, "parent_scene_digest", None),
                          "baseline_digest": getattr(session_spec, "baseline_digest", None),
                          "role_bindings": getattr(session_spec, "role_bindings", {}) or {},
-                         "browserID": browser_id, "status": status, "turns": rows}
+                         "browserID": browser_id, "status": status, "turns": rows,
+                         "classification_counts": classification_counts}
                 if error is not None:
                     value["error"] = error
                 (session_root / "session_summary.json").write_text(
@@ -502,9 +611,22 @@ class ServiceBatchRunner:
                         results.append({"session": name, "output_name": output_name,
                                         "difficulty": session_spec.difficulty,
                                         "category": session_spec.category,
-                                        "turn": turn_index, **result})
+                                        "turn": turn_index, "classification": "not_run",
+                                        "expected_assertions": session_spec.expected_assertions,
+                                        **result})
                         continue
                     try:
+                        # Capture the authoritative baseline immediately before
+                        # sending the instruction.  ``world`` is the previous
+                        # turn's local copy and may be stale after a browser
+                        # edit, so the live read is part of the oracle evidence.
+                        before = self._world(browser_id)
+                        before_identity = self._identity(before)
+                        (turn_root / "before_scene.json").write_text(
+                            json.dumps(before, ensure_ascii=False, indent=2), encoding="utf-8")
+                        (turn_root / "before_scene_identity.json").write_text(
+                            json.dumps(before_identity, ensure_ascii=False, indent=2), encoding="utf-8")
+                        world = before
                         request_id, started = self._start_task(session_id, browser_id, instruction, world)
                         state, result = self._wait_task(started["taskID"])
                         current = self._world(browser_id)
@@ -515,6 +637,7 @@ class ServiceBatchRunner:
                         (turn_root / "task_result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
                         (turn_root / "reply.txt").write_text(str(result.get("reply", "")), encoding="utf-8")
                         saved_artifacts = self._download_artifacts(result, turn_root)
+                        debug_evidence = self._record_debug_evidence(saved_artifacts, turn_root)
                         (turn_root / "scene.json").write_text(json.dumps(current, ensure_ascii=False, indent=2), encoding="utf-8")
                         (turn_root / "scene_identity.json").write_text(json.dumps(identity, ensure_ascii=False, indent=2), encoding="utf-8")
                         screenshot = {"status": "blocked", "reason": "camera_not_bound"}
@@ -528,6 +651,10 @@ class ServiceBatchRunner:
                             screenshot = {**screenshot, "status": "skipped"}
                         outcome = result.get("outcome", "failed")
                         assertion_result, assertion_error = _check_expectation(session_spec, result, state)
+                        oracle = _independent_oracle(session_spec, before, current, result)
+                        oracle["debug_evidence"] = debug_evidence
+                        (turn_root / "oracle.json").write_text(
+                            json.dumps(oracle, ensure_ascii=False, indent=2), encoding="utf-8")
                         screenshot_ok = screenshot.get("status") == "captured" or not self.screenshot_required
                         # A safe rejection or a correct clarification is a
                         # passing matrix result when it matches the row's
@@ -536,11 +663,18 @@ class ServiceBatchRunner:
                         # expectation, making T17/T18 impossible to pass.
                         semantic_ok = (assertion_result == "passed" if session_spec.expected_outcome
                                        else outcome not in {"failed"})
-                        ok = bool(state.get("terminal")) and semantic_ok and screenshot_ok
+                        oracle_ok = oracle.get("status") in {
+                            "passed", "expected_clarification", "expected_safe_rejection"
+                        }
+                        ok = bool(state.get("terminal")) and semantic_ok and screenshot_ok and oracle_ok
                         if assertion_result == "failed":
                             ok = False
                         if result.get("executed", False) is not False:
                             ok = False
+                        classification = _result_classification(
+                            session_spec=session_spec, result=result,
+                            assertion_result=assertion_result, oracle=oracle,
+                            screenshot_ok=screenshot_ok, ok=ok)
                         row_status = "passed" if ok else ("blocked" if screenshot.get("status") != "captured" and self.screenshot_required else "failed")
                         row = {"session": name, "difficulty": session_spec.difficulty,
                                "capabilities": list(session_spec.capabilities),
@@ -561,11 +695,23 @@ class ServiceBatchRunner:
                                "expected_scene_change": session_spec.expected_scene_change,
                                "assertion_profile": session_spec.assertion_profile,
                                "assertion_result": assertion_result,
+                               "expected_assertions": session_spec.expected_assertions,
+                               "oracle": oracle,
+                               "oracle_status": oracle.get("status", "not_checked"),
+                               "oracle_checks": oracle.get("checks", []),
+                               "oracle_errors": oracle.get("errors", []),
+                               "actual_outcome": outcome,
+                               "debug_evidence": debug_evidence,
+                               "catalog_revision": (getattr(session_spec, "catalog_revision", None)
+                                   or result.get("metrics", {}).get("catalog_revision")
+                                   or result.get("catalog_revision")),
+                               "classification": classification,
                                "variant_id": session_spec.variant_id,
                                "equivalence_group": session_spec.equivalence_group,
                                "parent_variant_id": session_spec.parent_variant_id,
                                "fixture_id": session_spec.fixture_id,
                                "asset_seed": session_spec.asset_seed,
+                               "seed_algorithm": getattr(session_spec, "seed_algorithm", None),
                                "parent_run_id": getattr(session_spec, "parent_run_id", None),
                                "parent_scene_path": getattr(session_spec, "parent_scene_path", None),
                                "parent_scene_digest": getattr(session_spec, "parent_scene_digest", None),
@@ -574,7 +720,12 @@ class ServiceBatchRunner:
                         if assertion_error:
                             row["assertion_error"] = assertion_error
                         results.append(row)
-                        if not ok:
+                        # Correct clarifications and safe rejections are valid
+                        # matrix observations, not dependency failures.  They
+                        # must not be used as parent snapshots, but a later
+                        # turn in the same authored session may continue after
+                        # the user supplies the missing information.
+                        if classification in {"failed_assertion", "failed_protocol/runtime", "blocked"}:
                             failed = True
                         world = current
                     except Exception as exc:
@@ -582,7 +733,10 @@ class ServiceBatchRunner:
                         failed = failed or row_status == "failed"
                         row = {"session": name, "turn": turn_index, "instruction": instruction,
                                "status": row_status, "outcome": row_outcome, "error": row_error,
-                               "failure_class": row_error.get("failure_class")}
+                               "failure_class": row_error.get("failure_class"),
+                               "classification": ("capability_unsupported" if row_error.get("failure_class") == "capability_unsupported"
+                                                   else "failed_protocol/runtime"),
+                               "expected_assertions": session_spec.expected_assertions}
                         (turn_root / "error.json").write_text(json.dumps(row, ensure_ascii=False, indent=2), encoding="utf-8")
                         (turn_root / "task_result.json").write_text(json.dumps({"outcome": row_outcome, "executed": False,
                             "failure_class": row_error.get("failure_class"), "error": row_error}, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -614,7 +768,15 @@ class ServiceBatchRunner:
         summary = {"transport": "service", "browserID": browser_id, "health": health,
                    "sessions": session_summaries, "turns": results,
                    "totals": {status: sum(item.get("status") == status for item in results)
-                              for status in ("passed", "failed", "blocked", "skipped")}}
+                              for status in ("passed", "failed", "blocked", "skipped")},
+            "classification_counts": {
+                       classification: sum(item.get("classification", "not_run") == classification for item in results)
+                       for classification in (
+                           "passed", "failed_assertion", "failed_protocol/runtime",
+                           "expected_clarification", "expected_safe_rejection",
+                           "blocked_fixture", "skipped_parent_not_satisfied", "not_run", "capability_unsupported"
+                       )
+                   }}
         (root / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         lines = ["# Batch test summary", "", f"Browser: `{browser_id}`", ""]
         for item in results:

@@ -61,10 +61,22 @@ def _last_scene_for_run(stage_root: Path, run: dict, summary: dict):
         return None
     if session.get("status") != "passed":
         return None
+    if session.get("expected_outcome") in {
+        "clarification_required", "safe_rejection", "capability_unsupported", "blocked"
+    }:
+        return None
     turns = session.get("turns") or []
     # A parent is qualified only when every executed turn was passed and a
     # final scene file exists.  Skips/blocked screenshots cannot be a baseline.
-    if not turns or any(item.get("status") != "passed" for item in turns):
+    if not turns or any(item.get("status") != "passed" or item.get("classification", "passed") != "passed"
+                        for item in turns):
+        return None
+    # A passing historical status is not enough for a semantic parent.  A
+    # correct clarification, safe rejection or capability boundary has no
+    # generated object state for a child to inherit.  Keep those outcomes in
+    # the report, but never promote them to a baseline snapshot.
+    usable_classes = {"passed"}
+    if any(item.get("classification", "passed") not in usable_classes for item in turns):
         return None
     turn_numbers = sorted(int(item.get("turn", 0) or 0) for item in turns)
     for turn_number in reversed(turn_numbers):
@@ -74,6 +86,14 @@ def _last_scene_for_run(stage_root: Path, run: dict, summary: dict):
         try:
             scene = json.loads(candidate.read_text(encoding="utf-8"))
         except (OSError, ValueError):
+            continue
+        # The sidecar identity is authoritative for lineage.  If a runner
+        # recorded a digest, reject a tampered or stale scene instead of
+        # recomputing a new baseline silently.
+        recorded = next((item for item in turns if int(item.get("turn", 0) or 0) == turn_number), {})
+        recorded_scene = recorded.get("scene") if isinstance(recorded.get("scene"), dict) else {}
+        recorded_digest = recorded_scene.get("sceneDigest")
+        if recorded_digest and recorded_digest != digest(scene):
             continue
         return {
             "path": candidate,
@@ -88,6 +108,7 @@ def _last_scene_for_run(stage_root: Path, run: dict, summary: dict):
 
 
 def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
+                          kind="generated_edit",
                           agent_url="http://127.0.0.1:8500",
                           gateway_url="http://127.0.0.1:8099", browser_id=None,
                           task_timeout=300, screenshot_required=True,
@@ -96,8 +117,10 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
     output = Path(output_dir).resolve()
     root = output / ("campaign-" + time.strftime("%Y%m%d-%H%M%S") + "-" + str(seed))
     root.mkdir(parents=True, exist_ok=False)
+    if kind not in {"generated_edit", "known_scene"}:
+        raise ValueError(f"semantic_campaign_kind_invalid:{kind}")
     document, compile_manifest = compile_semantic_matrix_v2(
-        matrix, kind="generated_edit", asset_roles=asset_roles,
+        matrix, kind=kind, asset_roles=asset_roles,
         asset_catalog=asset_catalog, seed=seed, strict_counts=True,
         run_profile=run_profile)
     compiled = document["sessions"]
