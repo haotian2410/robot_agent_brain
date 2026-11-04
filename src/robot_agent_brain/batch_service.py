@@ -277,8 +277,14 @@ class ServiceBatchRunner:
     def _health(self):
         agent = self._request("GET", self.agent_url + "/health").json()
         gateway = self._request("GET", self.gateway_url + "/api/health").json()
-        if agent.get("qwen") not in {"ready", "unavailable"}:
-            raise RuntimeError("batch_agent_health_invalid")
+        if agent.get("qwen") != "ready":
+            raise RuntimeError("batch_qwen_unavailable")
+        asset_detail = agent.get("asset_detail")
+        if isinstance(asset_detail, dict) and asset_detail.get("matched") is not True:
+            raise RuntimeError("batch_assets_unavailable")
+        tasks = agent.get("tasks") or {}
+        if tasks.get("active_task_id") is not None or int(tasks.get("queued") or 0) != 0:
+            raise RuntimeError("batch_tasks_already_running")
         if gateway.get("protocol") not in {None, "brain-web/2"}:
             raise RuntimeError("batch_gateway_protocol_invalid")
         return {"agent": agent, "gateway": gateway}
@@ -301,6 +307,15 @@ class ServiceBatchRunner:
             if stale:
                 raise RuntimeError("batch_browser_stale_binding")
             raise RuntimeError("batch_browser_not_bound")
+        # A connected browser is not enough for a screenshot-backed batch.  Do
+        # not begin a run that will later fabricate a camera or reuse an old
+        # frame; the active live world must expose at least one Camera object.
+        world = self._world(live_browser)
+        cameras = [obj for obj in world.get("objects", [])
+                   if any(component.get("component_type") == "Camera"
+                          for component in obj.get("components", []) or [])]
+        if not cameras:
+            raise RuntimeError("batch_browser_camera_unavailable")
         return live_browser, health
 
     def _world(self, browser_id):

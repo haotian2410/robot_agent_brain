@@ -12,6 +12,41 @@ def test_capability_boundary_is_classified_as_expected_unsupported():
     assert error["executed"] is False
 
 
+def test_service_batch_preflight_rejects_missing_qwen_assets_or_running_task(tmp_path):
+    runner = ServiceBatchRunner(agent_url="http://agent", gateway_url="http://gateway",
+                                output_dir=tmp_path, screenshot_required=False)
+
+    class Response:
+        def __init__(self, value):
+            self.value = value
+        def json(self):
+            return self.value
+
+    cases = [
+        ({"qwen": "unavailable", "asset_detail": {"matched": True}, "tasks": {}},
+         "batch_qwen_unavailable"),
+        ({"qwen": "ready", "asset_detail": {"matched": False}, "tasks": {}},
+         "batch_assets_unavailable"),
+        ({"qwen": "ready", "asset_detail": {"matched": True},
+          "tasks": {"active_task_id": 9, "queued": 0}}, "batch_tasks_already_running"),
+    ]
+    for agent, expected in cases:
+        runner._request = lambda method, url, agent=agent: Response(
+            agent if url.endswith("/health") else {"protocol": "brain-web/2"})
+        with pytest.raises(RuntimeError, match=expected):
+            runner._health()
+
+
+def test_service_batch_preflight_rejects_connected_browser_without_camera(tmp_path):
+    runner = ServiceBatchRunner(agent_url="http://agent", gateway_url="http://gateway",
+                                output_dir=tmp_path, screenshot_required=False)
+    runner._health = lambda: {"agent": {}, "gateway": {
+        "browser": {"connected": True, "browser_id": "browser-1"}}}
+    runner._world = lambda browser_id: {"objects": []}
+    with pytest.raises(RuntimeError, match="batch_browser_camera_unavailable"):
+        runner._resolve_browser()
+
+
 def test_service_batch_activates_each_session_before_loading_its_scene(tmp_path):
     """A shared browser must not be loaded with session B's scene while A is active."""
     scenes = tmp_path / "scenes"

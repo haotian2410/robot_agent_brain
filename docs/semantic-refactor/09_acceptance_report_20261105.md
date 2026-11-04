@@ -34,7 +34,7 @@ fixture 上完成，T03/T04/T05 共 26 条表达全部通过独立场景 oracle�
 
 | 阶段 | 状态 | 证据 |
 |---|---|---|
-| C0 基线与旧协议 | 已验证 | 全量 pytest 通过；旧 JSON/JSONL 入口仍保留 |
+| C0 基线与旧协议 | 已验证 | 全量 pytest 通过；旧 JSON/JSONL 入口仍保留；v2 `expected_json` 现在按 route/oracle 最小结构校验 |
 | C1 OLS 目录与命名空间 | 已验证（自动/静态） | `FinalModelsLibraryAdapter` 读取 34/13/7；model/robot 数字 ID 分离；每轮可原子刷新 OLS 与别名 revision |
 | C2 首阶段上下文 | 已验证（自动/静态） | 每轮请求携带完整 `asset_catalog`、`workspace`、`scene_context`，并使用同一 revision；mug-only/future-cup alias 回归通过 |
 | C3 资产选择 | 已验证 | v3.1 `asset_choices` 校验 key、规范名、可新增性和 catalog revision；不把 cup 永久改写成 mug |
@@ -213,6 +213,9 @@ conda run --no-capture-output -n robot_agent_integ \
 结果：33 项通过。新增行为包括：对象相对新增缺少 `reference` 时明确澄清且不转成
 `on(table)`；`center` 放置严格使用桌面几何中心，中心超出 workspace 时拒绝而不取
 裁剪后的工作区中点。修改代码后需要重启运行中的 Brain 进程才能在服务中生效。
+
+批量服务前置检查也已收紧：Qwen 非 `ready`、OLS `asset_detail.matched` 为假、已有活动/排队任务，
+或活动浏览器没有 Camera 时，在创建批量 session 前直接返回阻塞错误；不会继续执行并生成半套证据。
 
 ## 未验证、阻塞和边界
 
