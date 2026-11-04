@@ -593,10 +593,14 @@ def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str)
     region = None
     center = False
     for phrases, candidate in (
-        (("左上角", "左上方"), "left_front"),
-        (("右上角", "右上方"), "right_front"),
-        (("左下角", "左下方"), "left_back"),
-        (("右下角", "右下方"), "right_back"),
+        # Chinese users and the clean-v3 prompt use both the top-view
+        # ``上/下`` wording and the explicit ``前/后`` wording.  Keep these
+        # aliases in the deterministic canonicalizer so a Qwen response of
+        # ``back_half`` cannot erase the requested left/right half.
+        (("左上角", "左上方", "左前角", "左前方"), "left_front"),
+        (("右上角", "右上方", "右前角", "右前方"), "right_front"),
+        (("左下角", "左下方", "左后角", "左后方"), "left_back"),
+        (("右下角", "右下方", "右后角", "右后方"), "right_back"),
     ):
         if any(phrase in text for phrase in phrases):
             region = candidate

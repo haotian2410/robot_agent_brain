@@ -60,6 +60,55 @@ def test_oracle_counts_only_requested_role_during_platform_bootstrap():
     assert value["status"] == "passed", value
 
 
+def test_oracle_filters_platform_bootstrap_for_multi_role_add():
+    """A two-object add must not count the bootstrap platform as user data."""
+    before = _scene([])
+    table = _obj(1, "work_table")
+    table["components"][1]["properties"] = {"path": "$LIBRARY_SERVER/29", "type": "model"}
+    table["components"][2]["properties"] = {"semantic_name": "work_table", "category": "surface", "support": None}
+    pen = _obj(8, "pen", 0.2, 0.1)
+    pen["components"][1]["properties"] = {"path": "$LIBRARY_SERVER/6", "type": "model"}
+    pen["components"][2]["properties"] = {"semantic_name": "pen", "category": "tool", "support": 1}
+    marker = _obj(9, "marker", -0.2, 0.1)
+    marker["components"][1]["properties"] = {"path": "$LIBRARY_SERVER/10", "type": "model"}
+    marker["components"][2]["properties"] = {"semantic_name": "marker", "category": "tool", "support": 1}
+    after = _scene([table, pen, marker])
+    value = evaluate_turn(
+        expected={"operations": ["add:object_a", "add:object_b"],
+                  "counts": {"object_a": 1, "object_b": 1},
+                  "support": "primary_table"},
+        expected_outcome="scene_updated", before_scene=before, after_scene=after,
+        result={"outcome": "scene_updated", "executed": False},
+        role_mapping={
+            "object_a": {"semantic_name": "pen", "metadata_ref": "$LIBRARY_SERVER/6", "type": "model"},
+            "object_b": {"semantic_name": "marker", "metadata_ref": "$LIBRARY_SERVER/10", "type": "model"},
+            "surface_1": {"semantic_name": "work_table", "metadata_ref": "$LIBRARY_SERVER/29", "type": "model"},
+        },
+    )
+    assert value["status"] == "passed", value
+
+
+def test_oracle_catalog_member_allows_unspecified_style_variant():
+    """A generic semantic request may choose another real OLS style variant."""
+    before = _scene([])
+    table = _obj(1, "work_table")
+    table["components"][1]["properties"] = {"path": "$LIBRARY_SERVER/29", "type": "model"}
+    table["components"][2]["properties"] = {"semantic_name": "work_table", "category": "surface", "support": None}
+    selected = _obj(8, "pen", 0.2, 0.1)
+    selected["components"][1]["properties"] = {"path": "$LIBRARY_SERVER/5", "type": "model"}
+    selected["components"][2]["properties"] = {"semantic_name": "pen", "category": "tool", "support": 1}
+    after = _scene([table, selected])
+    value = evaluate_turn(
+        expected={"operation": "add", "target_role": "object_a", "count": 1,
+                  "asset_selection": "catalog_member", "support": "primary_table"},
+        expected_outcome="scene_updated", before_scene=before, after_scene=after,
+        result={"outcome": "scene_updated", "executed": False},
+        role_mapping={"object_a": {"semantic_name": "pen", "metadata_ref": "$LIBRARY_SERVER/6", "type": "model"}},
+    )
+    assert value["status"] == "passed", value
+    assert any(item["name"] == "added_object_asset_catalog_member" for item in value["checks"])
+
+
 def test_oracle_detects_query_mutating_scene():
     before = _scene([_obj(10, "apple")])
     after = _scene([_obj(10, "apple", 0.1, 0.0)])

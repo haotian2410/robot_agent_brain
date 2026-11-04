@@ -229,6 +229,7 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
             fixture_path = _fixture_path(fixture_dir, fixture_id)
             if fixture_path is None:
                 stages.append({"test_id": case_id, "status": "blocked_fixture",
+                               "classification": "blocked_fixture",
                                "fixture_id": fixture_id, "sessions": [],
                                "reason": "fixture_not_supplied"})
                 completed[case_id] = False

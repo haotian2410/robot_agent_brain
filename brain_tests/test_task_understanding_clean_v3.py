@@ -168,6 +168,23 @@ def test_corner_add_is_normalized_to_on_region_before_scene_edit_validation():
     assert operation.direction is None
 
 
+@pytest.mark.parametrize(("instruction", "region"), [
+    ("在桌面左前角增加一个苹果", "left_front"),
+    ("在桌面右前角增加一个苹果", "right_front"),
+    ("在桌面左后角增加一个苹果", "left_back"),
+    ("在桌面右后角增加一个苹果", "right_back"),
+])
+def test_explicit_front_back_corner_aliases_keep_both_axes(instruction, region):
+    value = envelope(scene_edit={
+        "scene_basis": "current",
+        "entities": [{"entity_id": "apple", "semantic_name": "apple", "category": "fruit"}],
+        "relations": [],
+        "operations": [{"operation": "add", "target": "apple", "relation": "on", "reference": "table"}],
+    })
+    turn = parse_qwen_turn(value, instruction)
+    assert turn.scene_edit.operations[0].placement_region == region
+
+
 def test_table_side_without_surface_context_is_clarification_even_if_qwen_says_on():
     value = envelope(scene_edit={
         "scene_basis": "current",

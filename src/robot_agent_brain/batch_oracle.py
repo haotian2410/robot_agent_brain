@@ -179,38 +179,87 @@ def _check_new_object(expected: dict, before: dict[str, dict], after: dict[str, 
                       role_mapping: dict | None, checks: list[dict], errors: list[str]):
     before_ids, after_ids = set(before), set(after)
     added = sorted(after_ids - before_ids, key=lambda x: (len(x), x))
-    role = expected.get("target_role")
     # A bootstrap edit legitimately adds the platform table/robot/cameras at
-    # the same time as the requested object.  Count and validate only the
-    # target role when one is declared; otherwise a bootstrap would look like
-    # nine user-added objects instead of one marker.
-    target_added = added
+    # the same time as the requested object.  For a single-role assertion we
+    # already filter those platform objects.  Multi-object rows (for example
+    # ``add:object_a`` + ``add:object_b``) must be filtered *per role*; using
+    # every new object as one pool makes an empty bootstrap look like ten user
+    # additions and falsely fails the support assertion.
+    added_objects = {oid: after[oid] for oid in added}
+    role_names: list[str] = []
+    role = expected.get("target_role")
     if role:
-        added_objects = {oid: after[oid] for oid in added}
-        target_added = [oid for oid, _ in _find_by_role(added_objects, role, role_mapping)]
-    count = expected.get("count")
-    if count is not None:
-        ok = len(target_added) == int(count)
-        _append(checks, "added_object_count", ok, expected=int(count), actual=len(target_added), ids=target_added,
-                all_added_ids=added)
-        if not ok:
-            errors.append("added_object_count")
-    if role and target_added:
-        target_name = _role_name(role_mapping, role)
-        matching = [oid for oid in target_added if not target_name or _semantic(after[oid]) == target_name]
-        ok = len(matching) >= 1
-        _append(checks, "added_object_role", ok, role=role, expected_semantic=target_name,
-                matching_ids=matching)
-        if not ok:
-            errors.append("added_object_role")
-        asset = _role_asset(role_mapping, role)
-        expected_ref = asset.get("metadata_ref")
-        if expected_ref and matching:
-            refs = [_metadata(after[oid])[0] for oid in matching]
-            ok = expected_ref in refs
-            _append(checks, "added_object_asset", ok, expected_metadata_ref=expected_ref, actual_refs=refs)
+        role_names.append(str(role))
+    counts = expected.get("counts") if isinstance(expected.get("counts"), dict) else {}
+    for operation in expected.get("operations") or []:
+        if isinstance(operation, str) and ":" in operation:
+            verb, candidate = operation.split(":", 1)
+            if verb.strip().casefold() == "add" and candidate.strip():
+                role_names.append(candidate.strip())
+        elif isinstance(operation, dict) and str(operation.get("operation", "")).casefold() == "add":
+            candidate = operation.get("target_role") or operation.get("target")
+            if candidate:
+                role_names.append(str(candidate))
+    for candidate in counts:
+        if candidate not in role_names:
+            role_names.append(str(candidate))
+    role_names = list(dict.fromkeys(role_names))
+
+    # Keep a role -> target IDs map so all subsequent checks (support, region,
+    # asset identity) use exactly the same user-added set.
+    target_by_role: dict[str, list[str]] = {}
+    if role_names:
+        for role_name in role_names:
+            target_by_role[role_name] = [oid for oid, _ in _find_by_role(
+                added_objects, role_name, role_mapping)]
+    else:
+        target_by_role["__all__"] = list(added)
+
+    for role_name, target_added in target_by_role.items():
+        expected_count = counts.get(role_name) if role_name != "__all__" else expected.get("count")
+        if expected_count is not None:
+            ok = len(target_added) == int(expected_count)
+            _append(checks, "added_object_count", ok, role=None if role_name == "__all__" else role_name,
+                    expected=int(expected_count), actual=len(target_added), ids=target_added,
+                    all_added_ids=added)
             if not ok:
-                errors.append("added_object_asset")
+                errors.append(f"added_object_count:{role_name}")
+        if role_name != "__all__" and target_added:
+            target_name = _role_name(role_mapping, role_name)
+            matching = [oid for oid in target_added if not target_name or _semantic(after[oid]) == target_name]
+            ok = len(matching) >= 1
+            _append(checks, "added_object_role", ok, role=role_name, expected_semantic=target_name,
+                    matching_ids=matching)
+            if not ok:
+                errors.append(f"added_object_role:{role_name}")
+            asset = _role_asset(role_mapping, role_name)
+            expected_ref = asset.get("metadata_ref")
+            if expected_ref and matching:
+                refs = [_metadata(after[oid])[0] for oid in matching]
+                # ``catalog_member`` deliberately allows an unspecified-style
+                # request (e.g. "钢笔") to select any real OLS variant with
+                # that semantic name.  The compiler's seeded role mapping is
+                # the reproducible fixture candidate, not a hidden command to
+                # the model; requiring its exact metadata ref would turn a
+                # valid Qwen catalog choice (model:5 vs model:6) into a false
+                # geometry/protocol failure.  Exact asset assertions remain
+                # available through ``asset_key``/``expected_metadata_ref``.
+                exact_asset = expected.get("asset_key") or expected.get("expected_metadata_ref")
+                if not exact_asset:
+                    ok = all(_metadata(after[oid])[1] == "model" and bool(ref)
+                             for oid, ref in zip(matching, refs))
+                    _append(checks, "added_object_asset_catalog_member", ok, role=role_name,
+                            expected_semantic=target_name, actual_refs=refs,
+                            seeded_candidate=expected_ref)
+                else:
+                    expected_value = exact_asset or expected_ref
+                    ok = expected_value in refs
+                    _append(checks, "added_object_asset", ok, role=role_name,
+                            expected_metadata_ref=expected_value, actual_refs=refs)
+                if not ok:
+                    errors.append(f"added_object_asset:{role_name}")
+
+    target_added = [oid for values in target_by_role.values() for oid in values]
     support = expected.get("support")
     if support == "primary_table" and target_added:
         table = _find_primary_table(after, role_mapping)

@@ -480,6 +480,7 @@ left_of、right_of、front_of、behind、above、below、near、on、inside
 - `left_of/right_of/front_of/behind`：相对于普通物体的位置；
 - “桌面右侧”是桌面内部 `placement_region=right_half`；
 - “桌子右边”按本期桌面工作域解释为桌面 `right_half`，不生成桌外地面关系。
+- 桌面角区统一使用顶视平面：右上/东北/右前=`right_front`，左上/西北/左前=`left_front`，右下/东南/右后=`right_back`，左下/西南/左后=`left_back`；这里“上/下”不是竖直 Z 轴。
 
 `scene_edit.relations` 只用于操作前的选择条件；操作要放置到哪里，必须写在 operation 的 `relation/reference` 中。
 
