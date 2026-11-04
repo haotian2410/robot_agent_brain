@@ -141,6 +141,33 @@ class SceneEditIntent(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
+    def normalize_rotation_direction(cls, values):
+        """Normalize a redundant clockwise/counter-clockwise model cue.
+
+        The v3 wire schema represents a rotation with ``axis`` and
+        ``angle_deg``. Qwen sometimes also emits ``direction=left/right``
+        for requests such as “向右转四分之一圈”. That cue is safe to
+        consume only for a Z-axis rotation with an explicit angle; other
+        direction values are not guessed.
+        """
+        if not isinstance(values, dict) or values.get("operation", values.get("type")) != "rotate":
+            return values
+        direction = values.get("direction")
+        axis = values.get("axis")
+        angle = values.get("angle_deg")
+        if direction is None:
+            return values
+        if direction in {"left", "right"} and axis == "z" and isinstance(angle, (int, float)):
+            values = dict(values)
+            magnitude = abs(float(angle))
+            # Top-view convention: left/CCW is +Z; right/CW is -Z.
+            values["angle_deg"] = magnitude if direction == "left" else -magnitude
+            values["direction"] = None
+            return values
+        return values
+
+    @model_validator(mode="before")
+    @classmethod
     def normalize_placement_goal(cls, values):
         """Flatten the canonical placement goal into the legacy edit fields.
 

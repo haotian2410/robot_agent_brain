@@ -56,6 +56,19 @@ def test_model_default_any_placement_hint_is_ignored_for_non_placement_ops():
                         distance_m=.05, placement_hint="center")
 
 
+def test_rotation_direction_cue_is_normalized_without_opening_extra_fields():
+    clockwise = SceneEditIntent(operation="rotate", target="marker", axis="z",
+                                angle_deg=90, direction="right")
+    counter_clockwise = SceneEditIntent(operation="rotate", target="marker", axis="z",
+                                        angle_deg=90, direction="left")
+    assert clockwise.direction is None and clockwise.angle_deg == pytest.approx(-90)
+    assert counter_clockwise.direction is None and counter_clockwise.angle_deg == pytest.approx(90)
+
+    with pytest.raises(ValueError, match="scene_edit_fields_forbidden: rotate"):
+        SceneEditIntent(operation="rotate", target="marker", axis="x",
+                        angle_deg=90, direction="right")
+
+
 def test_default_asset_is_only_used_for_ambiguous_scene_add():
     entity = TaskEntity(entity_id="basket", semantic_name="basket", category="container")
     binding = AssetResolver(AmbiguousAssets(), default_refs={"basket": "$LIBRARY_SERVER/4"}).resolve(

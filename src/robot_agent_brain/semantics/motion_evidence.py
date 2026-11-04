@@ -11,6 +11,12 @@ _DIRECTION_PATTERNS = (
     (r"(?:向|往|朝)\s*后\s*(?:移(?:动)?|挪)|后移", Direction.BACK),
     (r"(?:向|往|朝)\s*上\s*(?:移(?:动)?|挪)|上移", Direction.UP),
     (r"(?:向|往|朝)\s*下\s*(?:移(?:动)?|挪)|下移", Direction.DOWN),
+    # Fixed tabletop convention: east/right, west/left, north/front,
+    # south/back. These are extracted as evidence, not guessed by Qwen.
+    (r"(?:向|往|朝)?\s*东\s*(?:移(?:动)?|挪)|东移", Direction.RIGHT),
+    (r"(?:向|往|朝)?\s*西\s*(?:移(?:动)?|挪)|西移", Direction.LEFT),
+    (r"(?:向|往|朝)?\s*北\s*(?:移(?:动)?|挪)|北移", Direction.FRONT),
+    (r"(?:向|往|朝)?\s*南\s*(?:移(?:动)?|挪)|南移", Direction.BACK),
     (r"\b(?:left|leftward|leftwards)\b", Direction.LEFT),
     (r"\b(?:right|rightward|rightwards)\b", Direction.RIGHT),
     (r"\b(?:forward|forwards)\b", Direction.FRONT),

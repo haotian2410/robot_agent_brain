@@ -20,6 +20,17 @@ def test_scale_requires_matching_language(phrase, scale):
     assert span.motion_scale == scale and span.distance_m is None
 
 
+@pytest.mark.parametrize("text,expected", [
+    ("让苹果往东挪5厘米", "right"),
+    ("将苹果往西挪0.05米", "left"),
+    ("让苹果往北挪5厘米", "front"),
+    ("将苹果往南移动5厘米", "back"),
+])
+def test_compass_motion_words_bind_to_tabletop_axes(text, expected):
+    span = resolve_motion_evidence(text, 1)[0]
+    assert span.direction == expected and span.distance_m == pytest.approx(.05)
+
+
 def test_qwen_missing_distance_is_blocked_not_delivery_or_network_failure(tmp_path):
     from robot_agent_brain.application import BrainApplication
     from robot_agent_brain.config import BrainConfig
