@@ -1,6 +1,6 @@
 # Semantic Refactor C0–C7 验收报告（2026-11-05）
 
-> 报告使用的源代码基线为 `ee4baa0`，远端同步基线为 `c64f57a`（本轮按要求未自动推送）。
+> 报告使用的源代码基线为 `ee4baa0`，文档最新提交为 `1579325`，已同步到远端 `main`。
 > 文中历史段落若出现旧 SHA，
 > 仅表示当时的证据快照，不代表当前代码版本。
 
@@ -11,7 +11,7 @@ C0–C6 的代码、结构化校验和自动回归已完成；C7 的首五行真
 fixture 上完成，T03/T04/T05 共 26 条表达全部通过独立场景 oracle。完整 20 行、
 115 条表达的真实 Qwen/Gateway 验收尚未完成，不能据此宣称整个矩阵通过。
 
-源代码基线：`ee4baa0`；远端同步基线：`c64f57a`。generated campaign
+源代码基线：`ee4baa0`；远端文档基线：`1579325`。generated campaign
 的服务运行证据以 `50da3d1` 语义代码基线记录，后续提交仅补充证据分类、hash 和文档。
 
 ## 运行基线
@@ -156,6 +156,24 @@ conda run --no-capture-output -n robot_agent_integ robot-brain batch \
 `executed=false`，并保存 `before_scene.json`、`scene.json`、digest、
 `screenshot.png`、raw/canonical payload 和 debug bundle。
 
+### 七个预设场景 L1 查询 smoke
+
+任务空闲后使用现有 OLS 1.0.7 场景文件，每个场景独立创建一个 session，
+执行一条只读查询“有没有苹果？”。这不是 115 条官方矩阵的替代，只验证预设
+场景加载、会话绑定、查询不改版本、顶视截图和四元组一致性。
+
+证据目录：
+
+```text
+/tmp/known-scenes-smoke-out-8vTq7f/batch-20261105-053926-48c451f8/
+```
+
+结果：`passed=7, failed=0, blocked=0, skipped=0`。覆盖
+`ur5e_table_empty`、`ur5e_table_apple`、`ur5e_table_sorting`、
+`ur5e_table_cabinet`、`ur5e_table_push_pull`、`piper_table_twist` 和
+`cobotmagic_table_grasp`；每条截图均为 `camera_id=5`、640×480 PNG，截图四元组
+与任务结果一致，查询前后 digest 未变化，所有结果 `executed=false`。
+
 ### 本轮发现并修复的两个问题
 
 1. **独立 oracle 的命名空间误匹配（已修复）**
@@ -233,8 +251,9 @@ JSON/Scene 文档解析及被拒对象检查。新增测试覆盖显式浏览器
    T11/T15 的真实 Qwen差异均保留原始证据。
 2. **27 个回归不变量的真实运行**：结构和自动单测已验证，但没有把每一条都在
    真实浏览器/OLS 环境中执行并附独立证据。
-3. **Known-scene C7**：官方 known 编译成功，但 workbook 当前未给出 scene
-   路径；七个预设场景的真实矩阵运行仍为 `unverified`。
+3. **Known-scene C7 完整矩阵**：已完成七个场景各一条 L1 查询 smoke，但官方
+   workbook 当前未给出 scene 路径；完整 known-scene L1–L4/多轮矩阵仍为
+   `unverified`。
 4. **Wheel smoke**：当前环境缺少 `hatchling.build`，因此打包 smoke 为环境阻塞，
    不是业务测试失败。
 5. **真实机器人执行、Control、IK、MuJoCo、双臂规划**：按范围明确跳过；所有
