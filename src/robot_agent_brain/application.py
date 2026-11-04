@@ -460,7 +460,11 @@ class BrainApplication:
         # A failed live v3 parse has no BrainTurn from which to infer the
         # parser stage.  Do not mislabel it as the legacy adapter: that made
         # current Qwen contract failures look like an old-format request.
-        if turn is not None and getattr(turn, "protocol_version", "").endswith(".v3"):
+        # Live Qwen uses task_understanding.v3.1 (and future v3.x revisions),
+        # not the literal task_understanding.v3 string.  Treat the whole v3
+        # family as canonical; otherwise successful v3.1 turns were mislabeled
+        # as legacy_v2_adapter in the persisted diagnostics.
+        if turn is not None and str(getattr(turn, "protocol_version", "")).startswith("task_understanding.v3"):
             parser_stage = "canonical_v3"
             protocol_version = "task_understanding.v3"
         elif stage == "understanding" and understanding_calls:

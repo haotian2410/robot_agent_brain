@@ -34,6 +34,11 @@ class ComponentReferenceRule(BaseModel):
 class ComponentReferenceRegistry:
     def __init__(self, rules=None):
         self.rules = {name: ComponentReferenceRule(no_object_references=True) for name in COMPONENT_PROPERTIES}
+        # LocalAxes is a renderer/debug component used by the OLS 1.0.7 scene
+        # templates.  Its properties describe the drawn frame only and contain
+        # no scene-object references, so it must survive template bootstrap and
+        # scene remapping like the other built-in non-reference components.
+        self.rules["LocalAxes"] = ComponentReferenceRule(no_object_references=True)
         for name, field in (("Transform", "parent"), ("Semantic", "support"), ("RobotAttachment", "parent_object_id")):
             self.rules[name] = ComponentReferenceRule(references=[ReferenceField(path=[field], nullable=True, optional=True)])
         for name, rule in (rules or {}).items():
