@@ -29,6 +29,7 @@ def test_injected_client_success_and_single_record():
         call = provider.calls[0]
         assert call["status"] == "succeeded" and call["usage"]["total_tokens"] == 15
         assert call["response_request_id"] == "server-1" and call["elapsed_seconds"] >= 0
+        assert len(call["prompt_sha256"]) == 64 and len(call["schema_sha256"]) == 64
         assert "raw_text" not in call
 
 

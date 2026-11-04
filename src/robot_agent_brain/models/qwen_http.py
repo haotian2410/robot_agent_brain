@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 import time
@@ -96,8 +97,18 @@ class QwenHTTPProvider:
         summary_url = urlunsplit((url.scheme, url.netloc.rsplit("@", 1)[-1], url.path, "", ""))
         record = {"stage":stage, "status":"failed", "request_id":request_id,
                   "model":self.model, "base_url":summary_url, "finish_reason":None, "usage":None}
+        # Keep the real model-input identity in evidence without persisting the
+        # full prompt or JSON schema.  This lets a C7 run prove which prompt
+        # and contract were used while keeping local asset names/paths out of
+        # the diagnostic record.
+        record["prompt_sha256"] = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        record["schema_sha256"] = hashlib.sha256(
+            json.dumps(schema, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
         if stage == "task_understanding" and self.asset_catalog_sha256:
             record["asset_catalog_sha256"] = self.asset_catalog_sha256
+            if self.asset_catalog_snapshot is not None:
+                record["catalog_revision"] = self.asset_catalog_snapshot.revision
         started = time.monotonic()
         self.last_raw_text.pop(stage, None)
         self.last_raw_values.pop(stage, None)

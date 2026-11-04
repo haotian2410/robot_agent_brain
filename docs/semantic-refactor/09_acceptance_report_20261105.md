@@ -227,6 +227,9 @@ conda run --no-capture-output -n robot_agent_integ \
   宣称“编译 manifest 与运行请求版本完全一致”，这属于待补的锁定证据。
 - 官方 `A01–A13/M01–M13/R01` 27 项回归断言目前只有规范结构和自动单测覆盖，
   没有逐条真实浏览器证据；报告保留为未验证，不将计数校验写成行为通过。
+- 真实 debug bundle 已记录每轮模型、usage 和运行时 `asset_catalog_sha256`；当前
+  bundle 尚未保存完整 prompt/schema hash，因此这部分只能作为部分证据，不能声称
+  已完成 runbook 要求的完整模型输入审计。
 
 本轮新增的 v2 结构证据目录（临时目录，不是生产资产）为：
 `/tmp/semantic-v2-check.8BVZha/`。其中 generated/known 两份编译输出各有

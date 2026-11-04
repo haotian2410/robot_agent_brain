@@ -748,7 +748,11 @@ class ServiceBatchRunner:
                                "debug_evidence": debug_evidence,
                                "catalog_revision": (getattr(session_spec, "catalog_revision", None)
                                    or result.get("metrics", {}).get("catalog_revision")
-                                   or result.get("catalog_revision")),
+                                   or result.get("catalog_revision")
+                                   or next((call.get("catalog_revision") for call in
+                                            (result.get("metrics", {}).get("model_call_details") or [])
+                                            if call.get("stage") == "task_understanding"
+                                            and call.get("catalog_revision")), None)),
                                "classification": classification,
                                "variant_id": session_spec.variant_id,
                                "equivalence_group": session_spec.equivalence_group,
