@@ -88,6 +88,18 @@ def test_service_batch_preflight_records_matching_runtime_catalog_revision(tmp_p
     assert health["agent"]["asset_detail"]["catalog_revision"] == runner.runtime_catalog_revision == runner_revision
 
 
+def test_service_batch_rejects_mixed_catalog_revision_provenance(tmp_path):
+    cases = tmp_path / "mixed_catalog_revision.json"
+    cases.write_text(json.dumps({"sessions": [
+        {"name": "v2", "instructions": ["one"], "catalog_revision": "sha256:expected"},
+        {"name": "v1", "instructions": ["two"]},
+    ]}), encoding="utf-8")
+    runner = ServiceBatchRunner(agent_url="http://agent", gateway_url="http://gateway",
+                                output_dir=tmp_path, screenshot_required=False)
+    with pytest.raises(ValueError, match="batch_catalog_revision_missing"):
+        runner.run(cases)
+
+
 def test_service_batch_preflight_rejects_connected_browser_without_camera(tmp_path):
     runner = ServiceBatchRunner(agent_url="http://agent", gateway_url="http://gateway",
                                 output_dir=tmp_path, screenshot_required=False)

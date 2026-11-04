@@ -573,6 +573,12 @@ class ServiceBatchRunner:
                      if session.catalog_revision}
         if len(revisions) > 1:
             raise ValueError("batch_catalog_revision_multiple_expected")
+        # A v2 batch must carry provenance on every session.  Do not let a
+        # hand-edited/mixed input run with only the rows that happen to have a
+        # revision checked against runtime; an all-v1 input (no revisions at
+        # all) remains compatible and records runtime evidence when available.
+        if revisions and any(not session.catalog_revision for session in loaded["sessions"]):
+            raise ValueError("batch_catalog_revision_missing")
         self.expected_catalog_revision = next(iter(revisions), None)
         # Validate all preset documents before selecting the browser.  This
         # prevents a later bad path/schema from partially executing an earlier
