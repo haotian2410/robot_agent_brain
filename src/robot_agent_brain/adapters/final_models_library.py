@@ -111,9 +111,17 @@ class FinalModelsLibraryAdapter:
         after = fresh.catalog_snapshot(aliases=aliases).revision
         if before == after:
             return False
-        self.__dict__.clear()
-        self.__dict__.update(fresh.__dict__)
-        self.catalog_aliases = dict(aliases)
+        # Publish the complete state with one instance-dict replacement.  Do
+        # not clear/update ``self.__dict__`` in two steps: callers refresh the
+        # catalog at turn boundaries while other readers may still hold a
+        # reference to this adapter.  A clear followed by an update exposes a
+        # transient empty/partially populated catalog and can make a concurrent
+        # lookup report a spurious missing asset.  ``fresh`` has already passed
+        # all constructor validation, so constructing the replacement mapping
+        # cannot leave this adapter partially mutated if validation failed.
+        new_state = dict(fresh.__dict__)
+        new_state["catalog_aliases"] = dict(aliases)
+        self.__dict__ = new_state
         return True
 
     @staticmethod

@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from jsonschema import Draft202012Validator
 
 from robot_agent_brain.batch_matrix_v2 import (BatchMatrixError, _validate_expected_contract,
                                                compile_semantic_matrix_v2, read_semantic_matrix_v2)
@@ -18,6 +19,12 @@ def test_authoritative_workbook_has_expected_shape():
     assert spec["counts"] == {"cases": 20, "variants": 115}
     assert [row["case_id"] for row in spec["cases"][:5]] == ["T01", "T02", "T03", "T04", "T05"]
     assert all(isinstance(row["expected_json_value"], dict) for row in spec["variants"])
+
+
+def test_exported_plan_matches_checked_in_json_schema():
+    plan = json.loads((ROOT / "docs/semantic-refactor/03_semantic_test_plan.json").read_text())
+    schema = json.loads((ROOT / "docs/semantic-refactor/04_test_plan.schema.json").read_text())
+    Draft202012Validator(schema).validate(plan)
 
 
 def test_v2_compilation_expands_all_variants_and_is_seed_stable(tmp_path):

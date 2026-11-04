@@ -4,6 +4,7 @@ import tempfile
 from pathlib import Path
 
 import httpx
+import pytest
 
 from robot_agent_brain.adapters.final_models_library import FinalModelsLibraryAdapter
 from robot_agent_brain.contracts.scene import SceneComponent, SceneConfig, SceneObject
@@ -344,7 +345,7 @@ def test_scene_context_only_advertises_configured_primary_table_identity():
 
 
 def test_ols_adapter_refresh_publishes_new_catalog_atomically():
-    """A changed read-only OLS index is visible on the next snapshot."""
+    """A refresh publishes complete state or leaves the old catalog intact."""
     config = json.loads((ROOT / "config/webeditor.json").read_text())
     source = Path(config["asset_library_root"])
     if not source.is_absolute():
@@ -368,6 +369,19 @@ def test_ols_adapter_refresh_publishes_new_catalog_atomically():
                     shutil.copy2(source_meta, destination / source_meta.name)
         adapter = FinalModelsLibraryAdapter(target)
         before = adapter.catalog_snapshot().revision
+        before_keys = adapter.catalog_snapshot().model_keys()
+        apple_metadata_path = target / "models/1/apple.json"
+        apple_metadata = json.loads(apple_metadata_path.read_text(encoding="utf-8"))
+        apple_metadata["semantic_properties"]["object_name"] = "not_apple"
+        apple_metadata_path.write_text(json.dumps(apple_metadata), encoding="utf-8")
+        with pytest.raises(ValueError, match=r"asset_metadata_name_mismatch: model/1"):
+            adapter.refresh_from_source()
+        # A failed constructor must not expose a cleared or half-reloaded
+        # catalog to the next turn.
+        assert adapter.catalog_snapshot().revision == before
+        assert adapter.catalog_snapshot().model_keys() == before_keys
+        apple_metadata["semantic_properties"]["object_name"] = "apple"
+        apple_metadata_path.write_text(json.dumps(apple_metadata), encoding="utf-8")
         index_path = target / "models" / "model_index.json"
         index = json.loads(index_path.read_text())
         index["by_id"]["999"] = "test_cube"
