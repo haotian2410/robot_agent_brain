@@ -16,6 +16,7 @@ from .scene.layout_geometry import SceneLayoutGeometryRegistry
 from .adapters.local_scene_platform import LocalScenePlatform
 from .adapters.scene_file_codec import SceneFileCodec
 from .adapters.artifact_writer import ArtifactWriter, safe_identifier
+from .adapters.ols_robot_assembly import OlsRobotAssemblyAdapter
 from .contracts.run_report import BrainRunReport
 from .contracts.turn import TurnStatus
 from .errors import BrainIssue, BrainError
@@ -26,7 +27,16 @@ from .diagnostics import configuration_summary, fingerprint, redact
 class BrainApplication:
     def __init__(self, config=None, *, provider=None, platform_factory=LocalScenePlatform):
         self.config = config or BrainConfig.load()
+        # The legacy single-arm deployment is an explicit built-in UR5e
+        # profile.  It is not inferred from an arbitrary scene: it is enabled
+        # only when the configured planning backend is the fixed ``ur5e``
+        # backend.  Other OLS platforms remain display/query-only until a
+        # complete RobotProfile is supplied.
+        self.registered_profile_ids = set(self.config.robot_profiles.profiles)
+        if self.config.robot == "ur5e":
+            self.registered_profile_ids.add("ur5e")
         self.assets = self.config.load_assets()
+        self.robot_assembly = OlsRobotAssemblyAdapter(self.assets)
         self.defaults = self.config.load_defaults()
         aliases = (self.config.load_semantic_aliases() if self.config.semantic_aliases is not None
                    else getattr(getattr(self.assets, "metadata", None), "aliases", {}))
@@ -49,7 +59,7 @@ class BrainApplication:
             # assets distinct. The deterministic resolver retains its own
             # compatibility alias table.
             provider.set_asset_catalog(self.assets, aliases=None,
-                                       registered_profiles=list(self.config.robot_profiles.profiles))
+                                       registered_profiles=sorted(self.registered_profile_ids))
         if self.config.vision and (platform_factory is LocalScenePlatform or not hasattr(provider, "detect")):
             raise BrainError("vision_requires_rendering_platform", "configuration",
                              "Vision requires an explicit rendering platform and a detection provider; LocalScenePlatform has no images")
@@ -70,8 +80,12 @@ class BrainApplication:
                                       planner_mode=self.config.planner, robot=self.config.robot,
                                       query_near_distance_m=self.config.query_near_distance_m,
                                       aliases=self.config.load_semantic_aliases() if self.config.semantic_aliases else None,
-                                      registered_profiles=list(self.config.robot_profiles.profiles),
-                                      primary_table_metadata_ref=self.config.default_table_metadata_ref)
+                                      registered_profiles=sorted(self.registered_profile_ids),
+                                      primary_table_metadata_ref=self.config.default_table_metadata_ref,
+                                      workspace_center_m=((self.defaults.workspace_min[0] + self.defaults.workspace_max[0]) / 2,
+                                                          (self.defaults.workspace_min[1] + self.defaults.workspace_max[1]) / 2),
+                                      placement_policy_version="grid-v2",
+                                      motion_policy_version="motion-v1")
         bootstrap = self.config.bootstrap_settings()
         self.bootstrapper = SceneBootstrapper(self.assets, self.defaults, robot=self.config.robot, seed=self.config.seed,
             table_metadata_ref=bootstrap.get("default_table_metadata_ref"),
@@ -119,15 +133,16 @@ class BrainApplication:
         if hasattr(adapter, "catalog_aliases"):
             adapter.catalog_aliases = dict(aliases)
         previous_catalog_revision = adapter.catalog_snapshot(
-            aliases=None, registered_profiles=list(self.config.robot_profiles.profiles)
+            aliases=None, registered_profiles=sorted(self.registered_profile_ids)
         ).revision
         changed = adapter.refresh_from_source()
         current_catalog_revision = adapter.catalog_snapshot(
-            aliases=None, registered_profiles=list(self.config.robot_profiles.profiles)
+            aliases=None, registered_profiles=sorted(self.registered_profile_ids)
         ).revision
         changed = changed or current_catalog_revision != previous_catalog_revision
         if not changed:
             return False
+        self.robot_assembly = OlsRobotAssemblyAdapter(self.assets)
         self.config_summary = configuration_summary(self.config, self.assets, self.defaults)
         self.config_fingerprint = fingerprint(self.config_summary)
         self.pipeline.assets = self.assets
@@ -143,14 +158,14 @@ class BrainApplication:
         # Keep the live snapshot tied to this adapter's current OLS revision;
         # its collision-safe aliases are included by ``None``.
         self.pipeline.asset_catalog = self.assets.catalog_snapshot(
-            aliases=None, registered_profiles=list(self.config.robot_profiles.profiles))
+            aliases=None, registered_profiles=sorted(self.registered_profile_ids))
         self.bootstrapper.assets = self.assets
         self.bootstrapper.resolver.catalog = self.assets
         self.bootstrapper.resolver.aliases = dict(aliases)
         self.codec.assets = self.assets
         if hasattr(self.provider, "set_asset_catalog"):
             self.provider.set_asset_catalog(self.assets, aliases=None,
-                                            registered_profiles=list(self.config.robot_profiles.profiles))
+                                            registered_profiles=sorted(self.registered_profile_ids))
         return True
 
     def get_session(self, session_id):
@@ -164,6 +179,7 @@ class BrainApplication:
             from .scene.component_reference_registry import ComponentReferenceRegistry
             session = BrainSession(None, self.pipeline, self.platform_factory(), robot_profiles=self.config.robot_profiles,
                 reference_registry=ComponentReferenceRegistry(self.config.component_reference_rules))
+            session.robot_assembly_adapter = self.robot_assembly
             session.scene_id_bits = self.config.scene_id_bits
             self.sessions[session_id] = self.store.restore(state, session) if state else session
             from .session.original_scene_store import OriginalSceneStore
@@ -173,6 +189,15 @@ class BrainApplication:
             self.sessions[session_id].scene_reset_allowed = self.platform_factory is LocalScenePlatform or self.config.allow_scene_reset
             self.sessions[session_id].restored_config_fingerprint = state.config_fingerprint if state else None
             self.revisions[session_id] = state.revision if state else 0
+            if self.sessions[session_id].scene is not None and getattr(self.sessions[session_id], "robot_asset", None) is None:
+                binding = self.robot_assembly.scene_binding(self.sessions[session_id].scene)
+                self.sessions[session_id].robot_asset = binding.get("robot_asset")
+                self.sessions[session_id].gripper_asset = binding.get("gripper_asset")
+                self.sessions[session_id].camera_asset = binding.get("camera_asset")
+                self.sessions[session_id].execution_capability = (
+                    "supported" if binding.get("robot_asset") == "ur5e_arm"
+                    and (self.config.robot_profiles.profiles or getattr(self.pipeline, "robot", "ur5e") == "ur5e")
+                    else "unsupported")
         return self.sessions[session_id]
 
     def load_scene(self, session_id, path):
@@ -192,6 +217,11 @@ class BrainApplication:
             if not self.config.scene_platform_object_ids <= {o.object_id_in_scene for o in scene.objects}:
                 raise ValueError("scene_platform_manifest_invalid")
         session.initialize_scene(scene)
+        binding = self.robot_assembly.scene_binding(scene)
+        session.robot_asset, session.gripper_asset, session.camera_asset = binding.get("robot_asset"), binding.get("gripper_asset"), binding.get("camera_asset")
+        session.execution_capability = ("supported" if session.robot_asset == "ur5e_arm"
+                                        and (self.config.robot_profiles.profiles or getattr(self.pipeline, "robot", "ur5e") == "ur5e")
+                                        else "unsupported")
         if profile is not None:
             session.bind_imported_profile(profile)
         elif self.config.scene_platform_object_ids is not None:
@@ -218,7 +248,8 @@ class BrainApplication:
                 source=source, robot_setup=session.robot_setup, config_fingerprint=self.config_fingerprint,
                 profile_object_map=session.profile_object_map, allow_empty=allow_empty)
 
-    def accept_browser_scene(self, session_id, scene, *, platform_object_ids=None):
+    def accept_browser_scene(self, session_id, scene, *, platform_object_ids=None,
+                             change_kind="scene_edit"):
         """External editor metadata sync, distinct from execution reconciliation."""
         with self.store.lock(session_id):
             session = self.get_session(session_id)
@@ -227,7 +258,8 @@ class BrainApplication:
             manifest = platform_object_ids if platform_object_ids is not None else self.config.scene_platform_object_ids
             if manifest is None:
                 raise ValueError("browser_platform_manifest_required")
-            changed = session.accept_browser_scene(candidate, platform_object_ids=manifest)
+            changed = session.accept_browser_scene(candidate, platform_object_ids=manifest,
+                                                   change_kind=change_kind)
             self._save_session(session_id)
             self._capture_original(session_id, request_id="browser-import-" + uuid.uuid4().hex, source="uploaded", allow_empty=True)
             self._save_session(session_id)
@@ -302,6 +334,25 @@ class BrainApplication:
         self.revisions[session_id] = self.store.save(session_id, self.sessions[session_id],
             revision=self.revisions.get(session_id, 0) + 1, config_fingerprint=self.config_fingerprint)
 
+    @staticmethod
+    def _is_uninitialized_empty_scene(session):
+        """Return whether the browser's empty document is only a bootstrap placeholder.
+
+        WebEditor creates a session from ``scene_id=0`` with no objects before the
+        first command.  That document is not an initialized Brain scene: treating
+        it as a normal scene skips the configured table/robot bootstrap and makes
+        multi-object ``on table`` edits fail during layout.  Once a session has an
+        original snapshot, platform manifest, or non-empty scene, the empty
+        document is no longer allowed to reset it and normal CAS validation stays
+        in force.
+        """
+        scene = session.scene
+        return (scene is not None and scene.scene_id == 0 and not scene.objects
+                and session.original_scene_manifest is None
+                and not (session.platform_object_ids or set())
+                and session.sync_state == "synchronized"
+                and session.session_phase == "setup")
+
     def mark_dispatched(self, session_id, commands):
         with self.store.lock(session_id):
             session = self.get_session(session_id)
@@ -350,6 +401,13 @@ class BrainApplication:
         debug = {}
         stage = "session"
         before = session.scene
+        # A newly created WebEditor session may already contain its protocol
+        # empty document.  Keep it as an uninitialized placeholder so the first
+        # scene edit/robot task uses the same Brain-owned bootstrap path as a
+        # session whose scene is literally ``None``.
+        if self._is_uninitialized_empty_scene(session):
+            session.scene_manager = None
+            before = None
         calls_start = len(getattr(self.provider, "calls", []))
         understanding_calls = 0
         self.pipeline.skill_planner.last_trace = None
@@ -385,36 +443,47 @@ class BrainApplication:
                     stage = "bootstrap"
                     from secrets import randbits
                     from .contracts.robot_setup import RobotSetupRequest
-                    setup_request = turn.robot_setup_request
-                    if setup_request is None and self.config.robot_profiles.default_single is not None:
-                        setup_request = RobotSetupRequest(mode="single")
-                    if setup_request is not None:
-                        initial_profile = self.config.robot_profiles.resolve(setup_request)
-                        active_bootstrapper = self.bootstrapper.for_profile(initial_profile)
-                    if turn.turn_kind == "robot_config":
-                        if initial_profile is None:
-                            raise ValueError("robot_setup_profile_not_registered")
-                        template = active_bootstrapper.template_scene.model_copy(update={"scene_id": randbits(self.config.scene_id_bits), "scene_version": 1})
+                    if turn.robot_asset_switch is not None:
+                        if active_bootstrapper.template_scene is None:
+                            raise ValueError("robot_asset_switch_requires_scene")
+                        template = active_bootstrapper.template_scene.model_copy(
+                            update={"scene_id": randbits(self.config.scene_id_bits), "scene_version": 1, "scene_sub_version": 0})
                         session.initialize_scene(template)
-                        session.bind_imported_profile(initial_profile)
                         report.scene_created = True
                         report.scene_commit_status = "committed"
+                        report.scene_source = "generated"
                         initial = None
                     else:
-                        initial = active_bootstrapper.prepare(turn, scene_id=randbits(self.config.scene_id_bits))
-                    report.scene_source = "generated"
-                    report.assumptions = initial.assumptions if initial is not None else []
-                    if turn.turn_kind == "robot_task":
-                        initial_robot = initial
-                    elif turn.turn_kind == "scene_edit" and initial is not None:
-                        initial_edit = initial
-                    elif initial is not None:
-                        session.initialize_scene(initial.scene)
-                        report.scene_created = True
-                        report.scene_commit_status = "committed"
-                        bindings = initial.bindings_for(session.scene)
-                        if initial_profile is not None:
+                        setup_request = turn.robot_setup_request
+                        if setup_request is None and self.config.robot_profiles.default_single is not None:
+                            setup_request = RobotSetupRequest(mode="single")
+                        if setup_request is not None:
+                            initial_profile = self.config.robot_profiles.resolve(setup_request)
+                            active_bootstrapper = self.bootstrapper.for_profile(initial_profile)
+                        if turn.turn_kind == "robot_config":
+                            if initial_profile is None:
+                                raise ValueError("robot_setup_profile_not_registered")
+                            template = active_bootstrapper.template_scene.model_copy(update={"scene_id": randbits(self.config.scene_id_bits), "scene_version": 1})
+                            session.initialize_scene(template)
                             session.bind_imported_profile(initial_profile)
+                            report.scene_created = True
+                            report.scene_commit_status = "committed"
+                            initial = None
+                        else:
+                            initial = active_bootstrapper.prepare(turn, scene_id=randbits(self.config.scene_id_bits))
+                        report.scene_source = "generated"
+                        report.assumptions = initial.assumptions if initial is not None else []
+                        if turn.turn_kind == "robot_task":
+                            initial_robot = initial
+                        elif turn.turn_kind == "scene_edit" and initial is not None:
+                            initial_edit = initial
+                        elif initial is not None:
+                            session.initialize_scene(initial.scene)
+                            report.scene_created = True
+                            report.scene_commit_status = "committed"
+                            bindings = initial.bindings_for(session.scene)
+                            if initial_profile is not None:
+                                session.bind_imported_profile(initial_profile)
                 stage = "processing"
                 if initial_edit is not None:
                     result = session.process_initial_edit_turn(request_id, turn, initial_edit.scene,
@@ -435,6 +504,13 @@ class BrainApplication:
                 report.run_status = "success"
                 if result.robot_setup_was_changed:
                     report.scene_commit_status = "committed"
+                if result.platform_rebind is not None:
+                    report.scene_commit_status = "committed"
+                    report.execution_capability = session.execution_capability
+                    report.robot_asset = session.robot_asset
+                    report.gripper_asset = session.gripper_asset
+                    report.camera_asset = session.camera_asset
+                    report.platform_rebind_revision = session.platform_rebind_revision
                 if report.scene_created:
                     session.platform_object_ids = ({o.object_id_in_scene for o in active_bootstrapper.template_scene.objects}
                         if active_bootstrapper.template_scene is not None else {self.defaults.table_object_id, self.defaults.robot_object_id})
@@ -445,6 +521,12 @@ class BrainApplication:
                     report.delivery_status = "robot_configured"
                     report.reply = ("机器人配置已更新（未执行机器人动作）。" if result.robot_setup_was_changed or report.scene_created
                                     else "已是该机器人配置，场景未改变。")
+                elif result.platform_rebind is not None:
+                    report.delivery_status = "robot_configured"
+                    if report.execution_capability == "unsupported":
+                        report.reply = "场景平台已切换，但该机器人平台暂不支持 Brain 规划或执行。"
+                    else:
+                        report.reply = "机器人及配件装配已切换（未执行机器人动作）。"
                 elif result.scene_patch is not None or result.scene_replacement is not None:
                     report.delivery_status = "scene_updated"
                     report.scene_commit_status = "committed"
@@ -648,6 +730,11 @@ class BrainApplication:
         else:
             code = "internal_error"
         semantic_codes = ("semantic_", "scene_", "query_", "dialogue_", "grounding_", "motion_")
-        category = "semantic_protocol" if code.startswith(semantic_codes) else (
-            "provider" if code.startswith("provider_") or code == "model_output_invalid" else "internal")
+        provider_schema_codes = {
+            "asset_choice_missing", "asset_catalog_key_invalid", "provider_output_schema_invalid",
+            "vision_output_schema_invalid",
+        }
+        category = ("provider_output_schema" if code in provider_schema_codes else
+                    "semantic_protocol" if code.startswith(semantic_codes) else
+                    "provider" if code.startswith("provider_") or code == "model_output_invalid" else "internal")
         return BrainIssue(code=code, stage=stage, message=str(exc), category=category)

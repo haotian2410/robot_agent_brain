@@ -225,13 +225,32 @@ class QwenHTTPProvider:
             if request.asset_catalog is None:
                 value = _repair_explicit_replace(value, request.instruction)
                 value = _repair_explicit_selector_clarification(value, request.instruction)
+            else:
+                value = _repair_live_replace_entity(value, request.instruction)
             turn = parse_qwen_turn(value, request.instruction)
             if request.asset_catalog is not None:
                 self._validate_live_asset_choices(value, request)
             return turn
         prompt = TASK_UNDERSTANDING_PROMPT + self.asset_catalog_prompt
-        return self._call("task_understanding", prompt,
-                          prompt_payload(self._understanding_payload(request)), task_understanding_v3_wire_schema(), parse)
+        content = prompt_payload(self._understanding_payload(request))
+        schema = task_understanding_v3_wire_schema()
+        try:
+            return self._call("task_understanding", prompt, content, schema, parse)
+        except QwenProviderError as exc:
+            # A live v3.1 response must explicitly choose an OLS asset for
+            # every add/replace operation.  Qwen occasionally emits an
+            # otherwise valid edit while omitting that array.  Give it one
+            # bounded, schema-identical repair turn; never infer an asset in
+            # Python because doing so would make a stale catalog authoritative.
+            if request.asset_catalog is None or exc.code != "asset_choice_missing":
+                raise
+            repair_prompt = prompt + (
+                "\n\n上一轮输出缺少 asset_choices。请重新输出完整的 task_understanding.v3.1 JSON："
+                "scene_edit 中每一个 operation=add 或 operation=replace 都必须有一个"
+                "asset_choices 项，entity_id 必须与实体一致，asset_key 必须来自本次 OLS 资产目录。"
+                "不要省略其他必填字段，不要解释文字，只返回 JSON。"
+            )
+            return self._call("task_understanding", repair_prompt, content, schema, parse)
 
     def _understanding_payload(self, request: TaskUnderstandingRequest) -> dict[str, Any]:
         """Serialize the complete first-stage request, not just user text."""
@@ -391,10 +410,13 @@ def _repair_explicit_replace(value: dict[str, Any], instruction: str) -> dict[st
     # model emits each replacement role explicitly.
     if len(replace_ops) != 1 or any(item.get("replacement_entity") for item in replace_ops):
         return value
-    match = re.search(r"(?:替换成|替换为|换成|replace(?:d)?\s+(?:with|by))\s*([\w一-龥 -]+)", instruction, re.IGNORECASE)
+    match = re.search(r"(?:替换成|替换为|换成|更换为|replace(?:d)?\s+(?:with|by))\s*([\w一-龥 -]+)", instruction, re.IGNORECASE)
+    if not match:
+        match = re.search(r"用\s*([\w一-龥]+)\s*替换", instruction)
     if not match:
         return value
     raw_name = match.group(1).strip(" ，,。.!！?？\t\n")
+    raw_name = re.sub(r"^(一个|两个|三个|几个|这个|那个)\s*", "", raw_name)
     if not raw_name:
         return value
     # Legacy replay compatibility only: without a live catalog, retain the
@@ -422,6 +444,56 @@ def _repair_explicit_replace(value: dict[str, Any], instruction: str) -> dict[st
                                    if isinstance(item, dict) and item.get("operation") == "replace" and not item.get("replacement_entity")
                                    else item) for item in operations]}
     return {**value, "scene_edit": scene_edit}
+
+
+def _repair_live_replace_entity(value: dict[str, Any], instruction: str) -> dict[str, Any]:
+    """Fill a missing ``replacement_entity`` for live turns when the entity already exists.
+
+    Live turns must not invent new entities, but Qwen occasionally omits the
+    ``replacement_entity`` field even when the replacement entity is already
+    declared in ``scene_edit.entities``. This narrow repair only fills in the
+    field by matching the instruction's replacement name to an existing entity.
+    """
+    if not isinstance(value, dict) or value.get("status", "accepted") != "accepted":
+        return value
+    if value.get("turn_kind") != "scene_edit" or not isinstance(value.get("scene_edit"), dict):
+        return value
+    scene_edit = value["scene_edit"]
+    operations = scene_edit.get("operations")
+    if not isinstance(operations, list):
+        return value
+    replace_ops = [item for item in operations
+                   if isinstance(item, dict) and item.get("operation") == "replace"]
+    if len(replace_ops) != 1 or any(item.get("replacement_entity") for item in replace_ops):
+        return value
+    entities = list(scene_edit.get("entities") or [])
+    if not entities:
+        return value
+    match = re.search(r"(?:替换成|替换为|换成|更换为|replace(?:d)?\s+(?:with|by))\s*([\w一-龥 -]+)", instruction, re.IGNORECASE)
+    if not match:
+        match = re.search(r"用\s*([\w一-龥]+)\s*替换", instruction)
+    if not match:
+        return value
+    raw_name = match.group(1).strip(" ，,。.!！?？\t\n")
+    raw_name = re.sub(r"^(一个|两个|三个|几个|这个|那个)\s*", "", raw_name)
+    if not raw_name:
+        return value
+    name_map = {"苹果": "apple", "香蕉": "banana", "篮子": "basket", "托盘": "tray",
+                "棒球": "baseball", "钢笔": "pen", "马克笔": "marker", "马克杯": "mug", "杯子": "mug"}
+    semantic_name = name_map.get(raw_name, raw_name)
+    for entity in entities:
+        if isinstance(entity, dict):
+            entity_id = entity.get("entity_id", "")
+            entity_semantic = str(entity.get("semantic_name", "")).casefold()
+            if (entity_id == semantic_name or entity_id == raw_name or
+                entity_semantic == semantic_name.casefold() or entity_semantic == raw_name.casefold()):
+                replacement_id = entity.get("entity_id")
+                scene_edit = {**scene_edit,
+                              "operations": [({**item, "replacement_entity": replacement_id}
+                                               if isinstance(item, dict) and item.get("operation") == "replace" and not item.get("replacement_entity")
+                                               else item) for item in operations]}
+                return {**value, "scene_edit": scene_edit}
+    return value
 
 
 def _repair_explicit_selector_clarification(value: dict[str, Any], instruction: str) -> dict[str, Any]:

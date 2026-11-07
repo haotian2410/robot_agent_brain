@@ -295,7 +295,8 @@ class AgentService:
             if scene.objects:
                 manifest = session.platform_object_ids if session.scene is not None else (
                     self.config.editor_scene_manifests.get(scene.scene_name) if self.config.editor_scene_manifests else self.config.scene_platform_object_ids)
-                self.app.accept_browser_scene(request.sessionID, scene, platform_object_ids=manifest)
+                self.app.accept_browser_scene(request.sessionID, scene, platform_object_ids=manifest,
+                                               change_kind=request.change_kind)
             # An empty browser document has no platform manifest to accept.  The application
             # bootstrap path below owns creation of the initial scene and will publish it through
             # the same lease; accepting it here would incorrectly require table/robot ids.
@@ -372,7 +373,7 @@ class AgentService:
 
     def result(self, report, identifier):
         outcome = {"scene_updated":"scene_updated","answered":"answered","commands_exported":"plan_ready",
-                   "session_controlled":"answered"}.get(report.delivery_status, "failed")
+                   "robot_configured":"robot_configured", "session_controlled":"answered"}.get(report.delivery_status, "failed")
         if report.turn_status == "clarification_required" or report.error and report.error.clarification_question:
             outcome = "clarification_required"
         if report.run_status == "failed":
@@ -393,8 +394,12 @@ class AgentService:
                 if call.get("error"):
                     call["error"] = f"详见本机诊断 {report.request_id}"
         result.update(taskID=identifier, sessionID=report.session_id, outcome=outcome, executed=False)
+        if report.execution_capability == "unsupported" and report.delivery_status == "robot_configured":
+            result.update(outcome="scene_updated", execution_capability="unsupported", failure_class="capability_unsupported")
         if isinstance(result.get("error"), dict) and result["error"].get("code") in {
-                "web_platform_profile_unsupported", "capability_unsupported", "robot_profile_not_registered"}:
+                "web_platform_profile_unsupported", "capability_unsupported", "robot_profile_not_registered",
+                "robot_setup_profile_not_registered", "dual_planner_capability_unsupported",
+                "dual_recipe_capability_unsupported"}:
             result.update(outcome="unsupported", failure_class="capability_unsupported", terminal=True)
         result["artifacts"] = [{"name": name, "url": f"/tasks/{identifier}/artifacts/{quote(name)}"}
                                for name in report.artifacts
@@ -422,6 +427,9 @@ class AgentService:
             "qwen":"unavailable","browser":"not_bound","assets":"unconfigured",
             "capabilities":{"control":False,"segmentation":False,"active_browser_limit":1,
                 "requires_open_browser":True,"gateway_protocol":PROTOCOL_VERSION,"commands":["2.0"]}}
+        status["ols_catalog_revision"] = self.app.pipeline.asset_catalog.revision if self.app.pipeline.asset_catalog else None
+        status["switchable_assets"] = self.app.robot_assembly.catalog()
+        status["registered_profiles"] = sorted(self.app.registered_profile_ids)
         status["browser_id"] = None
         status["tasks"] = {"active_task_id": None, "queued": self.queue.qsize()}
         # §5.3: the Gateway waits three seconds for this reading, so the legs must not queue behind
@@ -552,10 +560,13 @@ def create_http_app(service):
             code = text.split(":", 1)[0]
             status = 404 if code in {"task_not_found","session_not_found","artifact_not_found"} else 422 if code in {
                 "web_platform_profile_unsupported", "capability_unsupported", "robot_profile_not_registered",
-                "robot_joint_inventory_missing"} else 409 if code in {
+                "robot_setup_profile_not_registered", "dual_planner_capability_unsupported",
+                "dual_recipe_capability_unsupported", "robot_joint_inventory_missing"} else 409 if code in {
                 "task_busy","idempotency_conflict","session_browser_not_active","session_reconciliation_required"} else 400
             payload = {"error": {"code": code, "message": text}}
-            if code in {"web_platform_profile_unsupported", "capability_unsupported", "robot_profile_not_registered"}:
+            if code in {"web_platform_profile_unsupported", "capability_unsupported", "robot_profile_not_registered",
+                        "robot_setup_profile_not_registered", "dual_planner_capability_unsupported",
+                        "dual_recipe_capability_unsupported"}:
                 # A scene may be perfectly valid for display while the
                 # current Brain profile cannot plan or execute robot tasks.
                 # Keep the precise legacy error code, but expose the stable
@@ -651,6 +662,10 @@ def create_http_app(service):
                     session = service.app.sessions[item["id"]]
                     item["session_phase"] = getattr(session, "session_phase", "setup")
                     item["camera_id"] = getattr(session, "camera_id", None)
+                    item["robot_asset"] = getattr(session, "robot_asset", None)
+                    item["gripper_asset"] = getattr(session, "gripper_asset", None)
+                    item["camera_asset"] = getattr(session, "camera_asset", None)
+                    item["execution_capability"] = getattr(session, "execution_capability", "unknown")
                 else:
                     item["session_phase"] = "setup"
                     item["camera_id"] = service.camera_bindings.get(item["id"])
@@ -678,6 +693,12 @@ def create_http_app(service):
             "scene_version": scene.scene_version if scene else None,
             "scene_sub_version": scene.scene_sub_version if scene else None,
             "sceneDigest": digest(scene) if scene else None,
+            "robot_asset": getattr(session, "robot_asset", None),
+            "gripper_asset": getattr(session, "gripper_asset", None),
+            "camera_asset": getattr(session, "camera_asset", None),
+            "profile_id": session.robot_setup.profile_id if getattr(session, "robot_setup", None) else None,
+            "execution_capability": getattr(session, "execution_capability", "unknown"),
+            "platform_rebind_revision": getattr(session, "platform_rebind_revision", 0),
         })
 
     async def artifact(request):
@@ -720,6 +741,17 @@ def create_http_app(service):
     async def health(request):
         return web.json_response(await asyncio.to_thread(service.health))
 
+    async def brain_capabilities(request):
+        return web.json_response({
+            "protocol": PROTOCOL_VERSION,
+            "ols_catalog_revision": service.app.pipeline.asset_catalog.revision if service.app.pipeline.asset_catalog else None,
+            "switchable_assets": service.app.robot_assembly.catalog(),
+            "registered_profiles": sorted(service.app.registered_profile_ids),
+            "capabilities": ["atomic_commit", "sub_versioned_scene_identity", "platform_rebind",
+                              "setup_only_local_edits", "bound_browser", "task_edit_lock",
+                              "canonical_scene", "agent_owned_phase", "uncertain_recovery"],
+        })
+
     app.router.add_post("/startTask", start)
     app.router.add_get("/queryTaskState", state)
     app.router.add_get("/queryTaskFailureReason", failure)
@@ -729,6 +761,7 @@ def create_http_app(service):
     app.router.add_get("/sessionState", session_state)
     app.router.add_get("/tasks/{taskID}/artifacts/{name}", artifact)
     app.router.add_get("/health", health)
+    app.router.add_get("/brainCapabilities", brain_capabilities)
 
     async def allocate_object_id(request):
         count = int(request.query.get("count", "1"))

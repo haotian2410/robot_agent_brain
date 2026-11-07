@@ -14,6 +14,11 @@ class BrainRunReport(BaseModel):
     turn_status: TurnStatus | None = None
     run_status: Literal["success", "blocked", "failed"]
     delivery_status: str = "none"
+    execution_capability: Literal["unknown", "supported", "unsupported"] = "unknown"
+    robot_asset: str | None = None
+    gripper_asset: str | None = None
+    camera_asset: str | None = None
+    platform_rebind_revision: int = 0
     scene_source: Literal["uploaded", "session", "generated", "none"] = "none"
     scene_created: bool = False
     scene_id: SceneId | None = None

@@ -139,9 +139,16 @@ def _safe(value: str, fallback: str) -> str:
 def _classify_batch_error(error: Exception) -> tuple[str, str, dict]:
     """Classify expected capability boundaries without hiding real failures."""
     text = str(error)
-    if "web_platform_profile_unsupported" in text:
+    capability_codes = {
+        "web_platform_profile_unsupported", "capability_unsupported",
+        "robot_profile_not_registered", "robot_setup_profile_not_registered",
+        "dual_planner_capability_unsupported", "dual_recipe_capability_unsupported",
+    }
+    code = next((candidate for candidate in sorted(capability_codes, key=len, reverse=True)
+                 if candidate in text), None)
+    if code is not None:
         return "passed", "unsupported", {
-            "code": "web_platform_profile_unsupported",
+            "code": code,
             "failure_class": "capability_unsupported",
             "message": "当前场景可展示，但该机器人平台暂不支持 Agent 任务规划或执行。",
             "executed": False,
@@ -155,7 +162,11 @@ def _check_expectation(session_spec, result: dict, state: dict) -> tuple[str, st
         return "not_checked", None
     actual = result.get("outcome") or result.get("failure_class")
     if expected == "capability_unsupported":
-        ok = result.get("failure_class") == "capability_unsupported" or result.get("error_code") == "web_platform_profile_unsupported"
+        ok = result.get("failure_class") == "capability_unsupported" or result.get("error_code") in {
+            "web_platform_profile_unsupported", "capability_unsupported", "robot_profile_not_registered",
+            "robot_setup_profile_not_registered", "dual_planner_capability_unsupported",
+            "dual_recipe_capability_unsupported",
+        }
     elif expected == "safe_rejection":
         ok = actual in {"failed", "rejected", "safe_rejection", "clarification_required"}
     elif expected == "query_answered":
@@ -369,6 +380,78 @@ class ServiceBatchRunner:
                 reasons = ",".join(sorted({str(item.get("reason", "unknown"))
                                               for item in document.rejected_objects}))
                 raise RuntimeError(f"batch_preset_scene_invalid:{index}:{scene_path}:scene_object_rejected:{reasons}")
+
+    @staticmethod
+    def _fixture_scene_semantics(value):
+        """Return semantic names and metadata refs from a preset document."""
+        names, refs = set(), set()
+        for obj in value.get("objects", []) if isinstance(value, dict) else []:
+            for component in obj.get("components", []) or []:
+                kind = component.get("component_type")
+                props = component.get("properties", {}) or {}
+                if kind == "Semantic" and isinstance(props.get("semantic_name"), str):
+                    names.add(props["semantic_name"].casefold())
+                elif kind == "MetadataRef":
+                    path, asset_type = props.get("path"), props.get("type")
+                    if isinstance(path, str) and isinstance(asset_type, str):
+                        refs.add((path, asset_type))
+        return names, refs
+
+    def _validate_session_fixture(self, input_path, session_spec):
+        """Validate matrix role preconditions without touching the browser.
+
+        Matrix rows describe an intended object, while a preset file is the
+        concrete starting world.  A missing target must be reported as a
+        fixture error and skip only that session; otherwise a batch would
+        mislabel bad test data as a Brain grounding or geometry regression.
+        """
+        if not session_spec.scene:
+            return None
+        scene_path = (Path(input_path).resolve().parent / session_spec.scene).resolve()
+        try:
+            value = json.loads(scene_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            return {"code": "fixture_scene_unreadable", "message": str(exc), "path": str(scene_path)}
+        names, refs = self._fixture_scene_semantics(value)
+        mapping = session_spec.asset_role_mapping or {}
+        assertions = session_spec.expected_assertions or {}
+        operation = assertions.get("operation")
+        role_names = []
+        for field in ("target_role", "reference_role", "source_role", "destination_role", "placement_role"):
+            role = assertions.get(field)
+            if isinstance(role, str):
+                role_names.append((field, role))
+        # Older C7 rows omitted target_role for the single-object scale and
+        # translate negatives but still bound object_a in the compiled asset
+        # map.  Infer that one unambiguous role for fixture validation only;
+        # never use it to execute or ground a live request.
+        if not any(field == "target_role" for field, _ in role_names) \
+                and operation in {"scale", "translate", "move_relative", "rotate", "remove", "update_properties"} \
+                and isinstance(mapping.get("object_a"), dict):
+            role_names.append(("target_role", "object_a"))
+        for field, role in role_names:
+            binding = mapping.get(role)
+            if not isinstance(binding, dict):
+                continue
+            semantic = binding.get("semantic_name")
+            if isinstance(semantic, str) and semantic.casefold() not in names:
+                return {"code": "fixture_asset_missing", "message":
+                        f"{field}={role} requires semantic asset {semantic!r}, but the preset contains {sorted(names)}",
+                        "role": role, "semantic_name": semantic, "path": str(scene_path)}
+            metadata_ref = binding.get("metadata_ref")
+            if isinstance(metadata_ref, str) and semantic is None:
+                # Only enforce a metadata identity when the scene advertises
+                # the same namespace; old fixtures may omit type in aliases.
+                if not any(path == metadata_ref for path, _ in refs):
+                    return {"code": "fixture_asset_missing", "message":
+                            f"{field}={role} requires {metadata_ref}, which is absent from the preset",
+                            "role": role, "metadata_ref": metadata_ref, "path": str(scene_path)}
+            if operation == "scale" and session_spec.expected_outcome in {"success", "scene_updated"} \
+                    and binding.get("scalable") is False:
+                return {"code": "fixture_capability_mismatch", "message":
+                        f"{role}={semantic or metadata_ref} is not scalable but the row expects a successful scale",
+                        "role": role, "capability": "scalable", "path": str(scene_path)}
+        return None
 
     def _world(self, browser_id):
         response = self._request("GET", self.gateway_url + "/getWorld", params={"browser_id": browser_id})
@@ -686,6 +769,38 @@ class ServiceBatchRunner:
                     json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
                 return value
 
+            fixture_issue = self._validate_session_fixture(input_path, session_spec)
+            if fixture_issue is not None:
+                # Preserve one evidence directory per authored instruction,
+                # but do not create a Gateway session or acquire a lease for
+                # invalid test data.  Other sessions in the same batch remain
+                # runnable.
+                for turn_index, instruction in enumerate(session_spec.instructions, 1):
+                    turn_root = turns_root / f"{turn_index:04d}"
+                    turn_root.mkdir()
+                    (turn_root / "instruction.txt").write_text(instruction, encoding="utf-8")
+                    (turn_root / "fixture_error.json").write_text(
+                        json.dumps(fixture_issue, ensure_ascii=False, indent=2), encoding="utf-8")
+                    result = {"outcome": "blocked", "executed": False,
+                              "failure_class": "fixture_invalid", "error": fixture_issue}
+                    (turn_root / "task_result.json").write_text(
+                        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+                    results.append({"session": name, "output_name": output_name,
+                                    "difficulty": session_spec.difficulty,
+                                    "category": session_spec.category, "turn": turn_index,
+                                    "instruction": instruction, "status": "blocked",
+                                    "outcome": "blocked", "classification": "blocked_fixture",
+                                    "semantic_classification": "blocked_fixture",
+                                    "evidence_status": "not_run", "fixture_error": fixture_issue,
+                                    "expected_assertions": session_spec.expected_assertions,
+                                    "test_id": session_spec.test_id,
+                                    "variant_id": session_spec.variant_id,
+                                    "fixture_id": session_spec.fixture_id})
+                write_session_summary("blocked_fixture", fixture_issue)
+                session_summaries.append({"session": name, "sessionID": session_record.get("sessionID"),
+                                          "status": "blocked_fixture", "error": fixture_issue})
+                continue
+
             try:
                 # Establish the Gateway/Brain session before touching the browser world.  The
                 # browser is a shared live surface, while a batch session owns its own frozen
@@ -785,7 +900,17 @@ class ServiceBatchRunner:
                             screenshot = {**screenshot, "status": "skipped"}
                         outcome = result.get("outcome", "failed")
                         assertion_result, assertion_error = _check_expectation(session_spec, result, state)
-                        oracle = _independent_oracle(session_spec, before, current, result)
+                        # The HTTP result exposes artifact descriptors as a
+                        # list (``[{name, url}, ...]``), while the oracle
+                        # needs the local, already-downloaded JSON payloads.
+                        # Keep the public result untouched, but give the
+                        # independent assertions the materialized artifact
+                        # paths so query_result/commands checks prove the
+                        # actual response rather than only its download URL.
+                        oracle_result = dict(result)
+                        if saved_artifacts:
+                            oracle_result["artifacts"] = dict(saved_artifacts)
+                        oracle = _independent_oracle(session_spec, before, current, oracle_result)
                         oracle["debug_evidence"] = debug_evidence
                         (turn_root / "oracle.json").write_text(
                             json.dumps(oracle, ensure_ascii=False, indent=2), encoding="utf-8")

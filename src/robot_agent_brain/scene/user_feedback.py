@@ -72,7 +72,9 @@ def explain_issue(issue, exc, scene, assets):
         question = original.split(":", 1)[-1].strip()
     elif code.startswith("scene_scale_"):
         issue.message = "无法执行此缩放：对象必须明确允许缩放，并满足资产范围和局部轴限制；机器人、附件及承载物不能这样缩放。场景未改变。"
-    elif code in {"scene_edit_support_footprint_exceeded", "scene_edit_workspace_exceeded", "scene_edit_support_invalid"}:
+    elif code == "scene_edit_workspace_exceeded":
+        issue.message = "编辑失败：目标位置超出桌面可用编辑区域，场景未改变。请改用桌面内的位置。"
+    elif code in {"scene_edit_support_footprint_exceeded", "scene_edit_support_invalid"}:
         issue.message = "编辑失败：目标位置超出原支撑面或可用工作区，或原支撑关系无法确认。请减小移动距离或选择桌面内的位置；场景未改变。"
     elif code == "scene_edit_inside_geometry_missing":
         question = "当前容器缺少可靠的内部空间数据，无法安全放置。请改用“放到容器旁边”，或选择具有内部几何的容器。"

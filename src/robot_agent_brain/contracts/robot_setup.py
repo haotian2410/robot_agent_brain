@@ -8,6 +8,21 @@ from .scene import SceneId
 ArmName = Literal["single", "left", "right"]
 
 
+class RobotAssetSwitchRequest(BaseModel):
+    """Semantic OLS asset selection; this is not a planning profile."""
+    model_config = ConfigDict(extra="forbid")
+    robot_asset: str | None = Field(default=None, min_length=1)
+    gripper_asset: str | None = Field(default=None, min_length=1)
+    camera_asset: str | None = Field(default=None, min_length=1)
+    profile_id: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def at_least_one_asset(self):
+        if not any((self.robot_asset, self.gripper_asset, self.camera_asset, self.profile_id)):
+            raise ValueError("robot_asset_switch_empty")
+        return self
+
+
 class RobotSetupRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mode: Literal["single", "dual"]

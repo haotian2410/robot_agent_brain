@@ -61,6 +61,13 @@ def test_runtime_prompt_uses_python_default_for_unspecified_asset_style():
     assert "operation=add" in TASK_UNDERSTANDING_PROMPT
 
 
+def test_runtime_prompt_uses_primary_table_for_bare_tabletop_adds():
+    assert 'relation="on"' in TASK_UNDERSTANDING_PROMPT
+    assert 'reference="table"' in TASK_UNDERSTANDING_PROMPT
+    assert "scene_edit_default_surface_missing" in TASK_UNDERSTANDING_PROMPT
+    assert "不要凭空补 `table`" not in TASK_UNDERSTANDING_PROMPT
+
+
 def test_v3_schema_requires_route_and_all_payload_slots():
     schema = task_understanding_v3_wire_schema()
     assert set(schema["required"]) == set(schema["properties"])
@@ -151,6 +158,75 @@ def test_scene_payloads_are_structured_wire_models():
     assert isinstance(query_wire.scene_query, SceneQueryWire)
     assert edit_wire.scene_edit.entities[0].entity_id == "apple"
     assert query_wire.scene_query.target == "basket"
+
+
+def test_live_v31_bare_add_is_canonicalized_to_primary_table():
+    payload = {
+        "protocol_version": "task_understanding.v3.1",
+        "status": "accepted",
+        "turn_kind": "scene_edit",
+        "arm_usage": "unspecified",
+        "hold_constraints": [],
+        "clarification_question": None,
+        "scene_edit": {
+            "scene_basis": "current",
+            "entities": [{"entity_id": "apple", "semantic_name": "apple", "category": "fruit"}],
+            "asset_choices": [{"entity_id": "apple", "asset_key": "model:1"}],
+            "relations": [],
+            "operations": [{"operation": "add", "target": "apple", "relation": None, "reference": None}],
+        },
+        "scene_query": None, "session_control": None, "robot_setup_request": None,
+        "entities": [], "operations": [], "relations": [],
+    }
+    turn = parse_qwen_turn(payload, "增加一个苹果")
+    operation = turn.scene_edit.operations[0]
+    assert operation.relation.value == "on"
+    assert operation.reference == "table"
+    assert operation.placement_hint == "any"
+
+
+def test_live_v31_bare_multi_add_uses_primary_table_for_each_object():
+    payload = {
+        "protocol_version": "task_understanding.v3.1",
+        "status": "accepted", "turn_kind": "scene_edit", "arm_usage": "unspecified",
+        "hold_constraints": [], "clarification_question": None,
+        "scene_edit": {
+            "scene_basis": "current",
+            "entities": [
+                {"entity_id": "basket", "semantic_name": "basket", "category": "container"},
+                {"entity_id": "apple", "semantic_name": "apple", "category": "fruit"},
+                {"entity_id": "banana", "semantic_name": "banana", "category": "fruit"},
+            ],
+            "asset_choices": [
+                {"entity_id": "basket", "asset_key": "model:4"},
+                {"entity_id": "apple", "asset_key": "model:1"},
+                {"entity_id": "banana", "asset_key": "model:2"},
+            ],
+            "relations": [],
+            "operations": [
+                {"operation": "add", "target": "basket", "relation": None, "reference": None},
+                {"operation": "add", "target": "apple", "relation": None, "reference": None},
+                {"operation": "add", "target": "banana", "relation": None, "reference": None},
+            ],
+        },
+        "scene_query": None, "session_control": None, "robot_setup_request": None,
+        "entities": [], "operations": [], "relations": [],
+    }
+    turn = parse_qwen_turn(payload, "同时在空场景放篮子、苹果、香蕉")
+    assert [(op.relation.value, op.reference, op.placement_hint)
+            for op in turn.scene_edit.operations] == [("on", "table", "any")] * 3
+
+
+def test_legacy_v3_bare_add_keeps_replay_shape():
+    payload = envelope(scene_edit={
+        "scene_basis": "current",
+        "entities": [{"entity_id": "apple", "semantic_name": "apple", "category": "fruit"}],
+        "asset_choices": [], "relations": [],
+        "operations": [{"operation": "add", "target": "apple", "relation": None, "reference": None}],
+    })
+    turn = parse_qwen_turn(payload, "增加一个苹果")
+    assert turn.scene_edit.operations[0].relation is None
+    assert turn.scene_edit.operations[0].reference is None
 
 
 def test_robot_payload_uses_canonical_v3_entity_and_operation_fields():

@@ -33,6 +33,11 @@ class SessionState(BaseModel):
     holding_object: SceneId | None = None
     robot_setup: RobotSetup | None = None
     robot_setup_revision: int = Field(default=0, strict=True, ge=0)
+    platform_rebind_revision: int = Field(default=0, strict=True, ge=0)
+    robot_asset: str | None = None
+    gripper_asset: str | None = None
+    camera_asset: str | None = None
+    execution_capability: Literal["unknown", "supported", "unsupported"] = "unknown"
     arm_states: RobotRuntimeState | None = None
     original_scene_manifest: OriginalSceneManifest | None = None
     platform_object_ids: set[SceneId] | None = None
@@ -173,7 +178,10 @@ class SessionStore:
             seen_scene_object_ids=session.seen_scene_object_ids, next_scene_object_id=session.next_scene_object_id,
             dialogue=session.dialogue, session_action=session.session_action, sync_state=session.sync_state,
             session_phase=getattr(session, "session_phase", "setup"), camera_id=getattr(session, "camera_id", None),
-            holding_object=session.holding_object, last_exported_request=session.last_exported_request,
+            holding_object=session.holding_object, platform_rebind_revision=getattr(session, "platform_rebind_revision", 0),
+            robot_asset=getattr(session, "robot_asset", None), gripper_asset=getattr(session, "gripper_asset", None),
+            camera_asset=getattr(session, "camera_asset", None), execution_capability=getattr(session, "execution_capability", "unknown"),
+            last_exported_request=session.last_exported_request,
             robot_setup=session.robot_setup, robot_setup_revision=session.robot_setup_revision, arm_states=session.arm_states,
             original_scene_manifest=session.original_scene_manifest, platform_object_ids=session.platform_object_ids,
             profile_object_map=session.profile_object_map,
@@ -216,7 +224,8 @@ class SessionStore:
         else:
             session.seen_scene_object_ids = set(state.seen_scene_object_ids)
             session.next_scene_object_id = state.next_scene_object_id
-        for name in ("dialogue", "session_action", "sync_state", "session_phase", "camera_id", "holding_object", "last_exported_request",
+        for name in ("dialogue", "session_action", "sync_state", "session_phase", "camera_id", "holding_object",
+                     "platform_rebind_revision", "robot_asset", "gripper_asset", "camera_asset", "execution_capability", "last_exported_request",
                      "exported_commands", "dispatched_requests", "pending_commands", "pending_execution_request",
                      "last_feedback_source", "recovery_context"):
             setattr(session, name, getattr(state.model_copy(deep=True), name))

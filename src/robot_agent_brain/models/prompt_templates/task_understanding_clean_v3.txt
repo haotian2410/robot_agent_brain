@@ -31,6 +31,11 @@
   "scene_query": null,
   "session_control": null,
   "robot_setup_request": null,
+  "robot_asset_switch": null,
+  "robot_asset": null,
+  "gripper_asset": null,
+  "camera_asset": null,
+  "profile_id": null,
   "entities": [],
   "operations": [],
   "relations": []
@@ -104,7 +109,25 @@
 
 用户只是在查询当前或原始场景，不改变场景，也不生成机器人动作。
 
+确定性路由规则：包含“有没有”“是否存在”“是否有”“有几个”“多少个”“哪些”或“查询”
+时，优先输出 `scene_query`；包含“增加”“添加”“生成”“放置”“移动”“删除”“改成”等
+明确编辑动词时才输出 `scene_edit`。同一句同时包含查询和编辑动词时返回
+`clarification_required`，不要把查询改写成新增对象。
+
 ### `robot_config`
+
+当用户明确说“换成 Piper”“换成 UR10”“换成 2F140 夹爪”或“换相机”时，使用
+`robot_config`，并只填 `robot_asset_switch`，例如：
+
+```text
+{"robot_asset_switch":{"robot_asset":"piper","gripper_asset":null,"camera_asset":null,"profile_id":null}}
+```
+
+机械臂、夹爪和相机名称必须逐字选择当前 OLS 装配目录中的规范名，不要输出数字 ID。
+“换成 Piper”只改变机械臂；“换成 2F140 夹爪”只改变夹爪；“换相机”只改变相机。
+OLS 资产存在不代表已有 RobotProfile；未注册平台仍可切换和展示，但后续机器人任务由
+Python 返回 `capability_unsupported`，不能生成 UR5e 假 Commands。多个同名或不存在的
+资产必须澄清。
 
 用户明确要求切换单臂/双臂或机器人 profile。没有明确提及时不要自动填写。
 
@@ -267,7 +290,9 @@ table、desk、desktop、桌子、桌面、台面
 同时添加一个篮子、一个苹果和一个香蕉
 ```
 
-用户没有明确说桌面、台面或其他支撑面时，不要凭空补 `table`。输出 `relation=null`、`reference=null`，并为每个对象保留一个 `add` 操作：
+在本协议的 `tabletop_edit` 工作域中，普通场景编辑默认发生在配置并已验证的主桌面上。因此“增加 A”和“在桌子上增加 A”是同一类语义：每个新增操作都使用 `relation="on"`、`reference="table"`、`placement_hint="any"`。这里的 `table` 是工作区环境引用，不是本轮要新增的实体；Python 会根据当前 `workspace`/`scene_context` 绑定真实主桌面，并在缺少主桌面时返回 `scene_edit_default_surface_missing`。
+
+用户没有指定具体方位时，不要凭空生成世界坐标或新增一张桌子。为每个对象保留一个 `add` 操作，并使用主桌面默认支撑：
 
 ```json
 {
@@ -287,9 +312,9 @@ table、desk、desktop、桌子、桌面、台面
     ],
     "relations": [],
     "operations": [
-      {"operation": "add", "target": "basket", "relation": null, "reference": null},
-      {"operation": "add", "target": "apple", "relation": null, "reference": null},
-      {"operation": "add", "target": "banana", "relation": null, "reference": null}
+      {"operation": "add", "target": "basket", "relation": "on", "reference": "table", "placement_hint": "any"},
+      {"operation": "add", "target": "apple", "relation": "on", "reference": "table", "placement_hint": "any"},
+      {"operation": "add", "target": "banana", "relation": "on", "reference": "table", "placement_hint": "any"}
     ]
   },
   "scene_query": null,
@@ -301,7 +326,7 @@ table、desk、desktop、桌子、桌面、台面
 }
 ```
 
-这里的“空场景”不是让模型猜一个桌子。是否存在 Brain 配置的默认支撑面、是否能够在空场景中放置，由 Python bootstrap、scene editor 和几何校验决定。
+这里的“空场景”不是让模型新增一张桌子。是否存在 Brain 配置的默认支撑面、是否能够在空场景中放置，由 Python bootstrap、scene editor 和几何校验决定；如果是用户上传的真正空场景而没有主桌面，必须返回明确的 `scene_edit_default_surface_missing`，不能猜测或把物体放到桌外。
 
 ## 6. Scene Edit 操作字段
 
@@ -346,8 +371,10 @@ update
 }
 ```
 
-如果用户没有明确新对象，或新对象不能唯一对应资产，返回
-`clarification_required`，不要猜测替换模型。
+如果用户没有明确新对象的语义名称（例如只说"替换一下"而不说替换成什么），返回
+`clarification_required`，不要猜测替换模型。但如果用户明确给出了语义名称（例如"钢笔"），
+即使目录中有多个同名不同款式的变体（例如橙色钢笔和黑色钢笔），也直接选择该语义名称，
+不要因为款式差异而澄清。Python 会按配置的默认资产完成选择。
 
 ### 放在支撑面上
 
@@ -462,6 +489,11 @@ update
 
 颜色修改只放在 `properties.color`。实体颜色只表示选择条件。
 
+当用户对已有物体说“给马克笔换上蓝色”“给苹果换上红色”或“把它渲染成蓝色”时，
+“换上/渲染成”表示修改实例颜色，必须使用 `update_properties`，不要因为出现“换”字
+就请求替换模型。只有用户明确给出新的物体名称（例如“把苹果换成香蕉”“换成一个杯子”）
+时才使用 `replace`；如果“换成”后只有颜色词，按颜色修改处理。
+
 ## 7. Scene Edit 关系
 
 允许：
@@ -480,7 +512,13 @@ left_of、right_of、front_of、behind、above、below、near、on、inside
 - `left_of/right_of/front_of/behind`：相对于普通物体的位置；
 - “桌面右侧”是桌面内部 `placement_region=right_half`；
 - “桌子右边”按本期桌面工作域解释为桌面 `right_half`，不生成桌外地面关系。
-- 桌面角区统一使用顶视平面：右上/东北/右前=`right_front`，左上/西北/左前=`left_front`，右下/东南/右后=`right_back`，左下/西南/左后=`left_back`；这里“上/下”不是竖直 Z 轴。
+- 桌面角区统一使用顶视平面：右上/东北/右前=`right_front`，左上/西北/左前=`left_front`，右下/东南/右后=`right_back`，左下/西南/左后=`left_back`；这里”上/下”不是竖直 Z 轴。
+- 相对移动的罗盘方向映射：东侧/东边=`right_of`，西侧/西边=`left_of`，南侧/南边=`behind`，北侧/北边=`front_of`。这与桌面角区映射一致：右=东，左=西，后=南，前=北。
+- 在桌面选择极值时，罗盘词也直接表示世界坐标极值，不需要额外参照物：
+  “最靠西/最西边”=`leftmost`，“最靠东/最东边”=`rightmost`，
+  “最靠北/最北边”=`frontmost`，“最靠南/最南边”=`backmost`。
+  例如“将最靠西的苹果设为蓝色”必须选择候选苹果中 X 坐标最小的一个，
+  不得追问参照物；只有用户说“苹果在某物体西边”时才使用 `left_of` 加 reference。
 
 `scene_edit.relations` 只用于操作前的选择条件；操作要放置到哪里，必须写在 operation 的 `relation/reference` 中。
 
@@ -508,6 +546,10 @@ left_of、right_of、front_of、behind、above、below、near、on、inside
 用户说“先增加篮子，再把苹果放进篮子”时，先生成 basket，再让 apple 的 operation reference=basket。必要时使用 `operation_id` 和 `depends_on`，但不得让后续操作引用尚未声明的实体。
 
 用户没有明确同时执行机器人动作时，不添加 `parallel_group`。
+
+用户说"生成一个苹果，再让它向右移动五厘米"时，两个操作都是场景编辑：第一个是 `add`，第二个是 `translate`。只要用户给出了明确的距离（如"五厘米""0.05米""5cm"），就是场景编辑的平移操作，不是机器人任务。机器人任务不会包含具体距离数值。
+
+用户说"增加一个苹果，然后把它改成蓝色"时，两个操作也都是场景编辑：第一个是 `add`，第二个是 `update_properties`。多步操作按顺序输出到同一个 `scene_edit.operations` 数组中。
 
 ## 9. Robot Task
 
@@ -550,6 +592,10 @@ left_of、right_of、front_of、behind、above、below、near、on、inside
 
 “哪个苹果离篮子最近？”使用 `query_type=selection`，关系放在 `scene_query.relations`，不要写到顶层 `relations`。
 
+“有没有蓝色钢笔？”使用 `query_type=existence`，不要生成 `add` 操作；“有几个苹果？”
+使用 `query_type=count`。实体仍必须来自当前 OLS 资产词表或当前场景对象，环境引用按
+Python 的场景解析器处理。
+
 ## 11. 澄清规则
 
 以下情况必须返回 `clarification_required`，不能猜：
@@ -582,8 +628,8 @@ left_of、right_of、front_of、behind、above、below、near、on、inside
 `operation=add` 的位置字段只使用 `relation/reference/placement_hint/placement_region`。
 `direction/distance_m/motion_scale/axis/angle_deg/scale_*` 必须为 `null`，`properties`
 必须为空对象；不要把未使用的默认值、颜色或旋转字段填进新增操作。
-{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit"}],"asset_choices":[{"entity_id":"apple","asset_key":"model:1"}],"relations":[],"operations":[{"operation":"add","target":"apple","relation":null,"reference":null}]}}
+{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit"}],"asset_choices":[{"entity_id":"apple","asset_key":"model:1"}],"relations":[],"operations":[{"operation":"add","target":"apple","relation":"on","reference":"table","placement_hint":"any"}]}}
 {"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"banana","semantic_name":"banana","category":"fruit"},{"entity_id":"basket","semantic_name":"basket","category":"container"}],"asset_choices":[],"relations":[],"operations":[{"operation":"move_relative","target":"banana","relation":"right_of","reference":"basket"}]}}
-{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"basket","semantic_name":"basket","category":"container"},{"entity_id":"apple","semantic_name":"apple","category":"fruit"},{"entity_id":"banana","semantic_name":"banana","category":"fruit"}],"asset_choices":[{"entity_id":"basket","asset_key":"model:4"},{"entity_id":"apple","asset_key":"model:1"},{"entity_id":"banana","asset_key":"model:2"}],"relations":[],"operations":[{"operation":"add","target":"basket","relation":null,"reference":null},{"operation":"add","target":"apple","relation":null,"reference":null},{"operation":"add","target":"banana","relation":null,"reference":null}]}}
+{"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"basket","semantic_name":"basket","category":"container"},{"entity_id":"apple","semantic_name":"apple","category":"fruit"},{"entity_id":"banana","semantic_name":"banana","category":"fruit"}],"asset_choices":[{"entity_id":"basket","asset_key":"model:4"},{"entity_id":"apple","asset_key":"model:1"},{"entity_id":"banana","asset_key":"model:2"}],"relations":[],"operations":[{"operation":"add","target":"basket","relation":"on","reference":"table","placement_hint":"any"},{"operation":"add","target":"apple","relation":"on","reference":"table","placement_hint":"any"},{"operation":"add","target":"banana","relation":"on","reference":"table","placement_hint":"any"}]}}
 {"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"banana","semantic_name":"banana","category":"fruit"}],"relations":[],"operations":[{"operation":"translate","target":"banana","direction":"right","distance_m":0.02,"coordinate_frame":"object_local","relation":null,"reference":null}]}}
 {"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit"},{"entity_id":"basket","semantic_name":"basket","category":"container"}],"relations":[],"operations":[{"operation":"move_relative","target":"apple","relation":"left_of","reference":"basket"}]}}

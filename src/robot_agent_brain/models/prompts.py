@@ -101,6 +101,24 @@ def build_asset_catalog_prompt(assets, aliases=None, *, snapshot=None, registere
         lines.append("当前 OLS 场景模板（仅用于场景上下文/预设选择，不可作为 scene_edit.add 的物体）：")
         for item in snapshot.scenes:
             lines.append(f"- {item.scene_key} | scene_name={item.name} | display={item.display_name or item.name}")
+    assembly_catalog = getattr(assets, "robot_assembly_catalog", None)
+    if callable(assembly_catalog):
+        lines.append("OLS 机器人/配件装配目录（只用于语义选择；是否能规划仍由 RobotProfile 决定）：")
+        try:
+            assembly_items = assembly_catalog(registered_profiles or ())
+        except TypeError:
+            assembly_items = assembly_catalog()
+        for item in assembly_items:
+            aliases_text = ", ".join(item.get("aliases") or ()) or "-"
+            lines.append("- {asset_key} | semantic_name={semantic_name} | role={role} | aliases={aliases} | "
+                         "connect_joints={connect_joints} | connect_links={connect_links} | child_link={child_link} | "
+                         "profile_registered={profile_registered}".format(
+                             asset_key=item.get("asset_key"), semantic_name=item.get("semantic_name"),
+                             role=item.get("role"), aliases=aliases_text,
+                             connect_joints=",".join(item.get("connect_joints") or ()) or "-",
+                             connect_links=",".join(item.get("connect_links") or ()) or "-",
+                             child_link=item.get("child_link") or "-",
+                             profile_registered=str(bool(item.get("profile_registered"))).lower()))
     lines.append("目录中的 mug 与 cup 是两个不同资产；只有当当前目录实际列出 cup 时才选择 cup。不要自行做名称替换。")
     lines.append("场景编辑统一在主桌面工作域解释：右/东=+X，前/北=+Y，上=+Z；角落和中间不表示桌外地面。")
     return "\n".join(lines), snapshot.revision.removeprefix("sha256:")

@@ -2,6 +2,7 @@
 import hashlib
 from urllib.parse import urlsplit
 
+from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from ..contracts.scene import SceneConfig, SceneDocument, parse_scene_document
 from ..scene.component_access import SceneIndex
@@ -39,6 +40,9 @@ class StartTask(BaseModel):
     clientRequestID: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,80}$")
     browserID: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,128}$")
     sceneDigest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    # Browser asset-panel platform replacements are a distinct, safe scene
+    # transition.  Ordinary scene edits keep the historical default.
+    change_kind: Literal["scene_edit", "platform_rebind"] = "scene_edit"
 
 
 class SessionRequest(BaseModel):

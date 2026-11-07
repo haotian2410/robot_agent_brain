@@ -44,6 +44,23 @@ class SceneQueryEngine:
         items = selector.select(
             intent.target, intent.entities, intent.relations, scene, bindings_override=overrides)
         index = SceneIndex(scene)
+        # Count/existence queries may scope the candidate set to an
+        # environment reference such as ``table``/``桌面``. The wire
+        # contract deliberately keeps that reference outside ``entities``;
+        # resolve it against the current scene and use the explicit semantic
+        # support relation instead of silently counting objects on every
+        # surface. This also works for verified containers whose contents
+        # carry ``support=<container id>``.
+        if intent.query_type in {"count", "existence"} and intent.reference is not None:
+            reference_items = selector.select(
+                intent.reference, intent.entities, intent.relations, scene,
+                bindings_override=overrides)
+            reference = self._unique(reference_items, intent.reference)
+            reference_id = reference.object_id_in_scene
+            items = [obj for obj in items
+                     if obj.object_id_in_scene != reference_id
+                     and index.semantic(obj.object_id_in_scene) is not None
+                     and index.semantic(obj.object_id_in_scene).support == reference_id]
         if intent.evidence_source == "image":
             # Image requests are dispatched by the pipeline, never silently answered as if seen.
             raise ValueError("query_visual_evidence_required")

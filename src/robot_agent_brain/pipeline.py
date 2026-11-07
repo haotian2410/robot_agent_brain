@@ -12,7 +12,7 @@ from .contracts.grounded_task import GroundedTask
 from .contracts.scene import SceneConfig, ScenePatch, SceneId
 from .contracts.skill_plan import SkillPlan
 from .contracts.task_intent import TaskIntent
-from .contracts.turn import BrainTurn, SessionControlIntent, TurnKind, TurnStatus
+from .contracts.turn import BrainTurn, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
 from .scene.query import SceneQueryEngine, SceneQueryResult
 from .scene.editor import SceneEditor
 from .grounding.scene_grounder import SceneGrounder, GroundingAmbiguous
@@ -29,6 +29,70 @@ from .semantics.task_domain_policy import TaskDomainPolicy
 from .errors import BrainError
 from .scene.component_access import SceneIndex
 
+
+_QUERY_MARKERS = (
+    "有没有", "是否存在", "是否有", "有几个", "多少个", "多少只", "多少件",
+    "哪些", "查询", "查一下", "查查", "数一数", "场景中有", "场景里有",
+)
+_EDIT_MARKERS = (
+    "增加", "添加", "生成", "放置", "摆放", "移动", "挪", "删除", "改成",
+    "换成", "渲染成", "画成", "旋转", "缩放", "放大", "缩小", "替换", "放进",
+    "放到", "移到", "调整",
+)
+
+
+def _canonicalize_query_route(turn: BrainTurn, instruction: str) -> BrainTurn:
+    """Prevent an accepted scene-edit payload from mutating a query.
+
+    The model is still the source of the structured entities and relations,
+    but the short, unambiguous Chinese query verbs are a protocol safety
+    boundary.  This only rewrites an *accepted* scene-edit response when the
+    user did not express an edit verb; mixed query/edit sentences remain on
+    the model route and are allowed to clarify instead of guessing.
+    """
+    if turn.status != TurnStatus.ACCEPTED:
+        return turn
+    text = (instruction or "").casefold()
+    if not any(marker in text for marker in _QUERY_MARKERS) or any(marker in text for marker in _EDIT_MARKERS):
+        return turn
+    if turn.turn_kind == TurnKind.SCENE_EDIT and turn.scene_edit is not None:
+        entities = turn.scene_edit.entities
+        relations = [relation for relation in turn.scene_edit.relations if relation.scope == "selection"]
+    elif (turn.turn_kind == TurnKind.ROBOT_TASK and turn.task_intent is not None
+          and not turn.task_intent.operations):
+        entities = turn.task_intent.entities
+        relations = [relation for relation in turn.task_intent.spatial_relations if relation.scope == "selection"]
+    else:
+        return turn
+    if not entities:
+        return BrainTurn(protocol_version=turn.protocol_version,
+                         status=TurnStatus.CLARIFICATION_REQUIRED,
+                         turn_kind=TurnKind.SCENE_QUERY,
+                         instruction=instruction,
+                         clarification_question="请明确要查询哪些物体或属性。")
+    query_type = "count" if any(marker in text for marker in ("有几个", "多少个", "多少只", "多少件")) else "existence"
+    # Preserve only query-compatible selection relations.  A layout relation
+    # in a wrongly-routed edit is not evidence for a query and must not be
+    # silently reinterpreted.
+    try:
+        query = SceneQueryIntent(query_type=query_type,
+                                 entities=entities,
+                                 relations=relations,
+                                 target=entities[0].entity_id,
+                                 evidence_source="scene")
+    except Exception:
+        return BrainTurn(protocol_version=turn.protocol_version,
+                         status=TurnStatus.CLARIFICATION_REQUIRED,
+                         turn_kind=TurnKind.SCENE_QUERY,
+                         instruction=instruction,
+                         clarification_question="请明确要查询的对象、数量或存在性。")
+    return turn.model_copy(update={"turn_kind": TurnKind.SCENE_QUERY,
+                                   "scene_edit": None,
+                                   "scene_query": query,
+                                   "task_intent": None,
+                                   "session_control": None,
+                                   "robot_setup_request": None})
+
 class BrainResult(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     status: TurnStatus = TurnStatus.ACCEPTED
@@ -42,6 +106,7 @@ class BrainResult(BaseModel):
     scene_source_snapshot: str | None = None
     scene_id_remap: dict[int, int] | None = None
     robot_setup_changed: RobotSetup | None = None
+    platform_rebind: dict | None = None
     robot_setup_was_changed: bool = False
     scene_query_result: SceneQueryResult | None = None
     session_action: SessionControlIntent | None = None
@@ -57,8 +122,9 @@ class BrainResult(BaseModel):
 
     @model_validator(mode="after")
     def turn_payload(self):
+        robot_config_payload = self.robot_setup_changed if self.robot_setup_changed is not None else self.platform_rebind
         groups = {
-            TurnKind.ROBOT_CONFIG: (self.robot_setup_changed,),
+            TurnKind.ROBOT_CONFIG: (robot_config_payload,),
             TurnKind.ROBOT_TASK: (self.task_intent, self.grounded_task, self.skill_plan, self.commands),
             TurnKind.SCENE_EDIT: (self.scene_patch,),
             TurnKind.SCENE_QUERY: (self.scene_query_result,),
@@ -88,7 +154,8 @@ class BrainPipeline:
     def __init__(self, understanding, assets, scene_editor=None, vision_provider=None,
                  skill_planning_provider=None, planner_mode="recipe", robot="ur5e", aliases=None,
                  query_near_distance_m=.2, registered_profiles=None,
-                 primary_table_metadata_ref=None):
+                 primary_table_metadata_ref=None, workspace_center_m=None,
+                 placement_policy_version="grid-v2", motion_policy_version="motion-v1"):
         self.understanding = understanding
         self.assets = assets
         # This is the configured command/export profile, not a guess from the
@@ -112,7 +179,10 @@ class BrainPipeline:
                               if hasattr(assets, "catalog_snapshot") else None)
         from .contracts.workspace import WorkspaceSemanticPolicy
         self.workspace_context = WorkspaceSemanticPolicy(
-            primary_table_metadata_ref=primary_table_metadata_ref)
+            primary_table_metadata_ref=primary_table_metadata_ref,
+            workspace_center_m=workspace_center_m,
+            placement_policy_version=placement_policy_version,
+            motion_policy_version=motion_policy_version)
         self.category_aliases = getattr(getattr(assets, "metadata", None), "category_aliases", {})
         self.grounder = SceneGrounder(aliases=self.aliases, category_aliases=self.category_aliases, assets=assets)
         self.motion = MotionScaleResolver(assets)
@@ -309,6 +379,10 @@ class BrainPipeline:
         else:
             intent = self.understanding.understand(request)
             turn = BrainTurn(status="accepted", turn_kind="robot_task", instruction=instruction, task_intent=intent)
+        # Keep unambiguous existence/count language on the read-only query
+        # route even if a provider emits an accepted scene_edit envelope.  A
+        # query must never acquire, resolve or commit an edit lease.
+        turn = _canonicalize_query_route(turn, instruction)
         # Bind the canonical turn to the exact catalog used in its provider
         # request.  This is checked again immediately before scene editing so
         # an OLS update between understanding and execution cannot retarget a

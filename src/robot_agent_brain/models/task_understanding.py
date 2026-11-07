@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from ..semantics.motion_evidence import _extract_motion_spans, resolve_motion_evidence
 from typing import Any, Protocol, Literal
-from ..contracts.robot_setup import RobotSetupRequest
+from ..contracts.robot_setup import RobotSetupRequest, RobotAssetSwitchRequest
 from ..contracts.task_intent import TaskHoldConstraint
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from ..contracts.turn import BrainTurn, SceneEditIntent, SceneEditPlan, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
@@ -43,11 +43,16 @@ def task_understanding_v3_wire_schema():
     defs = schema.get("$defs", {})
     for name in ("SceneEditWire", "SceneQueryWire"):
         if name in defs:
-            # ``asset_choices`` is required by live v3.1 validation when a
-            # catalog snapshot is present, but remains optional in the wire
-            # schema for replay/v3 compatibility.  The provider-side validator
-            # then gives a precise ``asset_choice_missing`` error.
-            required = [key for key in defs[name].get("properties", {}) if key != "asset_choices"]
+            # ``asset_choices`` is required by the live v3.1 provider
+            # validator when a catalog snapshot is present, but remains
+            # optional in the public schema for replay/v3 compatibility.  The
+            # provider-side validator gives a precise ``asset_choice_missing``
+            # diagnostic when a live scene-edit response omits it.  Keeping
+            # the field optional here also lets older recorded examples that
+            # predate the catalog-choice field validate against the same
+            # schema without weakening the live request gate.
+            required = [key for key in defs[name].get("properties", {})
+                        if key != "asset_choices"]
             _require_schema_fields(defs[name], *required)
     # The operation fields which are semantically optional must still be
     # emitted as explicit nulls.  This is important for JSON-schema decoding:
@@ -358,7 +363,8 @@ class TaskParseOutput(BaseModel):
         return BrainTurn(protocol_version=self.protocol_version, status=status, turn_kind=self.turn_kind, instruction=instruction,
                          clarification_question=self.clarification_question,
                          task_intent=task, scene_edit=self.scene_edit, scene_query=self.scene_query,
-                         session_control=self.session_control, robot_setup_request=self.robot_setup_request)
+                         session_control=self.session_control, robot_setup_request=self.robot_setup_request,
+                         robot_asset_switch=getattr(self, "robot_asset_switch", None))
 
 
 class TaskParseWireOutput(BaseModel):
@@ -382,11 +388,28 @@ class TaskParseWireOutput(BaseModel):
     scene_query: SceneQueryWire | None = None
     session_control: SessionControlIntent | None = None
     robot_setup_request: RobotSetupRequest | None = None
+    robot_asset_switch: RobotAssetSwitchRequest | None = None
+    robot_asset: str | None = None
+    gripper_asset: str | None = None
+    camera_asset: str | None = None
+    profile_id: str | None = None
     # All live v3 routes use the same canonical entity/operation vocabulary.
     # ``TaskParseOutput`` above remains the explicit legacy replay adapter.
     entities: list[TaskEntityWire] = Field(default_factory=list)
     operations: list[RobotOperationWire] = Field(default_factory=list)
     relations: list[ParseRelation] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_asset_switch(cls, value):
+        if not isinstance(value, dict):
+            return value
+        value = dict(value)
+        if value.get("turn_kind") == TurnKind.ROBOT_CONFIG.value and value.get("robot_asset_switch") is None:
+            fields = {key: value.pop(key, None) for key in ("robot_asset", "gripper_asset", "camera_asset", "profile_id")}
+            if any(item is not None for item in fields.values()):
+                value["robot_asset_switch"] = fields
+        return value
 
     @model_validator(mode="after")
     def validate_envelope(self):
@@ -402,7 +425,7 @@ class TaskParseWireOutput(BaseModel):
             TurnKind.SESSION_CONTROL: self.session_control,
         }
         if self.status != TurnStatus.ACCEPTED:
-            if (self.robot_setup_request is not None or self.entities or self.operations or self.relations
+            if (self.robot_setup_request is not None or self.robot_asset_switch is not None or self.entities or self.operations or self.relations
                     or any(value is not None for value in payloads.values())):
                 raise ValueError("task_semantic_invalid: rejected turn has payload")
             return self
@@ -412,7 +435,7 @@ class TaskParseWireOutput(BaseModel):
             if not self.entities or not self.operations or any(value is not None for value in payloads.values()):
                 raise ValueError("task_semantic_invalid: robot task needs only entities and operations")
         elif self.turn_kind == TurnKind.ROBOT_CONFIG:
-            if (self.robot_setup_request is None or self.entities or self.operations or self.relations
+            if ((self.robot_setup_request is None and self.robot_asset_switch is None) or self.entities or self.operations or self.relations
                     or any(value is not None for value in payloads.values())):
                 raise ValueError("task_semantic_invalid: robot config payload mismatch")
         elif self.turn_kind in payloads:
@@ -481,7 +504,8 @@ class TaskParseWireOutput(BaseModel):
                          clarification_question=self.clarification_question,
                          task_intent=task, scene_edit=None, scene_query=None,
                          session_control=self.session_control,
-                         robot_setup_request=self.robot_setup_request)
+                         robot_setup_request=self.robot_setup_request,
+                         robot_asset_switch=self.robot_asset_switch)
 
 
 def _wire_entity(value: dict[str, Any]) -> TaskEntity:
@@ -590,6 +614,14 @@ def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str)
     if not isinstance(scene_edit, dict) or not isinstance(scene_edit.get("operations"), list):
         return value
     text = instruction.casefold()
+    # The live v3.1 contract is explicitly tabletop-only.  In that contract
+    # an unqualified ``add`` is not an unconstrained world placement: it means
+    # placement on the configured primary table.  Keep the old v3/replay
+    # envelope untouched so historical fixtures do not silently change
+    # meaning.  This normalization is deliberately done before Pydantic
+    # validation, because the provider is expected to emit the same canonical
+    # relation/reference pair as the downstream editor consumes.
+    live_tabletop = value.get("protocol_version") == "task_understanding.v3.1"
     region = None
     center = False
     for phrases, candidate in (
@@ -622,7 +654,20 @@ def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str)
     if region is None and any(phrase in text for phrase in ("中间", "正中央", "中心位置")):
         center = True
         region = "center"
-    if region is None:
+    object_relative_words = (
+        "旁边", "附近", "靠近", "最近", "最远", "左边", "右边", "左侧", "右侧",
+        "前面", "后面", "前方", "后方", "上面", "下面", "里面", "内", "放进",
+        "near", "nearest", "farthest", "left of", "right of", "behind", "inside",
+    )
+    table_words = ("桌", "桌面", "台面", "table", "desktop", "work table")
+    has_table = any(word in text for word in table_words)
+    has_object_relative_language = any(word in text for word in object_relative_words)
+    # No region phrase is still meaningful for the bare-add default.  Do not
+    # apply it when the instruction contains object-relative language but the
+    # model omitted the reference; that case must remain a clarification or a
+    # strict semantic error rather than being retargeted to the table.
+    default_table_add = live_tabletop and region is None and not has_object_relative_language
+    if region is None and not default_table_add:
         return value
     operations = []
     changed = False
@@ -643,6 +688,17 @@ def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str)
             continue
         if raw_reference and not table_reference:
             operations.append(raw)
+            continue
+        # A bare add in the live tabletop contract inherits the configured
+        # primary-table support.  Explicit object-relative language is
+        # excluded above; if Qwen omitted its reference, the normal
+        # missing-reference diagnostic remains authoritative.
+        if default_table_add and raw_relation is None and not raw_reference:
+            item["relation"] = "on"
+            item["reference"] = "table"
+            item["placement_hint"] = item.get("placement_hint") or "any"
+            changed = True
+            operations.append(item)
             continue
         # A numeric distance or a second motion field is not a corner
         # placement.  Leave it untouched so the normal validator reports the

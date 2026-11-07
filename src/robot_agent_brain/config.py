@@ -18,6 +18,13 @@ class LayoutDefaults(BaseModel):
     table_position: tuple[float, float, float] = (0, 0, -.025)
     workspace_min: tuple[float, float] = (-.75, -.55)
     workspace_max: tuple[float, float] = (.75, .55)
+    # Robot reachability and scene editing use different safety envelopes.
+    # ``workspace_*`` remains the execution/bootstrap envelope.  When the
+    # scene-edit values are omitted, SceneEditor derives them from the
+    # verified support-surface AABB instead of clipping tabletop edits to the
+    # robot's reachable strip.
+    scene_edit_workspace_min: tuple[float, float] | None = None
+    scene_edit_workspace_max: tuple[float, float] | None = None
     clearance_m: float = Field(default=.04, gt=0)
     support_contact_tolerance_m: float = Field(default=.001, gt=0)
     max_attempts: int = Field(default=400, ge=1, le=10000)
@@ -30,6 +37,11 @@ class LayoutDefaults(BaseModel):
             raise ValueError("bootstrap_object_id_collision")
         if any(a >= b for a, b in zip(self.workspace_min, self.workspace_max)):
             raise ValueError("workspace bounds must increase")
+        if (self.scene_edit_workspace_min is None) != (self.scene_edit_workspace_max is None):
+            raise ValueError("scene_edit_workspace_bounds_must_be_paired")
+        if self.scene_edit_workspace_min is not None and any(
+                a >= b for a, b in zip(self.scene_edit_workspace_min, self.scene_edit_workspace_max)):
+            raise ValueError("scene_edit_workspace_bounds_must_increase")
         if any(count < 1 for count in self.initial_counts.values()):
             raise ValueError("initial counts must be positive")
         return self

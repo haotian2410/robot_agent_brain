@@ -4,7 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from .task_intent import TaskIntent, TaskEntity, Direction, MotionScale
 from .spatial import SpatialRelation
-from .robot_setup import RobotSetupRequest
+from .robot_setup import RobotSetupRequest, RobotAssetSwitchRequest
 from ..semantics.scene_references import CanonicalReference
 
 class TurnStatus(StrEnum):
@@ -415,7 +415,14 @@ class SceneQueryIntent(BaseModel):
             SpatialRelation(scope="selection", subject=self.target, reference=self.reference, relation=self.predicate)
             if self.reference not in entity_ids and catalog.lookup(self.reference) is None:
                 raise ValueError("query_reference_missing")
-        elif self.reference is not None or self.predicate is not None:
+        # A count/existence query may scope its candidates to an environment
+        # reference such as ``table``/``桌面``.  Relation predicates remain
+        # exclusive to query_type=relation; selection queries express their
+        # reference inside ``relations``.  The previous blanket rejection of
+        # top-level reference made otherwise valid prompts like
+        # “桌面上一共有多少个钢笔” fail semantic validation.
+        elif self.predicate is not None or (
+                self.reference is not None and self.query_type not in {"count", "existence"}):
             raise ValueError("query_predicate_requires_relation_query")
         return self
 
@@ -435,6 +442,7 @@ class BrainTurn(BaseModel):
     scene_query: SceneQueryIntent | None = None
     session_control: SessionControlIntent | None = None
     robot_setup_request: RobotSetupRequest | None = None
+    robot_asset_switch: RobotAssetSwitchRequest | None = None
     # Catalog identity is captured with the understanding result.  Geometry
     # resolution must not silently reinterpret a turn against a later OLS
     # revision.
@@ -463,16 +471,20 @@ class BrainTurn(BaseModel):
             TurnKind.SESSION_CONTROL: self.session_control,
         }
         if self.status != TurnStatus.ACCEPTED:
-            if any(value is not None for value in payloads.values()):
+            if any(value is not None for value in payloads.values()) or self.robot_asset_switch is not None:
                 raise ValueError("rejected turn must not contain actionable payloads")
             return self
         if self.turn_kind == TurnKind.UNSUPPORTED_TASK:
             raise ValueError("unsupported turn must have unsupported_task status")
         if self.robot_setup_request is not None and self.turn_kind not in {TurnKind.ROBOT_CONFIG, TurnKind.ROBOT_TASK}:
             raise ValueError("robot_setup_request_requires_robot_turn")
-        if self.turn_kind in payloads and payloads[self.turn_kind] is None:
+        if self.robot_asset_switch is not None and self.turn_kind != TurnKind.ROBOT_CONFIG:
+            raise ValueError("robot_asset_switch_requires_robot_config")
+        if self.turn_kind in payloads and payloads[self.turn_kind] is None and self.robot_asset_switch is None:
             raise ValueError("turn payload is missing")
         expected = 2 if self.turn_kind == TurnKind.ROBOT_TASK and self.robot_setup_request is not None else 1
+        if self.turn_kind == TurnKind.ROBOT_CONFIG and self.robot_asset_switch is not None:
+            expected = 0
         if sum(value is not None for value in payloads.values()) != expected:
             raise ValueError("turn must contain exactly one payload")
         return self

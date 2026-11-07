@@ -104,3 +104,14 @@ def test_v2_json_loads_with_backward_compatible_batch_model():
     assert loaded["kind"] == "sessions"
     assert loaded["sessions"][0].test_id
     assert loaded["sessions"][0].expected_outcome
+
+
+def test_known_scene_compile_marks_missing_scene_bindings_fail_closed():
+    workbook = ROOT / "docs" / "semantic-refactor" / "02_semantic_test_matrix.xlsx"
+    catalog = ROOT / "config" / "batch_asset_catalog.json"
+    roles = ROOT / "docs" / "semantic-refactor" / "07_asset_roles_template.json"
+    _, manifest = compile_semantic_matrix_v2(
+        workbook, kind="known_scene", asset_roles=roles,
+        seed=20261103, asset_catalog=catalog, strict_counts=True)
+    assert manifest["scene_binding_status"] == "missing"
+    assert manifest["known_scene_requires_fixture_binding"] is True

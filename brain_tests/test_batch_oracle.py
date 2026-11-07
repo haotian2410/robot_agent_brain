@@ -153,3 +153,57 @@ def test_oracle_classifies_expected_clarification_without_scene_change():
                           expected_outcome="clarification_required", before_scene=scene, after_scene=scene,
                           result={"outcome": "clarification_required", "executed": False})
     assert value["status"] == "expected_clarification"
+
+
+def test_oracle_checks_rotation_axis_and_angle_not_only_changed_quaternion():
+    before = _scene([_obj(10, "apple")])
+    after = _scene([deepcopy(before["objects"][0])])
+    after["objects"][0]["components"][0]["properties"]["quaternion_xyzw"] = [0, 0, 0.70710678, 0.70710678]
+    value = evaluate_turn(
+        expected={"operation": "rotate", "target_role": "object_a", "axis": "z", "angle_deg": 90,
+                  "preserve_instance": True, "non_targets_unchanged": True},
+        expected_outcome="scene_updated", before_scene=before, after_scene=after,
+        result={"outcome": "scene_updated", "executed": False},
+        role_mapping={"object_a": {"semantic_name": "apple", "metadata_ref": "$LIBRARY_SERVER/1", "type": "model"}},
+    )
+    assert value["status"] == "passed", value
+
+
+def test_oracle_checks_translation_non_target_axes_and_distance():
+    before = _scene([_obj(10, "apple")])
+    after = _scene([deepcopy(before["objects"][0])])
+    after["objects"][0]["components"][0]["properties"]["position"] = [0.05, 0.0, 0.1]
+    value = evaluate_turn(
+        expected={"operation": "translate", "target_role": "object_a", "direction": "right",
+                  "distance_m": 0.05, "preserve_orientation": True, "non_targets_unchanged": True},
+        expected_outcome="scene_updated", before_scene=before, after_scene=after,
+        result={"outcome": "scene_updated", "executed": False},
+        role_mapping={"object_a": {"semantic_name": "apple", "metadata_ref": "$LIBRARY_SERVER/1", "type": "model"}},
+    )
+    assert value["status"] == "passed", value
+
+
+def test_oracle_checks_scale_factor():
+    before = _scene([_obj(10, "apple")])
+    after = _scene([deepcopy(before["objects"][0])])
+    after["objects"][0]["components"][0]["properties"]["scale"] = [1.1, 1.1, 1.1]
+    value = evaluate_turn(
+        expected={"operation": "scale", "target_role": "object_a", "scale_mode": "multiply",
+                  "scale_xyz": [1.1, 1.1, 1.1], "preserve_orientation": True},
+        expected_outcome="scene_updated", before_scene=before, after_scene=after,
+        result={"outcome": "scene_updated", "executed": False},
+        role_mapping={"object_a": {"semantic_name": "apple", "metadata_ref": "$LIBRARY_SERVER/1", "type": "model"}},
+    )
+    assert value["status"] == "passed", value
+
+
+def test_oracle_checks_query_count_and_relation_evidence():
+    scene = _scene([_obj(10, "apple")])
+    value = evaluate_turn(
+        expected={"route": "scene_query", "query_type": "count", "count": 1,
+                  "scene_unchanged": True},
+        expected_outcome="answered", before_scene=scene, after_scene=scene,
+        result={"outcome": "answered", "executed": False,
+                "query_result": {"query_type": "count", "count": 1}},
+    )
+    assert value["status"] == "passed", value

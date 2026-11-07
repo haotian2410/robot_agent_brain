@@ -20,6 +20,31 @@ def configuration_summary(config, assets, defaults):
     from .scene.layout_geometry import SceneLayoutGeometryRegistry
     layout_registry = SceneLayoutGeometryRegistry.from_path(config.scene_layout_interiors)
     scene_reference_catalog = config.load_scene_reference_catalog()
+    workspace_policy = {
+        "mode": "tabletop",
+        "interaction_mode": "tabletop_edit",
+        "default_support": "primary_table",
+        "primary_table_metadata_ref": config.default_table_metadata_ref,
+        "coordinate_convention": "x_right_y_front_z_up",
+        # Keep the allowlisted diagnostic JSON-native.  A tuple here would be
+        # serialized as a list by ArtifactWriter and fail its exact
+        # read-back check, turning every otherwise successful turn into an
+        # ``artifact_write_failed`` publication error.
+        "workspace_center_m": [
+            (defaults.workspace_min[0] + defaults.workspace_max[0]) / 2,
+            (defaults.workspace_min[1] + defaults.workspace_max[1]) / 2,
+        ],
+        "scene_edit_workspace": {
+            "mode": "explicit" if defaults.scene_edit_workspace_min is not None else "support_aabb",
+            "min": list(defaults.scene_edit_workspace_min) if defaults.scene_edit_workspace_min is not None else None,
+            "max": list(defaults.scene_edit_workspace_max) if defaults.scene_edit_workspace_max is not None else None,
+        },
+        "default_plane": "xy",
+        "default_rotation_axis": "z",
+        "placement_policy_version": "grid-v2",
+        "motion_policy_version": "motion-v1",
+        "semantics_version": "tabletop.v1",
+    }
     return {"provider":config.provider, "model":config.model, "base_url":endpoint,
             "scene_scale_policy": config.scale_policy().model_dump(mode="json"),
             "query_near_distance_m": config.query_near_distance_m,
@@ -50,6 +75,7 @@ def configuration_summary(config, assets, defaults):
             "scene_layout_clearance_m": getattr(defaults, "clearance_m", None),
             "scene_layout_grid_size": config.scene_layout_grid_size,
             "scene_layout_near_clearance_m": config.scene_layout_near_clearance_m,
+            "workspace_policy": workspace_policy,
             "robot_driver_sha256":fingerprint(config.default_robot_driver.model_dump(mode="json")
                                                if config.default_robot_driver is not None else None),
             "defaults_sha256":fingerprint(defaults.model_dump(mode="json")),

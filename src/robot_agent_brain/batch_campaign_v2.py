@@ -212,6 +212,21 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
         run_profile=run_profile)
     compiled = document["sessions"]
     spec = read_semantic_matrix_v2(matrix, strict_counts=True)
+    # A known-scene matrix without a concrete fixture directory is a
+    # specification-only compile, never a runnable preset campaign.  Fail
+    # closed before touching the browser; otherwise ``scene=None`` would be
+    # interpreted as the current/empty world and produce misleading passes.
+    if kind == "known_scene" and compile_manifest.get("known_scene_requires_fixture_binding"):
+        stages = [{"test_id": str(row["case_id"]), "status": "blocked_fixture",
+                   "classification": "blocked_fixture",
+                   "reason": "known_scene_fixture_binding_required",
+                   "fixture_id": row.get("fixture_id"), "sessions": []}
+                  for row in spec["cases"]]
+        result = {"schema": "brain-semantic-matrix.v2", "kind": "semantic_campaign",
+                  "seed": seed, "matrix": str(Path(matrix).resolve()),
+                  "compile_manifest": compile_manifest, "stages": stages}
+        (root / "campaign_manifest.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return result, root
     # Keep campaign dependency decisions identical to the compiler.  Without
     # this, ``independent_first_five`` emitted root sessions for T02–T05 but
     # the campaign re-read the workbook's original T01 parent and skipped
@@ -293,8 +308,21 @@ def run_semantic_campaign(*, matrix, asset_roles, asset_catalog=None, seed=0,
                     # Role bindings are inherited from the actual parent run;
                     # this prevents a child from silently redrawing object A
                     # when the parent's selected branch differs.
-                    value["role_bindings"] = parent_snapshot.get("role_bindings") or parent_row.get("role_bindings") or value.get("asset_role_mapping", {})
-                    value["asset_role_mapping"] = value["role_bindings"]
+                    # The parent snapshot contains the roles that existed in
+                    # the prefix, while the child row may introduce a new
+                    # role (for example T11 replaces ``object_a`` with a
+                    # newly selected ``object_b``).  Do not replace the
+                    # child's complete mapping with the parent's narrower
+                    # mapping: merge them so the oracle and the service both
+                    # retain inherited identities and can resolve new roles.
+                    inherited_roles = (parent_snapshot.get("role_bindings")
+                                       or parent_row.get("role_bindings") or {})
+                    child_roles = value.get("asset_role_mapping") or {}
+                    merged_roles = dict(inherited_roles) if isinstance(inherited_roles, dict) else {}
+                    if isinstance(child_roles, dict):
+                        merged_roles.update(child_roles)
+                    value["role_bindings"] = merged_roles
+                    value["asset_role_mapping"] = merged_roles
                     value["parent_snapshot_turn"] = parent_snapshot.get("turn")
                     stage_rows.append(value)
         else:

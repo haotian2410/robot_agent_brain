@@ -134,8 +134,17 @@ class SemanticEntitySelector:
                                   "highest", "lowest", "nearest", "farthest", "near"}
             result_selector = any(item.relation.value in selector_relations
                                   for item in selected_relations)
+            # ``all_available`` plus an extremum relation means “choose one
+            # result from the current complete candidate set”.  A provider
+            # may report the pre-filter count while dialogue/context removes
+            # an already-satisfied instance; requiring the remaining pool to
+            # equal that stale count incorrectly rejects valid phrases such
+            # as “将距离杯子最远的那个苹果设为蓝色”.  An explicit
+            # “两个苹果中最右边的那个” still keeps the exact pool-count
+            # check because it is not marked all_available.
+            selection_from_all = result_selector and entity.all_available
             if (entity.quantity_mode == QuantityMode.CANDIDATE_POOL
-                    and not (entity.count == 1 and result_selector)
+                    and not ((entity.count == 1 and result_selector) or selection_from_all)
                     and len(candidates) != entity.count):
                 raise ValueError("grounding_candidate_pool_count_mismatch: " + identifier)
             candidates = self.relations.resolve(candidates, selected_relations, scene, identifier)

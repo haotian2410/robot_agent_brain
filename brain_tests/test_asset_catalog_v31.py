@@ -61,6 +61,16 @@ def test_understanding_request_sends_catalog_workspace_and_scene_context():
     assert "asset_catalog" not in body or "models" in body["asset_catalog"]
 
 
+def test_live_workspace_policy_records_tabletop_geometry_conventions():
+    from robot_agent_brain.contracts.workspace import WorkspaceSemanticPolicy
+    policy = WorkspaceSemanticPolicy(workspace_center_m=(0.0, 0.0))
+    assert policy.mode == "tabletop"
+    assert policy.default_plane == "xy"
+    assert policy.default_rotation_axis == "z"
+    assert policy.placement_policy_version == "grid-v2"
+    assert policy.motion_policy_version == "motion-v1"
+
+
 def test_live_qwen_payload_contains_full_current_ols_catalog_and_scenes():
     config = json.loads((ROOT / "config/webeditor.json").read_text())
     root = Path(config["asset_library_root"])
@@ -385,7 +395,10 @@ def test_ols_adapter_refresh_publishes_new_catalog_atomically():
         index_path = target / "models" / "model_index.json"
         index = json.loads(index_path.read_text())
         index["by_id"]["999"] = "test_cube"
-        index["by_name"]["test_cube"] = [999]
+        # OLS 1.0.8 publishes category/by_id only; older packages also
+        # carried a denormalized by_name map.  The refresh contract must
+        # work with either index shape.
+        index.setdefault("by_name", {})["test_cube"] = [999]
         index_path.write_text(json.dumps(index), encoding="utf-8")
         metadata = json.loads((target / "models/1/apple.json").read_text())
         metadata["semantic_properties"].update(object_id=999, object_name="test_cube")

@@ -7,7 +7,7 @@ class LocalScenePlatform:
     def __init__(self):
         self.manager = None
 
-    def load_scene(self, scene):
+    def load_scene(self, scene, *, change_kind="scene_edit"):
         candidate = SceneManager(scene)
         self.manager = candidate
         return SceneSnapshot(scene_id=candidate.scene.scene_id, scene_version=candidate.scene.scene_version,

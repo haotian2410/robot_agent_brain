@@ -194,17 +194,23 @@ class GatewayScenePlatformAdapter:
                     "scene_sub_version": previous.scene_sub_version, "sceneDigest": digest(previous)}.items())
                 and digest(self.read_live(lease_snapshot=False)) == digest(previous))
 
-    def load_scene(self, scene):
+    def load_scene(self, scene, *, change_kind="scene_edit"):
         candidate = self.validate(scene)
         self.capabilities()
         previous = self.read_live()
         if self.scene is not None and digest(previous) != digest(self.scene):
             raise ValueError("gateway_scene_conflict")
         if candidate.scene_id == previous.scene_id:
-            if candidate.scene_version != previous.scene_version + 1:
-                raise ValueError("gateway_target_version_invalid")
-            if candidate.scene_sub_version != 0:
-                raise ValueError("gateway_scene_revision_invalid")
+            if change_kind == "platform_rebind":
+                if candidate.scene_version != previous.scene_version:
+                    raise ValueError("gateway_platform_rebind_version_invalid")
+                if candidate.scene_sub_version != previous.scene_sub_version + 1:
+                    raise ValueError("gateway_platform_rebind_revision_invalid")
+            else:
+                if candidate.scene_version != previous.scene_version + 1:
+                    raise ValueError("gateway_target_version_invalid")
+                if candidate.scene_sub_version != 0:
+                    raise ValueError("gateway_scene_revision_invalid")
         elif candidate.scene_version != 1:
             raise ValueError("gateway_new_scene_version_invalid")
         elif candidate.scene_sub_version != 0:
@@ -213,6 +219,7 @@ class GatewayScenePlatformAdapter:
         request = {"transactionID": transaction, "browserID": self.browser_id,
             "expected": {"scene_id": previous.scene_id, "scene_version": previous.scene_version,
                          "scene_sub_version": previous.scene_sub_version, "sceneDigest": digest(previous)},
+            "change_kind": change_kind,
             "scene": candidate.raw_document() if hasattr(candidate, "raw_document")
             else candidate.model_dump(mode="json")}
         record = {"request": request, "status": "prepared"}

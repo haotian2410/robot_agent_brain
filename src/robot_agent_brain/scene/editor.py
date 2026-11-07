@@ -202,8 +202,6 @@ class SceneEditor:
             name = (semantic.semantic_name or "").casefold().replace("-", "_")
             return semantic.category == "surface" and name in {"table", "work_table", "桌子", "工作台"}
 
-        # Keep the fast path for the original template IDs, but validate that
-        # the object is actually the configured table before accepting it.
         try:
             configured = defaults.table_object_id
             if is_table(configured):
@@ -223,6 +221,43 @@ class SceneEditor:
             return self._default_surface_id(scene, defaults) == identifier
         except ValueError:
             return False
+
+    def _scene_edit_workspace(self, scene, support_id, defaults):
+        """Return the envelope for tabletop editing, never robot execution.
+
+        The configured ``workspace_min/max`` describes the robot/bootstrap
+        reachability envelope and is intentionally narrow on the UR5e
+        template.  Scene edits, however, are validated against the verified
+        support surface.  An explicit scene-edit envelope may override that
+        derived AABB; otherwise the support model's world AABB is the
+        conservative editing domain.  The final footprint/support checks are
+        still authoritative, so this helper never makes an arbitrary surface
+        editable when its geometry is unavailable.
+        """
+        if defaults is None or support_id is None:
+            return None
+        if (defaults.scene_edit_workspace_min is not None
+                and defaults.scene_edit_workspace_max is not None
+                and self._is_default_surface(scene, support_id, defaults)):
+            return defaults.scene_edit_workspace_min, defaults.scene_edit_workspace_max
+        # Small unit fixtures historically used a symbolic ``table`` metadata
+        # ref and intentionally exercised the robot workspace bounds.  Keep
+        # that compatibility path; deployed OLS refs are namespaced
+        # ``$LIBRARY_SERVER/<id>`` and use the verified support AABB below.
+        if (defaults.scene_edit_workspace_min is None
+                and self.table_metadata_ref is not None
+                and not str(self.table_metadata_ref).startswith("$LIBRARY_SERVER/")):
+            return defaults.workspace_min, defaults.workspace_max
+        try:
+            index = SceneIndex(scene)
+            support = index.object(support_id)
+            bounds = world_bounds(self._facts(defaults).asset(support, scene),
+                                  world_transform(scene, support_id))
+            return ((bounds[0][0], bounds[0][1]), (bounds[1][0], bounds[1][1]))
+        except (LookupError, ValueError, TypeError):
+            # For non-table support objects retain the historical robot
+            # envelope only when no verified support bounds are available.
+            return defaults.workspace_min, defaults.workspace_max
 
     def _validate_transform_bounds(self, identifier, before, candidate, defaults):
         """Keep supported model edits within proven support/workspace bounds.
@@ -251,8 +286,10 @@ class SceneEditor:
                 and index.metadata_type(support_id) != "robot"
                 and (self.scale_table_transform is None
                      or world_transform(candidate, support_id) == self.scale_table_transform)):
-            if any(bounds[0][i] < configured.workspace_min[i] - 1e-9
-                   or bounds[1][i] > configured.workspace_max[i] + 1e-9 for i in (0, 1)):
+            edit_workspace = self._scene_edit_workspace(candidate, support_id, configured)
+            if edit_workspace is not None and any(
+                    bounds[0][i] < edit_workspace[0][i] - 1e-9
+                    or bounds[1][i] > edit_workspace[1][i] + 1e-9 for i in (0, 1)):
                 raise ValueError("scene_edit_workspace_exceeded")
 
     def _replace(self, matches, entity, scene, next_id, *, asset_key=None):
@@ -302,7 +339,10 @@ class SceneEditor:
                         and index.metadata_type(support_id) != "robot"
                         and (self.scale_table_transform is None or world_transform(scene, support_id) == self.scale_table_transform)):
                     bounds = world_bounds(model, world_transform(candidate, identifier))
-                    if any(bounds[0][i] < defaults.workspace_min[i] or bounds[1][i] > defaults.workspace_max[i] for i in (0, 1)):
+                    edit_workspace = self._scene_edit_workspace(candidate, support_id, defaults)
+                    if edit_workspace is not None and any(
+                            bounds[0][i] < edit_workspace[0][i]
+                            or bounds[1][i] > edit_workspace[1][i] for i in (0, 1)):
                         raise ValueError("scene_replace_workspace_exceeded")
             operations.extend([ScenePatchOperation(action="remove_object", object_id_in_scene=old_id),
                                ScenePatchOperation(action="add_object", object_id_in_scene=identifier, object=obj)])
@@ -362,10 +402,11 @@ class SceneEditor:
         if relation in {"left_of", "right_of", "front_of", "behind", "above", "below", "near"}:
             if relation in {"left_of", "right_of", "front_of", "behind"} and facts.is_surface(reference, scene):
                 region = {"left_of": "left_half", "right_of": "right_half", "front_of": "front_half", "behind": "back_half"}[relation]
+                edit_workspace = self._scene_edit_workspace(scene, reference.object_id_in_scene, self.scale_defaults)
                 candidates = self.layout.surface_candidates(reference_world, reference_model, object_model, current_world,
                     region=region, center_only=False,
-                    workspace_min=self.scale_defaults.workspace_min if self.scale_defaults else None,
-                    workspace_max=self.scale_defaults.workspace_max if self.scale_defaults else None)
+                    workspace_min=edit_workspace[0] if edit_workspace else None,
+                    workspace_max=edit_workspace[1] if edit_workspace else None)
             else:
                 candidates = (self.layout.near_candidates(reference_world, reference_model, object_model, current_world)
                               if relation == "near" else
@@ -375,11 +416,12 @@ class SceneEditor:
             entry = self._layout_entry(reference, scene)
             if not facts.is_surface(reference, scene) and not (entry and entry.verified and entry.supports_on_top):
                 raise ValueError("scene_edit_on_reference_not_support")
+            edit_workspace = self._scene_edit_workspace(scene, reference.object_id_in_scene, self.scale_defaults)
             candidates = self.layout.surface_candidates(reference_world, reference_model, object_model, current_world,
                                                         region=edit.placement_region,
                                                         center_only=edit.placement_hint == "center",
-                                                        workspace_min=self.scale_defaults.workspace_min if self.scale_defaults else None,
-                                                        workspace_max=self.scale_defaults.workspace_max if self.scale_defaults else None)
+                                                        workspace_min=edit_workspace[0] if edit_workspace else None,
+                                                        workspace_max=edit_workspace[1] if edit_workspace else None)
         elif relation == "inside":
             entry = self._layout_entry(reference, scene)
             if entry is None or not entry.verified:
@@ -474,7 +516,10 @@ class SceneEditor:
                     and index.metadata_type(support_id) != "robot"
                     and (self.scale_table_transform is None or world_transform(scene, support_id) == self.scale_table_transform)):
                 bounds = world_bounds(asset, world_transform(candidate, identifier))
-                if any(bounds[0][i] < defaults.workspace_min[i] or bounds[1][i] > defaults.workspace_max[i] for i in (0, 1)):
+                edit_workspace = self._scene_edit_workspace(candidate, support_id, defaults)
+                if edit_workspace is not None and any(
+                        bounds[0][i] < edit_workspace[0][i]
+                        or bounds[1][i] > edit_workspace[1][i] for i in (0, 1)):
                     raise ValueError("scene_scale_workspace_exceeded")
         if self._overlaps(index.object(identifier), candidate):
             raise ValueError("scene_edit_transform_collision")
@@ -511,7 +556,15 @@ class SceneEditor:
         # intentionally equivalent to placing on the configured primary
         # surface.  Preserve that semantic source in the result instead of
         # making callers infer it from the generated Transform/ support ID.
-        if edit.relation is None and reference is None and defaults is not None:
+        # Both the canonical live v3.1 form (relation=on, reference=table)
+        # and the legacy internal form (relation/reference omitted) can mean
+        # the configured primary table.  Keep an explicit assumption in both
+        # cases so reports do not have to infer the support source from a
+        # generated Transform.
+        default_surface = False
+        if defaults is not None and reference is not None:
+            default_surface = self._is_default_surface(scene, reference.object_id_in_scene, defaults)
+        if (edit.relation is None and reference is None and defaults is not None) or default_surface:
             assumptions.insert(0, "source=workspace_default: primary_table")
         if binding.color_override is not None:
             assumptions.append(f"source=color_override: {model.semantic_name} -> {binding.color_override}")
@@ -550,6 +603,8 @@ class SceneEditor:
             raise ValueError("unsupported_scene_layout_relation: " + str(relation))
 
         world = facts.support_transform(model, support, scene, x=0, y=0) if support is not None else WorldTransform((0, 0, 0), IDENTITY)
+        edit_workspace = (self._scene_edit_workspace(scene, support.object_id_in_scene, defaults)
+                          if support is not None else None)
         relation_candidates = None
         if reference is not None:
             reference_world = world_transform(scene, reference.object_id_in_scene)
@@ -558,8 +613,8 @@ class SceneEditor:
                 region = {"left_of": "left_half", "right_of": "right_half", "front_of": "front_half", "behind": "back_half"}[relation]
                 relation_candidates = self.layout.surface_candidates(reference_world, reference_model, model, world,
                     region=region, center_only=False,
-                    workspace_min=defaults.workspace_min if defaults else None,
-                    workspace_max=defaults.workspace_max if defaults else None)
+                    workspace_min=edit_workspace[0] if edit_workspace else None,
+                    workspace_max=edit_workspace[1] if edit_workspace else None)
             elif relation in {"left_of", "right_of", "front_of", "behind", "above", "below", "near"}:
                 relation_candidates = (self.layout.near_candidates(reference_world, reference_model, model, world)
                                       if relation == "near" else
@@ -568,17 +623,25 @@ class SceneEditor:
                 relation_candidates = self.layout.surface_candidates(
                     reference_world, reference_model, model, world,
                     region=edit.placement_region, center_only=edit.placement_hint == "center",
-                    workspace_min=defaults.workspace_min if defaults else None,
-                    workspace_max=defaults.workspace_max if defaults else None)
+                    workspace_min=edit_workspace[0] if edit_workspace else None,
+                    workspace_max=edit_workspace[1] if edit_workspace else None)
             elif relation == "inside":
                 relation_candidates = self.layout.inside_candidates(reference_world, model, world,
                                                                     self._layout_entry(reference, scene))
         origin_low, origin_high = world_bounds(model, WorldTransform((0, 0, 0), world.linear))
         rng = random.Random(f"{self.seed}:{identifier}")
         limit = defaults.max_attempts if defaults else max(2 * len(scene.objects) + 5, len(relation_candidates or ()))
+        entry = None
         for attempt in range(limit):
             if reference is None:
-                limits = [(defaults.workspace_min[i] - origin_low[i], defaults.workspace_max[i] - origin_high[i]) for i in (0, 1)]
+                # Bare scene additions are still tabletop edits: use the
+                # verified support AABB (or explicit scene-edit envelope),
+                # not the robot reachability envelope.  The latter remains
+                # the fallback only for legacy symbolic fixtures without a
+                # resolved support surface.
+                workspace_min = edit_workspace[0] if edit_workspace is not None else defaults.workspace_min
+                workspace_max = edit_workspace[1] if edit_workspace is not None else defaults.workspace_max
+                limits = [(workspace_min[i] - origin_low[i], workspace_max[i] - origin_high[i]) for i in (0, 1)]
                 if any(a > b for a, b in limits):
                     raise ValueError("bootstrap_layout_failed")
                 position = (rng.uniform(*limits[0]), rng.uniform(*limits[1]), world.position[2])
@@ -603,7 +666,9 @@ class SceneEditor:
             candidate = scene.model_copy(update={"objects": [*scene.objects, obj]})
             candidate_world = WorldTransform(position, world.linear)
             box = world_bounds(model, candidate_world)
-            if defaults and any(box[0][i] < defaults.workspace_min[i] or box[1][i] > defaults.workspace_max[i] for i in (0, 1)):
+            if edit_workspace is not None and any(
+                    box[0][i] < edit_workspace[0][i] or box[1][i] > edit_workspace[1][i]
+                    for i in (0, 1)):
                 continue
             if support is not None and not facts.footprint_contains(obj, support, candidate):
                 continue
@@ -616,23 +681,58 @@ class SceneEditor:
                 if not self.layout.contained_interior(model, candidate_world,
                                                       world_transform(scene, reference.object_id_in_scene), interior):
                     continue
-            ignored = {reference.object_id_in_scene} if relation == "inside" and reference is not None else set()
+            ignored = {reference.object_id_in_scene} if relation in {"on", "inside"} and reference is not None else set()
             overlap_clearance = 0 if relation == "on" else (defaults.clearance_m if defaults else self.layout.clearance_m)
-            if not self._overlaps(obj, candidate, clearance=overlap_clearance,
-                                  ignore_ids=ignored):
+            if not self._overlaps(obj, candidate, clearance=overlap_clearance, ignore_ids=ignored):
                 return position
+        # A valid geometric candidate existed before the editing envelope was
+        # applied, but every one lay outside that envelope.  Preserve this
+        # distinction for the Web/UI and batch oracle instead of reporting a
+        # generic collision.
+        if reference is not None and relation in {"on", "left_of", "right_of", "front_of", "behind"}:
+            unbounded = self.layout.surface_candidates(
+                reference_world, reference_model, model, world,
+                region=edit.placement_region if relation == "on" else (
+                    {"left_of": "left_half", "right_of": "right_half",
+                     "front_of": "front_half", "behind": "back_half"}.get(relation)),
+                center_only=edit.placement_hint == "center" if relation == "on" else False,
+                workspace_min=None, workspace_max=None)
+            if unbounded and edit_workspace is not None:
+                # Do not label a centre collision as a workspace error merely
+                # because a candidate exists.  Re-run the non-envelope
+                # geometry checks on the unbounded candidates; only a
+                # candidate that is otherwise valid proves that the editing
+                # envelope, rather than collision/support, caused rejection.
+                for base in unbounded:
+                    probe = make_object(identifier, model.semantic_name, model.metadata_ref,
+                                        base.position, category=model.category or "object",
+                                        asset_type=model.asset_type if getattr(self.assets, "supports_features", False) else None)
+                    probe_scene = scene.model_copy(update={"objects": [*scene.objects, probe]})
+                    if support is not None and not facts.footprint_contains(probe, support, probe_scene):
+                        continue
+                    if relation == "on" and reference is not None and (facts.is_surface(reference, scene)
+                            or (entry and entry.verified and entry.supports_on_top)) \
+                            and not facts.footprint_contains(probe, reference, probe_scene):
+                        continue
+                    ignored = {reference.object_id_in_scene} if relation == "on" and reference is not None else set()
+                    clearance = 0 if relation == "on" else (defaults.clearance_m if defaults else self.layout.clearance_m)
+                    if not self._overlaps(probe, probe_scene, clearance=clearance, ignore_ids=ignored):
+                        raise ValueError("scene_edit_workspace_exceeded")
         raise ValueError("scene_edit_layout_collision")
 
     def _overlaps(self, obj, scene, *, clearance=0, ignore_ids=None):
         # Existing conservative AABB layout guard, not physics collision checking.
         facts = self._facts()
         ignore_ids = set(ignore_ids or ())
+        index = SceneIndex(scene)
         try:
             low, high = world_bounds(facts.asset(obj, scene), world_transform(scene, obj.object_id_in_scene))
         except (ValueError, LookupError):
             return False  # Unknown resource geometry is not asserted as contact evidence.
         for other in scene.objects:
             if other.object_id_in_scene == obj.object_id_in_scene or other.object_id_in_scene in ignore_ids:
+                continue
+            if index.metadata_type(other.object_id_in_scene) == "robot":
                 continue
             try:
                 olow, ohigh = world_bounds(facts.asset(other, scene), world_transform(scene, other.object_id_in_scene))

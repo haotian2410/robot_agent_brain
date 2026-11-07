@@ -235,3 +235,16 @@ class FinalModelsLibraryAdapter:
             (models if view.asset_type == "model" else robots).append(item)
         return AssetCatalogSnapshot.from_items(models, robots, scenes=self._scenes,
                                                registered_profiles=registered_profiles or ())
+
+    def robot_assembly_catalog(self, registered_profiles=()):
+        """Return OLS robot/attachment/camera roles for the live prompt."""
+        from .ols_robot_assembly import OlsRobotAssemblyAdapter
+        adapter = OlsRobotAssemblyAdapter(self)
+        values = adapter.catalog(registered_profiles)
+        canonical = {item.semantic_name.casefold() for item in adapter._items.values()}
+        aliases = getattr(self, "catalog_aliases", {}) or {}
+        for value in values:
+            value["aliases"] = sorted({str(key) for key, target in aliases.items()
+                                        if str(target).casefold() == str(value["semantic_name"]).casefold()
+                                        and str(key).casefold() not in canonical})
+        return values

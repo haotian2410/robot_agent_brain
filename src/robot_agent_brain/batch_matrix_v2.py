@@ -727,6 +727,13 @@ def compile_semantic_matrix_v2(matrix: str | Path, *, kind: str = "generated_edi
                                               "asset_role_mapping": role_map, "source_row": variant["_row"],
                                               "catalog_scenario": variant.get("catalog_scenario"),
                                               "expected_outcome": variant["expected_outcome"]})
+    # ``known_scene`` is a distinct execution target.  The authoritative
+    # semantic workbook intentionally describes fixture IDs rather than
+    # machine-specific absolute scene paths, so do not silently present a
+    # scene-less document as a runnable preset campaign.  Keep compilation
+    # deterministic (and backward compatible for schema inspection), but
+    # record the missing binding explicitly for campaign/service preflight.
+    unbound_known_scene = kind == "known_scene" and not any(item.get("scene") for item in sessions)
     manifest = {"schema": "brain-semantic-matrix.v2", "schema_version": 2, "matrix_version": 2,
                 "kind": kind, "matrix": str(Path(matrix).resolve()),
                 "run_profile": run_profile, "seed": seed,
@@ -738,6 +745,8 @@ def compile_semantic_matrix_v2(matrix: str | Path, *, kind: str = "generated_edi
                 "catalog_revision": catalog_revision,
                 "catalog_revision_source": ("derived_ols_snapshot" if declared_catalog_revision
                                              else "assets_mapping_digest"),
+                "scene_binding_status": "missing" if unbound_known_scene else "bound",
+                "known_scene_requires_fixture_binding": unbound_known_scene,
                 "rows": manifest_rows,
                 "catalog_keys": sorted(catalog),
                 "coverage": {"enabled_variants": len(spec["variants"]),

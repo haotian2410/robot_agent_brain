@@ -6,6 +6,7 @@ from robot_agent_brain.contracts.asset_library import AssetGeometry
 from robot_agent_brain.contracts.scene import SceneConfig, TransformProperties
 from robot_agent_brain.contracts.task_intent import TaskEntity, TaskIntent
 from robot_agent_brain.contracts.turn import SceneQueryIntent, SceneEditIntent, SceneEditPlan, BrainTurn
+from robot_agent_brain.contracts.spatial import SpatialRelation
 from robot_agent_brain.grounding.scene_grounder import SceneGrounder
 from robot_agent_brain.scene.query import SceneQueryEngine
 from robot_agent_brain.scene.editor import SceneEditor
@@ -92,6 +93,39 @@ def test_query_candidate_pool_validates_before_relation_filter():
         relations=[dict(scope="selection", subject="apple", relation="rightmost")], target="apple")
     with pytest.raises(ValueError, match="candidate_pool_count_mismatch"):
         SceneQueryEngine().query(query, supported_scene())
+
+
+def test_count_query_environment_reference_scopes_to_supported_objects():
+    scene = supported_scene()
+    # One apple is on the table and one is explicitly unsupported/free. The
+    # phrase “桌面上有几个苹果” must count only the supported instance.
+    scene.objects.append(object_(3, "apple", position=(0.2, 0.2, 0.045),
+                                 metadata_ref="$DEMO_LIBRARY/2", support=None))
+    query = SceneQueryIntent(
+        query_type="count",
+        entities=[entity(quantity_mode="all", all_available=True)],
+        target="apple",
+        reference="table",
+    )
+    result = SceneQueryEngine().query(query, scene)
+    assert result.count == 1
+    assert result.object_ids == [1]
+
+
+def test_all_available_extremum_selection_ignores_stale_filtered_count():
+    scene = supported_scene()
+    scene.objects.extend([
+        object_(3, "apple", position=(-.1, .2, .045), metadata_ref="$DEMO_LIBRARY/2", support=0),
+        object_(4, "apple", position=(.35, .2, .045), metadata_ref="$DEMO_LIBRARY/2", support=0),
+    ])
+    from robot_agent_brain.grounding.semantic_entity_selector import SemanticEntitySelector
+    apples = entity(quantity_mode="candidate_pool", count=3, all_available=True,
+                    exclude_scene_object_ids=[3])
+    relations = [SpatialRelation(subject="apple", relation="farthest", reference="banana")]
+    selected = SemanticEntitySelector().select(
+        "apple", [apples, entity("banana")], relations, scene)
+    assert len(selected) == 1
+    assert selected[0].object_id_in_scene == 1
 
 
 def test_d_c01_c02_plural_query_focus_then_edit_preserves_entire_set():
