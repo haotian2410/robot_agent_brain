@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +10,7 @@ from robot_agent_brain.contracts.scene import SceneConfig, SceneSnapshot
 from robot_agent_brain.session.brain_session import BrainSession
 
 
-OLS_DATA = Path("/home/cscvlab/lht/webeditor_runtime/ObjectLibraryServer-1.0.8-rel/data")
+OLS_DATA = Path(os.environ["ROBOT_BRAIN_OLS_DATA_ROOT"]) if os.environ.get("ROBOT_BRAIN_OLS_DATA_ROOT") else None
 
 
 class _Platform:
@@ -29,21 +30,29 @@ class _Platform:
 
 @pytest.fixture
 def adapter():
-    if not OLS_DATA.is_dir():
+    if OLS_DATA is None or not OLS_DATA.is_dir():
         pytest.skip("OLS 1.0.8 runtime assets are not installed")
     return OlsRobotAssemblyAdapter(FinalModelsLibraryAdapter(OLS_DATA))
 
 
+def _empty_scene_path():
+    for name in ("ur5e_table_empty.json", "ur5_table_empty.json"):
+        path = OLS_DATA / "scenes/1" / name
+        if path.is_file():
+            return path
+    raise AssertionError("OLS empty scene fixture is missing")
+
+
 def test_ols_catalog_classifies_arm_gripper_and_camera(adapter):
     catalog = {item["semantic_name"]: item for item in adapter.catalog()}
-    assert catalog["ur5e_arm"]["role"] == "arm"
+    assert catalog.get("ur5e_arm", catalog.get("ur5"))["role"] == "arm"
     assert catalog["piper"]["role"] == "arm"
     assert catalog["robotiq_2f140"]["role"] == "gripper"
     assert catalog["d455"]["role"] == "camera"
 
 
 def test_platform_rebind_preserves_ids_and_increments_only_subversion(adapter):
-    scene = SceneConfig.model_validate_json((OLS_DATA / "scenes/1/ur5e_table_empty.json").read_text())
+    scene = SceneConfig.model_validate_json(_empty_scene_path().read_text())
     platform = _Platform()
     session = BrainSession(scene, SimpleNamespace(robot="ur5e"), platform)
     session.robot_assembly_adapter = adapter
@@ -70,7 +79,7 @@ def test_platform_rebind_preserves_ids_and_increments_only_subversion(adapter):
 
 
 def test_normal_scene_edit_cannot_replace_platform_metadata(adapter):
-    scene = SceneConfig.model_validate_json((OLS_DATA / "scenes/1/ur5e_table_empty.json").read_text())
+    scene = SceneConfig.model_validate_json(_empty_scene_path().read_text())
     candidate, _ = adapter.rebind_scene(scene, robot_asset="piper")
     platform = _Platform()
     session = BrainSession(scene, SimpleNamespace(robot="ur5e"), platform)
@@ -82,7 +91,7 @@ def test_normal_scene_edit_cannot_replace_platform_metadata(adapter):
 
 
 def test_camera_only_rebind_does_not_reposition_arm_or_remove_pedestal(adapter):
-    scene = SceneConfig.model_validate_json((OLS_DATA / "scenes/1/ur5e_table_empty.json").read_text())
+    scene = SceneConfig.model_validate_json(_empty_scene_path().read_text())
     candidate, _ = adapter.rebind_scene(scene, camera_asset="d455")
     before = {item.object_id_in_scene: item for item in scene.objects}
     after = {item.object_id_in_scene: item for item in candidate.objects}

@@ -28,6 +28,7 @@ from .planning.task_expander import TaskExpander
 from .semantics.task_domain_policy import TaskDomainPolicy
 from .errors import BrainError
 from .scene.component_access import SceneIndex
+from .adapters.ols_robot_assembly import normalize_robot_platform_name
 
 
 _QUERY_MARKERS = (
@@ -155,7 +156,8 @@ class BrainPipeline:
                  skill_planning_provider=None, planner_mode="recipe", robot="ur5e", aliases=None,
                  query_near_distance_m=.2, registered_profiles=None,
                  primary_table_metadata_ref=None, workspace_center_m=None,
-                 placement_policy_version="grid-v2", motion_policy_version="motion-v1"):
+                 placement_policy_version="grid-v2", motion_policy_version="motion-v1",
+                 catalog_for_provider: bool = True):
         self.understanding = understanding
         self.assets = assets
         # This is the configured command/export profile, not a guess from the
@@ -168,12 +170,18 @@ class BrainPipeline:
         if aliases is not None:
             self.aliases = aliases
         self.registered_profiles = tuple(sorted(set(registered_profiles or ())))
+        self.catalog_for_provider = bool(catalog_for_provider)
         # The live provider must see the current adapter-owned catalog data,
         # including human-language aliases that are valid for this exact OLS
         # revision.  ``FinalModelsLibraryAdapter`` reserves canonical names,
         # so a future real ``cup`` asset cannot inherit the mug-only ``cup``
         # alias.  Keep ``self.aliases`` for deterministic grounding of
         # existing scene instances and old replay inputs only.
+        # Only the live Qwen transport receives the request-scoped OLS
+        # catalog automatically.  Injected HTTP transports are explicit
+        # replay/test boundaries and retain the pre-v3 compatibility path;
+        # tests that exercise the live contract pass a catalog on the request
+        # (or construct the provider with ``live_catalog=True``).
         self.asset_catalog = (assets.catalog_snapshot(aliases=None,
                                                       registered_profiles=self.registered_profiles)
                               if hasattr(assets, "catalog_snapshot") else None)
@@ -314,15 +322,10 @@ class BrainPipeline:
             detected.append((oid, ref, name))
         if not detected:
             return
-        expected = self.robot.casefold().replace("-", "_")
-        if expected.endswith("_arm"):
-            expected = expected[:-4]
+        expected = normalize_robot_platform_name(self.robot)
         actual = []
         for _, _, name in detected:
-            value = name.casefold().replace("-", "_")
-            if value.endswith("_arm"):
-                value = value[:-4]
-            actual.append(value)
+            actual.append(normalize_robot_platform_name(name))
         if any(value == expected for value in actual):
             return
         raise BrainError(
@@ -371,7 +374,7 @@ class BrainPipeline:
             provider_instruction = instruction
         scene_context = self._understanding_scene_context(scene)
         request = TaskUnderstandingRequest(instruction=provider_instruction,
-                                           asset_catalog=self.asset_catalog,
+                                           asset_catalog=self.asset_catalog if self.catalog_for_provider else None,
                                            workspace=self.workspace_context,
                                            scene_context=scene_context)
         if hasattr(self.understanding, "understand_turn"):

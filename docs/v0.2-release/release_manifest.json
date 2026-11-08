@@ -1,0 +1,52 @@
+{
+  "release": "robot-agent-brain-v0.2",
+  "baseline": "b2e5e0a8c74bd329c0344122f28e0bb1db443167",
+  "brain_commit": "b2e5e0a8c74bd329c0344122f28e0bb1db443167",
+  "frontend_local_commit": "88a35b31dfaac1aaad36d68fd0cdc77b6171f849",
+  "frontend_remote_commit": "caf1ba8c4c9bc00d7f2816d98d7b3cf26f27b91c",
+  "ols_commit": "4ab7c6b2a2d602f160e33100dfd011b16699133a",
+  "ols_version": "AppVersion 1.0.8-5cd6db7",
+  "ols_counts": {"model": 31, "robot": 14, "scene": 7},
+  "protocols": {"web": "brain-web/2", "task_understanding": "task_understanding.v3.1"},
+  "release_policy": {
+    "dynamic_platform_rebind": false,
+    "runtime_robot_setup_change": false,
+    "nl_initial_platform_selection": false,
+    "control_dispatch": false
+  },
+  "recorded_at": "2026-11-08T18:45:00+08:00",
+  "runtime": {
+    "qwen": null,
+    "gateway": null,
+    "real_browser_integration": "not_run",
+    "control_execution": "not_run"
+  },
+  "checks": {
+    "ci_311": "not_run",
+    "ci_312": "passed",
+    "wheel_smoke": "passed",
+    "initial_import": "passed",
+    "policy_zero_write": "passed",
+    "plan_invalidation": "passed",
+    "real_browser": "not_run",
+    "demo_repeats": "not_run"
+  },
+  "ols_indexes": {
+    "model_index_sha256": "b65090c913698d02885e8774babe97ef1ea150e7215dc64dcd8a9ffc4bb49083",
+    "robot_index_sha256": "976b37d58d04373828ee378d8388b59bbf9f2c452de8ff961fe66095f661dec8",
+    "scene_index_sha256": "786544da953eddfe8107e607f88f1bd309970c8f450b7b0499f56dd92ecb5047",
+    "data_version": "ResVersion 1.0.8-rel"
+  },
+  "wheel": {
+    "sha256": "17a4bfa706d9125fec52594eb57ea29a9516651d609258ab7e394971c9b59e45",
+    "python": "3.12",
+    "smoke": "passed"
+  },
+  "notes": [
+    "Frontend local checkout is one commit ahead of its remote master; no force update was performed.",
+    "OLS production source is external and was not modified.",
+    "Local untracked fixtures, documents and environment files are intentionally preserved.",
+    "The source tree contains the v0.2 working-tree changes and has not been pushed in this closeout.",
+    "Real Qwen/Gateway/browser integration and Control/IK/MuJoCo execution remain not_run."
+  ]
+}

@@ -175,5 +175,12 @@
   "vision": true,
   "debug": true,
   "allow_scene_reset": true,
-  "output_dir": "var/webeditor/tasks"
+  "output_dir": "var/webeditor/tasks",
+  "release_policy": {
+    "version": "v0.2",
+    "dynamic_platform_rebind": false,
+    "runtime_robot_setup_change": false,
+    "nl_initial_platform_selection": false,
+    "control_dispatch": false
+  }
 }

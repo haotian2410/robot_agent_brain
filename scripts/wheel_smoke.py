@@ -110,7 +110,10 @@ def main():
     add_options[add_options.index("--session") + 1] = "wheel-add"
     fourth = json.loads(run("run", add, *add_options))
     assert fourth["run_status"] == "success" and "commands" not in fourth["artifacts"]
-    assert fourth["scene_source"] == "generated" and fourth["scene_version"] == 2
+    # A new session's first no-reference scene edit bootstraps its generated
+    # scene at version 1. Version 2 is reserved for a subsequent edit in the
+    # same session; this assertion must not depend on another session's state.
+    assert fourth["scene_source"] == "generated" and fourth["scene_version"] == 1
     edited = json.loads(Path(fourth["artifacts"]["scene_config"]).read_text(encoding="utf-8"))
     index = SceneIndex(SceneConfig.model_validate(edited))
     assert sum(index.semantic(o.object_id_in_scene).semantic_name == "banana" for o in index.semantic_objects()) == 1

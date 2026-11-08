@@ -2,18 +2,24 @@ from ..contracts.camera import CameraRequest
 from ..contracts.commands import ExecutionFeedback, canonical_commands
 from ..contracts.scene import SceneConfig
 from ..scene.scene_manager import SceneManager
+from ..adapters.ols_robot_assembly import is_ur5_platform_name
 from .dialogue_state import DialogueState
 from ..errors import SceneCommitRejected
 
 class BrainSession:
     """Local semantic state commits only after platform acknowledgement."""
-    def __init__(self, scene, pipeline, platform, *, robot_profiles=None, reference_registry=None):
+    def __init__(self, scene, pipeline, platform, *, robot_profiles=None, reference_registry=None,
+                 release_policy=None):
         self.scene_manager = None
         self.scene_id_bits = 53
         self.seen_scene_object_ids = set()
         self.next_scene_object_id = 0
         self.pipeline, self.platform = pipeline, platform
         self.robot_profiles = robot_profiles
+        # Application-owned sessions receive the published v0.2 policy.  A
+        # missing policy is reserved for low-level assembly experiments and
+        # legacy unit fixtures; HTTP/CLI/application entry points never omit it.
+        self.release_policy = release_policy
         self.robot_assembly_adapter = None
         from ..scene.component_reference_registry import ComponentReferenceRegistry
         self.reference_registry = reference_registry or ComponentReferenceRegistry()
@@ -40,6 +46,7 @@ class BrainSession:
         self.last_request_id = None
         self.last_exported_request = None
         self.exported_commands = {}
+        self.stale_commands = {}
         self.dispatched_requests = set()
         self.pending_commands = None
         self.pending_execution_request = None
@@ -89,7 +96,7 @@ class BrainSession:
         self.arm_states = None
         self.platform_object_ids = None
         self.profile_object_map = None
-        self.exported_commands.clear()
+        self._invalidate_plans()
         self.last_exported_request = None
         self.last_request_id = None
 
@@ -117,6 +124,8 @@ class BrainSession:
         if change_kind not in {"scene_edit", "platform_rebind"}:
             raise ValueError("scene_change_kind_invalid")
         platform_rebind = change_kind == "platform_rebind"
+        if platform_rebind and self.release_policy is not None:
+            self.release_policy.deny_dynamic_platform()
         if self.pending_execution_request is not None or self.sync_state != "synchronized":
             raise ValueError("browser_sync_execution_state_blocked")
         if platform_rebind and self.session_phase != "setup":
@@ -205,7 +214,7 @@ class BrainSession:
             self.dialogue.last_entity_ids = [i for i in self.dialogue.last_entity_ids if i in known]
             if self.dialogue.last_entity_id not in known:
                 self.dialogue.last_entity_id = None
-            self.exported_commands.clear()
+            self._invalidate_plans()
             self.last_exported_request = self.last_request_id = None
         if platform_rebind:
             binding = self.robot_assembly_adapter.scene_binding(candidate)
@@ -218,7 +227,7 @@ class BrainSession:
             self.robot_setup_revision += 1
             self.arm_states = None
             self.profile_object_map = None
-            self.exported_commands.clear()
+            self._invalidate_plans()
             self.last_exported_request = self.last_request_id = None
         return changed
 
@@ -243,18 +252,23 @@ class BrainSession:
                 if profile.setup.mode == "single":
                     return "supported"
             return "unsupported"
-        configured_robot = getattr(self.pipeline, "robot", "ur5e").casefold().replace("-", "_")
-        if configured_robot != "ur5e" or self.robot_asset != "ur5e_arm":
+        configured_robot = getattr(self.pipeline, "robot", "ur5e")
+        if not is_ur5_platform_name(configured_robot) or not is_ur5_platform_name(self.robot_asset):
             return "unsupported"
         try:
-            expected = self.robot_assembly_adapter.resolve("ur5e_arm", role="arm")
+            expected = self.robot_assembly_adapter.resolve(self.robot_asset, role="arm")
             from ..scene.component_access import SceneIndex
             actual = SceneIndex(scene).robot_driver(
                 self.robot_assembly_adapter.classify_scene(scene)["arm"][0][0])
-            if actual is None or actual.joint_sequence != (expected.driver or {}).get("joint_sequence", []):
+            expected_driver = expected.driver or {}
+            if actual is None or list(actual.joint_sequence) != list(expected_driver.get("joint_sequence", [])):
                 return "unsupported"
-            expected_limits = (expected.driver or {}).get("joint_limits", {})
-            if actual.joint_limits != expected_limits:
+            expected_limits = expected_driver.get("joint_limits", {})
+            actual_limits = {str(name): tuple(float(item) for item in values)
+                             for name, values in (actual.joint_limits or {}).items()}
+            expected_limits = {str(name): tuple(float(item) for item in values)
+                               for name, values in (expected_limits or {}).items()}
+            if actual_limits != expected_limits:
                 return "unsupported"
         except Exception:
             return "unsupported"
@@ -323,6 +337,8 @@ class BrainSession:
 
     def rebind_platform_assets(self, adapter, request, *, owner_task_id=None):
         """Atomically apply an OLS robot/gripper/camera assembly change."""
+        if self.release_policy is not None:
+            self.release_policy.deny_dynamic_platform()
         owner = getattr(self, "active_task_owner", None)
         if self.pending_execution_request is not None:
             raise ValueError("platform_rebind_task_busy")
@@ -365,7 +381,7 @@ class BrainSession:
         self.robot_setup_revision += 1
         self.arm_states = None
         self.profile_object_map = None
-        self.exported_commands.clear()
+        self._invalidate_plans()
         self.last_exported_request = None
         self.last_request_id = None
         self.sync_state = "synchronized"
@@ -396,6 +412,7 @@ class BrainSession:
             raise
         self.sync_state = "synchronized"
         self._commit_manager(candidate)
+        self._invalidate_plans()
         return self.scene
 
     def capture(self, request=None):
@@ -417,11 +434,19 @@ class BrainSession:
             raise ValueError("original_scene_unavailable")
         if turn.turn_kind == "robot_task" and self.robot_asset is not None and self.execution_capability != "supported":
             raise ValueError("capability_unsupported")
+        if turn.robot_asset_switch is not None:
+            if self.release_policy is not None:
+                self.release_policy.deny_dynamic_platform()
         if turn.robot_setup_request is not None:
+            if self.release_policy is not None:
+                self.release_policy.deny_runtime_robot_setup()
             if self.robot_profiles is None:
                 raise ValueError("robot_setup_profile_not_registered")
             self.robot_profiles.resolve(turn.robot_setup_request)
         elif turn.robot_asset_switch is not None:
+            # A platform switch is checked by the release policy above and,
+            # in experimental fixtures, handled by the assembly path.  It is
+            # not a legacy robot task and must not require a task profile.
             pass
         elif self.robot_setup is None or self.robot_setup.mode != "dual":
             turn.require_legacy_execution()
@@ -539,6 +564,8 @@ class BrainSession:
 
     def switch_robot_setup(self, target_profile, *, platform_bindings, plan_candidate=None):
         """Prepare, optionally plan, then ACK and commit the robot-only candidate."""
+        if self.release_policy is not None:
+            self.release_policy.deny_runtime_robot_setup()
         from ..scene.robot_setup_manager import RobotSetupManager
         from ..contracts.robot_setup import RobotSetupRequest, RobotRuntimeState, ArmRuntimeState
         if self.pending_execution_request is not None:
@@ -580,7 +607,7 @@ class BrainSession:
         self.holding_object = None
         self.platform_object_ids = (set(self.platform_object_ids or ()) - {self.profile_object_map[i] for i in current_profile.robot_object_ids}) | prepared.robot_object_ids
         self.profile_object_map = dict(prepared.template_id_map)
-        self.exported_commands.clear()
+        self._invalidate_plans()
         self.last_exported_request = None
         self.last_request_id = None
         self.sync_state = "synchronized"
@@ -608,7 +635,7 @@ class BrainSession:
         self.holding_object = state.arms["single"].holding_object if self.robot_setup.mode == "single" else None
         self.last_feedback_source = source
         # Old plans were derived from different initial state evidence.
-        self.exported_commands.clear()
+        self._invalidate_plans()
         self.last_exported_request = None
         self.last_request_id = None
 
@@ -657,7 +684,7 @@ class BrainSession:
         self.sync_state = "synchronized"
         self.last_feedback_source = source
         self.recovery_context = None
-        self.exported_commands.clear()
+        self._invalidate_plans()
         self.last_exported_request = None
         self.last_request_id = None
 
@@ -734,7 +761,7 @@ class BrainSession:
             self.camera_asset = binding.get("camera_asset")
             self.execution_capability = self._platform_execution_capability(remapped.scene)
         self.dialogue = DialogueState()
-        self.exported_commands.clear()
+        self._invalidate_plans()
         self.last_exported_request = None
         self.last_request_id = None
         self.sync_state = "synchronized"
@@ -783,6 +810,14 @@ class BrainSession:
         if profile is not None:
             self.bind_imported_profile(profile)
         return self._accept_result(request_id, result)
+
+    def _invalidate_plans(self):
+        """Move current plans to audit history after a successful Scene commit."""
+        if self.exported_commands:
+            self.stale_commands.update(self.exported_commands)
+            self.exported_commands.clear()
+        self.last_exported_request = None
+        self.last_request_id = None
 
     def _accept_result(self, request_id, result):
         if self.session_action == "pause":

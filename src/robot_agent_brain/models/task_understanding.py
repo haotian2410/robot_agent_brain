@@ -671,11 +671,25 @@ def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str)
         return value
     operations = []
     changed = False
+    operation_count = len(scene_edit["operations"])
     for raw in scene_edit["operations"]:
         if not isinstance(raw, dict) or raw.get("operation") != "add":
             operations.append(raw)
             continue
         item = dict(raw)
+        # A model may already have attached a region to this operation.  It is
+        # authoritative.  Never overwrite it with the first region found in
+        # the natural-language sentence.
+        if item.get("placement_region") is not None:
+            operations.append(raw)
+            continue
+        # With multiple add clauses there is no safe positional correspondence
+        # between a sentence-level phrase and each operation.  Leave missing
+        # regions for the strict wire/schema path instead of broadcasting one
+        # corner to every object.
+        if operation_count > 1 and region is not None:
+            operations.append(raw)
+            continue
         # Region words only describe a desktop area when the reference is the
         # tabletop itself.  Do not rewrite object-relative placement such as
         # ``在苹果左侧增加香蕉`` into ``on table`` merely because it contains
@@ -706,7 +720,12 @@ def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str)
         if any(item.get(key) is not None for key in ("distance_m", "motion_scale", "axis", "angle_deg")):
             operations.append(raw)
             continue
-        item["relation"] = "on"
+        # Only fill fields that are absent.  A valid object-relative relation
+        # must not be rewritten to ``on table`` by the tabletop fallback.
+        if raw_relation not in (None, "on") and not (table_reference and region is not None):
+            operations.append(raw)
+            continue
+        item["relation"] = "on" if table_reference and region is not None else (raw_relation or "on")
         item["reference"] = item.get("reference") or "table"
         item["placement_region"] = None if center else region
         item["placement_hint"] = "center" if center else (item.get("placement_hint") or "any")

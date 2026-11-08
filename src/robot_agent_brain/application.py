@@ -17,6 +17,7 @@ from .adapters.local_scene_platform import LocalScenePlatform
 from .adapters.scene_file_codec import SceneFileCodec
 from .adapters.artifact_writer import ArtifactWriter, safe_identifier
 from .adapters.ols_robot_assembly import OlsRobotAssemblyAdapter
+from .adapters.ols_robot_assembly import is_ur5_platform_name
 from .contracts.run_report import BrainRunReport
 from .contracts.turn import TurnStatus
 from .errors import BrainIssue, BrainError
@@ -50,7 +51,7 @@ class BrainApplication:
                 timeout=self.config.timeout, structured_output=self.config.structured_output,
                 planner_max_completion_tokens=self.config.planner_max_completion_tokens)
         self.provider = provider
-        if hasattr(provider, "set_asset_catalog"):
+        if hasattr(provider, "set_asset_catalog") and getattr(provider, "live_catalog", True):
             # The adapter owns aliases for this exact OLS revision. Passing
             # ``None`` lets the public snapshot apply those aliases while
             # reserving every canonical name. A mug-only package may teach
@@ -85,7 +86,8 @@ class BrainApplication:
                                       workspace_center_m=((self.defaults.workspace_min[0] + self.defaults.workspace_max[0]) / 2,
                                                           (self.defaults.workspace_min[1] + self.defaults.workspace_max[1]) / 2),
                                       placement_policy_version="grid-v2",
-                                      motion_policy_version="motion-v1")
+                                      motion_policy_version="motion-v1",
+                                      catalog_for_provider=getattr(provider, "live_catalog", True))
         bootstrap = self.config.bootstrap_settings()
         self.bootstrapper = SceneBootstrapper(self.assets, self.defaults, robot=self.config.robot, seed=self.config.seed,
             table_metadata_ref=bootstrap.get("default_table_metadata_ref"),
@@ -178,7 +180,8 @@ class BrainApplication:
             # MetadataRef only when geometry is actually needed, not on restore.
             from .scene.component_reference_registry import ComponentReferenceRegistry
             session = BrainSession(None, self.pipeline, self.platform_factory(), robot_profiles=self.config.robot_profiles,
-                reference_registry=ComponentReferenceRegistry(self.config.component_reference_rules))
+                reference_registry=ComponentReferenceRegistry(self.config.component_reference_rules),
+                release_policy=self.config.release_policy)
             session.robot_assembly_adapter = self.robot_assembly
             session.scene_id_bits = self.config.scene_id_bits
             self.sessions[session_id] = self.store.restore(state, session) if state else session
@@ -195,7 +198,7 @@ class BrainApplication:
                 self.sessions[session_id].gripper_asset = binding.get("gripper_asset")
                 self.sessions[session_id].camera_asset = binding.get("camera_asset")
                 self.sessions[session_id].execution_capability = (
-                    "supported" if binding.get("robot_asset") == "ur5e_arm"
+                    "supported" if is_ur5_platform_name(binding.get("robot_asset"))
                     and (self.config.robot_profiles.profiles or getattr(self.pipeline, "robot", "ur5e") == "ur5e")
                     else "unsupported")
         return self.sessions[session_id]
@@ -208,7 +211,28 @@ class BrainApplication:
 
     def _load_scene(self, session_id, path):
         session = self.get_session(session_id)
+        # v0.2 distinguishes the one-time scene import from a platform
+        # rebind.  Replacing an already initialized session through the
+        # generic load path would silently reset its platform/original/plan
+        # bindings, so callers must create a new session for another initial
+        # import.  The browser's protocol-empty placeholder is still treated
+        # as uninitialized and may be replaced on the first import.
+        # Preserve the stronger pending-execution guard for recovery callers;
+        # a replacement import must never mask an unresolved dispatch.
+        if session.pending_execution_request is not None:
+            raise ValueError("execution_pending")
+        if session.scene is not None and not self._is_uninitialized_empty_scene(session):
+            raise ValueError("capability_unsupported: scene import is only allowed before session initialization; use a new session for another platform")
         scene = self.codec.load(path)
+        return self._load_scene_object(session_id, scene)
+
+    def _load_scene_object(self, session_id, scene):
+        """Validate and commit one initial import after semantic policy checks."""
+        session = self.get_session(session_id)
+        if session.pending_execution_request is not None:
+            raise ValueError("execution_pending")
+        if session.scene is not None and not self._is_uninitialized_empty_scene(session):
+            raise ValueError("capability_unsupported: scene import is only allowed before session initialization; use a new session for another platform")
         profile = None
         if self.config.scene_robot_profile is not None:
             profile = self.config.robot_profiles.profiles[self.config.scene_robot_profile]
@@ -219,7 +243,7 @@ class BrainApplication:
         session.initialize_scene(scene)
         binding = self.robot_assembly.scene_binding(scene)
         session.robot_asset, session.gripper_asset, session.camera_asset = binding.get("robot_asset"), binding.get("gripper_asset"), binding.get("camera_asset")
-        session.execution_capability = ("supported" if session.robot_asset == "ur5e_arm"
+        session.execution_capability = ("supported" if is_ur5_platform_name(session.robot_asset)
                                         and (self.config.robot_profiles.profiles or getattr(self.pipeline, "robot", "ur5e") == "ur5e")
                                         else "unsupported")
         if profile is not None:
@@ -236,8 +260,7 @@ class BrainApplication:
         # "原始场景" edits cannot reproduce the imported scene.
         self._capture_original(session_id, request_id="import-" + uuid.uuid4().hex,
                                source="uploaded", allow_empty=True)
-        self._save_session(session_id)
-        return session.scene
+        return scene
 
     def _capture_original(self, session_id, *, request_id, source, allow_empty=False):
         from .session.original_scene_store import OriginalSceneStore
@@ -335,6 +358,42 @@ class BrainApplication:
             revision=self.revisions.get(session_id, 0) + 1, config_fingerprint=self.config_fingerprint)
 
     @staticmethod
+    def _scene_digest(scene):
+        if scene is None:
+            return None
+        from .web.protocol import digest
+        return digest(scene)
+
+    @staticmethod
+    def _platform_signature(session):
+        """Stable evidence for the platform portion of a published plan."""
+        from .scene.component_access import SceneIndex
+        import hashlib
+        import json
+        scene = session.scene
+        if scene is None:
+            return None
+        ids = sorted(session.platform_object_ids or ())
+        index = SceneIndex(scene)
+        payload = []
+        for identifier in ids:
+            try:
+                value = index.object(identifier).model_dump(mode="json")
+            except LookupError:
+                continue
+            for component in value.get("components", []):
+                if component.get("component_type") == "RobotDriver":
+                    component.get("properties", {}).pop("now_joint_positions_rad", None)
+            payload.append(value)
+        return hashlib.sha256(json.dumps({
+            "robot_asset": session.robot_asset,
+            "gripper_asset": session.gripper_asset,
+            "camera_asset": session.camera_asset,
+            "robot_setup_revision": session.robot_setup_revision,
+            "objects": payload,
+        }, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+
+    @staticmethod
     def _is_uninitialized_empty_scene(session):
         """Return whether the browser's empty document is only a bootstrap placeholder.
 
@@ -411,6 +470,7 @@ class BrainApplication:
         calls_start = len(getattr(self.provider, "calls", []))
         understanding_calls = 0
         self.pipeline.skill_planner.last_trace = None
+        pending_import = None
         try:
             if session.session_action == "close":
                 raise ValueError("session_closed")
@@ -418,22 +478,46 @@ class BrainApplication:
                 stage = "scene_import"
                 if session.scene is not None:
                     raise ValueError("scene_already_loaded: use explicit load_scene to replace it")
-                self._load_scene(session_id, scene_path)
+                # Parse and validate the document only after the session
+                # identity check.  The external write/original snapshot is
+                # deferred until the turn has passed the v0.2 policy gate;
+                # a rejected platform-change request therefore has no import
+                # side effect.
+                pending_import = self.codec.load(scene_path)
                 report.scene_source = "uploaded"
-                report.scene_commit_status = "committed"
             elif session.scene is not None:
                 report.scene_source = "session"
             stage = "understanding"
             understanding_calls = 1
-            turn = self.pipeline.understand_turn(instruction, scene=session.scene, dialogue=session.dialogue)
+            try:
+                turn = self.pipeline.understand_turn(instruction, scene=pending_import or session.scene, dialogue=session.dialogue)
+            except Exception:
+                # The uploaded document is an explicit initial import.  If
+                # understanding is unavailable there is no accepted platform
+                # rebind payload to reject, so preserve the historical import
+                # semantics while still keeping the actual write deferred for
+                # accepted turns that can be checked by ReleasePolicy.
+                if pending_import is not None:
+                    self._load_scene_object(session_id, pending_import)
+                    report.scene_commit_status = "committed"
+                raise
             report.turn_kind, report.turn_status = turn.turn_kind, turn.status
             if turn.status != "accepted":
+                if pending_import is not None:
+                    self._load_scene_object(session_id, pending_import)
+                    report.scene_commit_status = "committed"
                 report.run_status = "blocked"
                 report.clarification_question = turn.clarification_question
                 report.reply = (turn.clarification_question or "需要澄清任务。") \
                     if turn.status == "clarification_required" else (turn.clarification_question or "不支持该任务。")
             else:
                 session.check_turn(turn)
+                if pending_import is not None:
+                    self._load_scene_object(session_id, pending_import)
+                    report.scene_commit_status = "committed"
+                    # All subsequent processing is against the acknowledged
+                    # imported scene, not the temporary read-only candidate.
+                    session = self.get_session(session_id)
                 bindings = None
                 initial_robot = None
                 initial_edit = None
@@ -669,6 +753,23 @@ class BrainApplication:
                           id_remap={str(k): v for k, v in result.scene_id_remap.items()})
         record.update(robot_setup=session.robot_setup.model_dump(mode="json") if session.robot_setup else None,
                       robot_setup_revision=session.robot_setup_revision)
+        if result is not None and result.commands is not None:
+            record["plan_binding"] = {
+                "session_id": session_id,
+                "request_id": request_id,
+                "scene_id": result.commands.scene_id,
+                "scene_version": result.commands.scene_version,
+                "scene_sub_version": getattr(session.scene, "scene_sub_version", None),
+                "scene_digest": self._scene_digest(session.scene),
+                "platform_signature": self._platform_signature(session),
+                "robot_setup_revision": session.robot_setup_revision,
+                "profile_id": (session.robot_setup.profile_id if session.robot_setup is not None
+                                else self.config.scene_robot_profile),
+                "asset_catalog_revision": (self.pipeline.asset_catalog.revision
+                                            if self.pipeline.asset_catalog is not None else None),
+                "geometry_cache_revision": getattr(self.assets, "geometry_cache_metadata", {}).get("asset_tree_sha256"),
+                "config_fingerprint": self.config_fingerprint,
+            }
         secret = self.config.api_key.get_secret_value() if self.config.api_key else None
         if self.config.debug:
             if planning_trace is not None:
@@ -707,6 +808,8 @@ class BrainApplication:
             "scene_commit_status": report.scene_commit_status, "scene_id": report.scene_id,
             "scene_version": report.scene_version, "snapshot_id": None, "publication_status": "pending",
             "checkpoint_revision": self.revisions.get(session_id, 0) + 1}
+        if "plan_binding" in record:
+            publication_record["plan_binding"] = record["plan_binding"]
         try:
             publication.write(publication_record)
             # Save the confirmed scene before freezing/publishing derived files.

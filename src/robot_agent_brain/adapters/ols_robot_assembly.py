@@ -19,6 +19,25 @@ from ..scene.component_access import SceneIndex
 from ..scene.scene_graph import world_transform
 
 
+_UR5_PLATFORM_NAMES = frozenset({"ur5", "ur5e", "ur5e_arm"})
+
+
+def normalize_robot_platform_name(value: str | None) -> str:
+    """Normalize only the known UR5/UR5e naming family.
+
+    OLS 1.0.8 renamed robot 1 from ``ur5e_arm`` to ``ur5`` while the legacy
+    planning backend remains named ``ur5e``. Other platforms stay distinct.
+    """
+    raw = str(value or "").strip().casefold().replace("-", "_")
+    if raw in _UR5_PLATFORM_NAMES:
+        return "ur5"
+    return raw[:-4] if raw.endswith("_arm") else raw
+
+
+def is_ur5_platform_name(value: str | None) -> bool:
+    return normalize_robot_platform_name(value) == "ur5"
+
+
 @dataclass(frozen=True)
 class RobotAssemblyAsset:
     asset_key: str
@@ -115,13 +134,19 @@ class OlsRobotAssemblyAdapter:
                  "connect_joints": list(item.connect_joints),
                  "connect_links": list(item.connect_links), "child_link": item.child_link,
                  "profile_registered": item.semantic_name.casefold() in profiles
-                 or (item.semantic_name == "ur5e_arm" and "ur5e" in profiles)}
+                 or (is_ur5_platform_name(item.semantic_name)
+                     and any(is_ur5_platform_name(profile) for profile in profiles))}
                 for item in sorted(self._items.values(), key=lambda value: value.asset_key)]
 
     def resolve(self, name: str, *, role: str | None = None) -> RobotAssemblyAsset:
         raw = str(name or "").strip().casefold()
         matches = [item for item in self._items.values()
                    if item.semantic_name.casefold() == raw or item.asset_key.casefold() == raw]
+        # Preserve old prompts/configurations with OLS 1.0.8's ``ur5`` rename,
+        # while exact canonical names win if a future package contains both.
+        if not matches and raw in _UR5_PLATFORM_NAMES:
+            matches = [item for item in self._items.values()
+                       if is_ur5_platform_name(item.semantic_name)]
         if role is not None:
             matches = [item for item in matches if item.role == role]
         if len(matches) != 1:

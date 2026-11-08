@@ -266,6 +266,8 @@ class AgentService:
     def execute(self, identifier):
         record = self.tasks.get(identifier)
         request = StartTask.model_validate(record["payload"])
+        if request.change_kind == "platform_rebind":
+            self.config.release_policy.deny_dynamic_platform()
         self.tasks.update(identifier, "进行中")
         session = None
         platform = None
@@ -595,6 +597,8 @@ def create_http_app(service):
         if not isinstance(payload, dict) or not {"sessionID", "clientRequestID", "browserID", "sceneDigest"} <= payload.keys():
             raise ValueError("session_context_required: create/restore an explicit session first")
         value = StartTask.model_validate(payload)
+        if value.change_kind == "platform_rebind":
+            service.config.release_policy.deny_dynamic_platform()
         parsed = validate_web_scene(value.scene)
         if not value.command.strip() or digest(value.scene) != value.sceneDigest:
             raise ValueError("task_scene_digest_or_command_invalid")
@@ -754,7 +758,8 @@ def create_http_app(service):
             "ols_catalog_revision": service.app.pipeline.asset_catalog.revision if service.app.pipeline.asset_catalog else None,
             "switchable_assets": service.app.robot_assembly.catalog(),
             "registered_profiles": sorted(service.app.registered_profile_ids),
-            "capabilities": ["atomic_commit", "sub_versioned_scene_identity", "platform_rebind",
+            "release_policy": service.config.release_policy.model_dump(mode="json"),
+            "capabilities": ["atomic_commit", "sub_versioned_scene_identity", "initial_platform_binding",
                               "setup_only_local_edits", "bound_browser", "task_edit_lock",
                               "canonical_scene", "agent_owned_phase", "uncertain_recovery"],
         })

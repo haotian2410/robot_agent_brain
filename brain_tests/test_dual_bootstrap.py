@@ -3,6 +3,7 @@ from pathlib import Path
 
 from robot_agent_brain.application import BrainApplication
 from robot_agent_brain.config import BrainConfig
+from robot_agent_brain.contracts.release_policy import ReleasePolicy
 from robot_agent_brain.contracts.robot_profile import RobotProfileRegistry
 from robot_agent_brain.models.task_understanding import TaskParseOutput
 from test_robot_profiles_state import fixture
@@ -37,7 +38,9 @@ def turn(kind="grasp"):
 
 def test_profile_bootstrap_keeps_both_arms_and_commits_after_planning(tmp_path):
     provider = Provider(turn())
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path), robot_profiles=registry()), provider=provider)
+    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path), robot_profiles=registry(),
+        release_policy=ReleasePolicy(version="experiment", runtime_robot_setup_change=True,
+                                     dynamic_platform_rebind=True)), provider=provider)
     report = app.handle("用双臂的右臂抓苹果")
     assert report.run_status == "success", report
     scene = json.loads(Path(report.artifacts["scene_config"]).read_text(encoding="utf-8"))
@@ -52,7 +55,9 @@ def test_profile_bootstrap_keeps_both_arms_and_commits_after_planning(tmp_path):
 
 def test_profile_bootstrap_failed_plan_never_loads_scene(tmp_path):
     # Release without a held object is a deterministic planning failure.
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path), robot_profiles=registry()), provider=Provider(turn("release")))
+    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path), robot_profiles=registry(),
+        release_policy=ReleasePolicy(version="experiment", runtime_robot_setup_change=True,
+                                     dynamic_platform_rebind=True)), provider=Provider(turn("release")))
     report = app.handle("用双臂的右臂释放苹果")
     assert report.run_status != "success"
     assert app.get_session(report.session_id).scene is None
@@ -61,7 +66,9 @@ def test_profile_bootstrap_failed_plan_never_loads_scene(tmp_path):
 
 def test_configuration_only_first_turn_does_not_freeze_platform(tmp_path):
     config_turn = TaskParseOutput(turn_kind="robot_config", robot_setup_request={"mode": "dual"}).to_brain_turn("换成双臂")
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path), robot_profiles=registry()), provider=Provider(config_turn))
+    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path), robot_profiles=registry(),
+        release_policy=ReleasePolicy(version="experiment", runtime_robot_setup_change=True,
+                                     dynamic_platform_rebind=True)), provider=Provider(config_turn))
     report = app.handle("换成双臂")
     assert report.run_status == "success", report
     assert report.delivery_status == "robot_configured" and "commands" not in report.artifacts

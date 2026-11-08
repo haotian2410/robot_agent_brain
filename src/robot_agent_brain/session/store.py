@@ -47,6 +47,9 @@ class SessionState(BaseModel):
     next_scene_object_id: int = Field(default=0, strict=True, ge=0, le=2**53)
     last_exported_request: str | None = None
     exported_commands: dict[str, dict] = Field(default_factory=dict)
+    # Historical plans are retained for audit/download but are never eligible
+    # for dispatch after a later successful Scene commit.
+    stale_commands: dict[str, dict] = Field(default_factory=dict)
     dispatched_requests: set[str] = Field(default_factory=set)
     pending_commands: dict | None = None
     pending_execution_request: str | None = None
@@ -114,6 +117,10 @@ class SessionState(BaseModel):
             command = parse_commands(payload)
             if command.request_id != request or canonical_commands(command) != payload:
                 raise ValueError("session_state_invalid_export")
+        for request, payload in self.stale_commands.items():
+            command = parse_commands(payload)
+            if command.request_id != request or canonical_commands(command) != payload:
+                raise ValueError("session_state_invalid_stale_export")
         if self.last_exported_request is not None and self.last_exported_request not in self.exported_commands:
             raise ValueError("session_state_last_export_missing")
         if (self.pending_execution_request is None) != (self.pending_commands is None):
@@ -186,6 +193,7 @@ class SessionStore:
             original_scene_manifest=session.original_scene_manifest, platform_object_ids=session.platform_object_ids,
             profile_object_map=session.profile_object_map,
             exported_commands=session.exported_commands, dispatched_requests=session.dispatched_requests,
+            stale_commands=getattr(session, "stale_commands", {}),
             pending_commands=session.pending_commands, pending_execution_request=session.pending_execution_request,
             last_feedback_source=getattr(session, "last_feedback_source", None), recovery_context=session.recovery_context)
         parent = self.directory(session_id)
@@ -227,6 +235,7 @@ class SessionStore:
         for name in ("dialogue", "session_action", "sync_state", "session_phase", "camera_id", "holding_object",
                      "platform_rebind_revision", "robot_asset", "gripper_asset", "camera_asset", "execution_capability", "last_exported_request",
                      "exported_commands", "dispatched_requests", "pending_commands", "pending_execution_request",
+                     "stale_commands",
                      "last_feedback_source", "recovery_context"):
             setattr(session, name, getattr(state.model_copy(deep=True), name))
         for name in ("robot_setup", "robot_setup_revision", "arm_states", "original_scene_manifest", "platform_object_ids", "profile_object_map"):

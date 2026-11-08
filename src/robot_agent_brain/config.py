@@ -8,6 +8,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from .contracts.scene import SceneId, RobotDriverProperties
 from .contracts.robot_profile import RobotProfileRegistry
+from .contracts.release_policy import ReleasePolicy
 
 
 class LayoutDefaults(BaseModel):
@@ -73,6 +74,7 @@ class BrainConfig(BaseModel):
     defaults: str | None = None
     robot: str = "ur5e"
     robot_profiles: RobotProfileRegistry = Field(default_factory=RobotProfileRegistry)
+    release_policy: ReleasePolicy = Field(default_factory=ReleasePolicy)
     component_reference_rules: dict[str, dict] = Field(default_factory=dict)
     scene_robot_profile: str | None = None
     scene_platform_object_ids: set[SceneId] | None = None

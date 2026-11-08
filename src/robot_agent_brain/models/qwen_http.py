@@ -44,6 +44,7 @@ class QwenHTTPProvider:
         transport: httpx.BaseTransport | None = None,
         planner_max_completion_tokens: int = 1024,
         asset_catalog=None,
+        live_catalog: bool | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -54,6 +55,13 @@ class QwenHTTPProvider:
         if client is not None and transport is not None:
             raise ValueError("supply either client or transport")
         self.client, self.transport = client, transport
+        # A transport/client supplied by a test or replay harness is an
+        # explicit compatibility boundary: it does not represent the live
+        # Qwen endpoint used by the release service.  Live HTTP (the default,
+        # with neither injected object) receives and must satisfy the
+        # request-scoped OLS v3.1 catalog.  Callers that wrap a real endpoint
+        # with a custom client can opt in explicitly with ``live_catalog``.
+        self.live_catalog = (client is None and transport is None) if live_catalog is None else bool(live_catalog)
         self.calls: list[dict[str, Any]] = []
         self.last_raw_values: dict[str, Any] = {}
         self.last_raw_text: dict[str, str] = {}
@@ -273,16 +281,14 @@ class QwenHTTPProvider:
                                     code="provider_output_schema_invalid")
         protocol = value.get("protocol_version")
         if protocol != "task_understanding.v3.1":
-            # Keep envelopes with no protocol marker working for old direct
-            # providers, but do not let an explicitly advertised v2/v3 scene
-            # edit bypass the catalog-choice contract.  That distinction is
-            # what preserves old replay compatibility without silently
-            # reintroducing the cup -> mug live fallback.
-            if protocol in {"task_understanding.v2", "task_understanding.v3"} \
-                    and value.get("turn_kind") == "scene_edit":
-                raise QwenProviderError("live task_understanding requires protocol_version=task_understanding.v3.1",
-                                        code="provider_output_schema_invalid")
-            return
+            # A request carrying a catalog is a live call.  Missing, old, and
+            # unknown protocol markers are all rejected before any edit can
+            # reach the scene pipeline.  Historical replay callers do not
+            # carry a request-scoped catalog and remain on the explicit
+            # compatibility path in ``understand_turn``.
+            raise QwenProviderError(
+                "live task_understanding requires protocol_version=task_understanding.v3.1",
+                code="provider_output_schema_invalid")
         if value.get("turn_kind") != "scene_edit" or value.get("status", "accepted") != "accepted":
             return
         payload = value.get("scene_edit")

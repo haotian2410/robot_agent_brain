@@ -5,6 +5,7 @@ platform is only an in-memory acknowledgement boundary; no Control or robot
 execution is involved.
 """
 from pathlib import Path
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -15,7 +16,17 @@ from robot_agent_brain.contracts.scene import SceneConfig, SceneSnapshot
 from robot_agent_brain.session.brain_session import BrainSession
 
 
-OLS_DATA = Path("/home/cscvlab/lht/webeditor_runtime/ObjectLibraryServer-1.0.8-rel/data")
+# Integration-only fixture.  CI must not depend on a developer's home path;
+# set ROBOT_BRAIN_OLS_DATA_ROOT explicitly when running the real OLS suite.
+OLS_DATA = Path(os.environ["ROBOT_BRAIN_OLS_DATA_ROOT"]) if os.environ.get("ROBOT_BRAIN_OLS_DATA_ROOT") else None
+
+
+def _empty_scene_path():
+    for name in ("ur5e_table_empty.json", "ur5_table_empty.json"):
+        path = OLS_DATA / "scenes/1" / name
+        if path.is_file():
+            return path
+    raise AssertionError("OLS empty scene fixture is missing")
 
 
 class RecordingPlatform:
@@ -37,10 +48,10 @@ class RecordingPlatform:
 
 @pytest.fixture
 def scene_adapter():
-    if not OLS_DATA.is_dir():
+    if OLS_DATA is None or not OLS_DATA.is_dir():
         pytest.skip("OLS 1.0.8 runtime assets are not installed")
     adapter = OlsRobotAssemblyAdapter(FinalModelsLibraryAdapter(OLS_DATA))
-    scene = SceneConfig.model_validate_json((OLS_DATA / "scenes/1/ur5e_table_empty.json").read_text())
+    scene = SceneConfig.model_validate_json(_empty_scene_path().read_text())
     # The real scene has deployment positions but no live-now field.  Keep a
     # non-zero now value in the fixture so a camera/gripper-only change cannot
     # accidentally reset runtime evidence.
@@ -188,8 +199,9 @@ def test_first_turn_platform_switch_publishes_final_candidate_once(tmp_path):
     from robot_agent_brain.config import BrainConfig
     from robot_agent_brain.contracts.robot_setup import RobotAssetSwitchRequest
     from robot_agent_brain.contracts.turn import BrainTurn
+    from robot_agent_brain.contracts.release_policy import ReleasePolicy
 
-    if not OLS_DATA.is_dir():
+    if OLS_DATA is None or not OLS_DATA.is_dir():
         pytest.skip("OLS 1.0.8 runtime assets are not installed")
 
     class Provider:
@@ -204,7 +216,9 @@ def test_first_turn_platform_switch_publishes_final_candidate_once(tmp_path):
         return value
 
     config = BrainConfig.load(Path("config/webeditor.json")).model_copy(
-        update={"vision": False, "output_dir": str(tmp_path), "asset_geometry_cache": None})
+        update={"vision": False, "output_dir": str(tmp_path), "asset_geometry_cache": None,
+                "release_policy": ReleasePolicy(version="experiment", dynamic_platform_rebind=True,
+                                                 runtime_robot_setup_change=True)})
     try:
         app = BrainApplication(config, provider=Provider(), platform_factory=factory)
     except ValueError as exc:
