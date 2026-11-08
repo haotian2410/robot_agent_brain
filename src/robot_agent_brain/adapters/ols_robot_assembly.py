@@ -33,6 +33,8 @@ class RobotAssemblyAsset:
     driver: dict | None = None
     scene_one_arm: dict | None = None
     aabb: tuple[float, ...] | None = None
+    local_aabb_min_m: tuple[float, float, float] | None = None
+    local_aabb_max_m: tuple[float, float, float] | None = None
 
 
 class OlsRobotAssemblyAdapter:
@@ -91,13 +93,20 @@ class OlsRobotAssemblyAdapter:
             else:
                 role = "prop"
             aabb = data.get("geometric_properties", {}).get("AABB")
+            geometry = None
+            try:
+                geometry = self.assets.resolve(f"$LIBRARY_SERVER/{identifier}", asset_type="robot")
+            except Exception:
+                pass
             self._items[f"robot:{identifier}"] = RobotAssemblyAsset(
                 asset_key=f"robot:{identifier}", semantic_name=str(name), asset_type="robot",
                 role=role, metadata_ref=f"$LIBRARY_SERVER/{identifier}", tags=tags,
                 connect_joints=joints, connect_links=links,
                 child_link=child[0] if child else None, driver=driver,
                 scene_one_arm=(data.get("scene_one_arm") or [None])[0],
-                aabb=tuple(float(v) for v in aabb) if isinstance(aabb, list) and len(aabb) == 6 else None)
+                aabb=tuple(float(v) for v in aabb) if isinstance(aabb, list) and len(aabb) == 6 else None,
+                local_aabb_min_m=getattr(geometry, "local_aabb_min_m", None),
+                local_aabb_max_m=getattr(geometry, "local_aabb_max_m", None))
 
     def catalog(self, registered_profiles=()) -> list[dict]:
         profiles = {str(value).casefold() for value in (registered_profiles or ())}
@@ -223,15 +232,34 @@ class OlsRobotAssemblyAdapter:
 
     @staticmethod
     def _replace(obj: SceneObject, *, metadata=None, driver=None, attachment=None, semantic=None, transform=None) -> SceneObject:
-        values = {component.component_type: component.model_dump(mode="json") for component in obj.components}
-        for name, properties in (("MetadataRef", metadata), ("RobotDriver", driver),
-                                 ("RobotAttachment", attachment), ("Semantic", semantic),
-                                 ("Transform", transform)):
-            if properties is None:
-                continue
-            values[name] = {"component_type": name, "properties": properties}
-        return obj.model_copy(update={"components": [SceneComponent.model_validate(values[key])
-                                                       for key in values]})
+        # Preserve component order, unknown extensions and duplicate unknown
+        # components.  Rebinding is allowed to replace only the named known
+        # component; rebuilding a dict keyed by component type silently lost
+        # lossless Scene data.
+        replacements = {name: properties for name, properties in (
+            ("MetadataRef", metadata), ("RobotDriver", driver),
+            ("RobotAttachment", attachment), ("Semantic", semantic),
+            ("Transform", transform)) if properties is not None}
+        components = []
+        consumed = set()
+        for component in obj.components:
+            if component.component_type in replacements and component.component_type not in consumed:
+                components.append(SceneComponent(component_type=component.component_type,
+                                                 properties=replacements[component.component_type]))
+                consumed.add(component.component_type)
+            else:
+                components.append(component.model_copy(deep=True))
+        for name, properties in replacements.items():
+            if name not in consumed:
+                components.append(SceneComponent(component_type=name, properties=properties))
+        return obj.model_copy(update={"components": components})
+
+    @staticmethod
+    def _next_id(objects, cursor):
+        value = max(objects, default=-1) + 1 if cursor is None else int(cursor)
+        while value in objects:
+            value += 1
+        return value, value + 1
 
     def rebind_scene(self, scene: SceneConfig, *, robot_asset: str | None = None,
                      gripper_asset: str | None = None, camera_asset: str | None = None,
@@ -242,14 +270,26 @@ class OlsRobotAssemblyAdapter:
         if len(arms) != 1:
             raise ValueError("robot_assembly_arm_ambiguous")
         arm_id, old_arm = arms[0]
-        arm_changed = robot_asset is not None
-        target_arm = self.resolve(robot_asset, role="arm") if arm_changed else old_arm
-        target_gripper = self.resolve(gripper_asset, role="gripper") if gripper_asset else None
-        target_camera = self.resolve(camera_asset, role="camera") if camera_asset else None
+        target_arm = self.resolve(robot_asset, role="arm") if robot_asset else old_arm
+        current_gripper = current["gripper"][0][1] if len(current["gripper"]) == 1 else None
+        current_camera = current["camera"][0][1] if len(current["camera"]) == 1 else None
+        target_gripper = self.resolve(gripper_asset, role="gripper") if gripper_asset else current_gripper
+        target_camera = self.resolve(camera_asset, role="camera") if camera_asset else current_camera
+        arm_changed = target_arm.asset_key != old_arm.asset_key
+        gripper_changed = bool(gripper_asset) and (current_gripper is None or target_gripper.asset_key != current_gripper.asset_key)
+        camera_changed = bool(camera_asset) and (current_camera is None or target_camera.asset_key != current_camera.asset_key)
+        changed_roles = (["arm"] if arm_changed else []) + (["gripper"] if gripper_changed else []) + (["camera"] if camera_changed else [])
+        if not changed_roles:
+            return scene.model_copy(deep=True), {
+                "noop": True, "changed_roles": [], "robot_asset": old_arm.semantic_name,
+                "gripper_asset": current_gripper.semantic_name if current_gripper else None,
+                "camera_asset": current_camera.semantic_name if current_camera else None,
+                "asset_revision": self.revision,
+            }
         objects = {obj.object_id_in_scene: obj.model_copy(deep=True) for obj in scene.objects}
         table_id, table_box = self._table_box(scene)
         percent, has_pedestal, pedestal_id, pedestal_scale = self._placement(target_arm)
-        if arm_changed and table_box is not None and target_arm.aabb is not None:
+        if arm_changed and table_box is not None and target_arm.local_aabb_min_m is not None:
             for arm_index, (identifier, _) in enumerate(arms):
                 position, quaternion = self._arm_pose(table_box, percent, 1 if arm_index % 2 == 0 else -1)
                 old_transform = SceneIndex(scene).transform(identifier)
@@ -258,28 +298,42 @@ class OlsRobotAssemblyAdapter:
                     transform={"position": position, "quaternion_xyzw": quaternion,
                                "scale": list(old_transform.scale), "parent": old_transform.parent})
                 objects[identifier] = arm_obj
-        driver = self._scene_driver(target_arm.driver)
-        for identifier, _ in arms:
-            arm_obj = objects[identifier]
-            old_semantic = SceneIndex(scene).semantic(identifier)
-            arm_obj = self._replace(arm_obj,
-                metadata={"path": target_arm.metadata_ref, "type": "robot"},
-                driver=driver,
-                semantic={**(old_semantic.model_dump(mode="json") if old_semantic else {}),
-                          "semantic_name": target_arm.semantic_name, "category": "robot"})
-            objects[identifier] = arm_obj
-        if target_gripper:
+        if arm_changed:
+            driver = self._scene_driver(target_arm.driver)
+            for identifier, _ in arms:
+                arm_obj = objects[identifier]
+                old_semantic = SceneIndex(scene).semantic(identifier)
+                arm_obj = self._replace(arm_obj,
+                    metadata={"path": target_arm.metadata_ref, "type": "robot"},
+                    driver=driver,
+                    semantic={**(old_semantic.model_dump(mode="json") if old_semantic else {}),
+                              "semantic_name": target_arm.semantic_name, "category": "robot"})
+                objects[identifier] = arm_obj
+        if arm_changed or gripper_changed:
             grippers = current["gripper"]
             if len(grippers) > 1:
                 raise ValueError("robot_assembly_gripper_ambiguous")
-            gid = grippers[0][0] if grippers else (max(objects, default=-1) + 1 if next_object_id is None else next_object_id)
+            gid, next_object_id = (grippers[0][0], next_object_id) if grippers else self._next_id(objects, next_object_id)
             if gid in objects and gid not in {item[0] for item in grippers}:
                 raise ValueError("robot_assembly_object_id_collision")
-            parent_joint = target_arm.connect_joints[0] if target_arm.connect_joints else ""
-            parent_link = target_arm.connect_links[0] if target_arm.connect_links else ""
+            if len(target_arm.connect_joints) != 1 or len(target_arm.connect_links) != 1:
+                raise ValueError("robot_assembly_mount_ambiguous")
+            if not target_gripper.child_link:
+                raise ValueError("robot_assembly_mount_missing")
+            parent_joint = target_arm.connect_joints[0]
+            parent_link = target_arm.connect_links[0]
             driver = self._scene_driver(target_gripper.driver)
             mount_position = (target_gripper.driver or {}).get("position") or [[0.0, 0.0, 0.0]]
             mount_quaternion = (target_gripper.driver or {}).get("quaternion_xyzw") or [[0.0, 0.0, 0.0, 1.0]]
+            # OLS gripper metadata does not always carry the already verified
+            # fixed mount transform.  When retaining the same gripper during
+            # an arm switch, preserve that Scene attachment transform rather
+            # than replacing it with an invented zero/identity pose.
+            old_attachment = SceneIndex(scene).component(gid, "RobotAttachment") if gid in objects else None
+            old_mount = old_attachment.properties.get("transform") if old_attachment is not None else None
+            if not gripper_changed and isinstance(old_mount, dict):
+                mount_position = [old_mount.get("position", [0.0, 0.0, 0.0])]
+                mount_quaternion = [old_mount.get("quaternion_xyzw", [0.0, 0.0, 0.0, 1.0])]
             position = list(mount_position[0]) if mount_position and isinstance(mount_position[0], list) else [0.0, 0.0, 0.0]
             quaternion = list(mount_quaternion[0]) if mount_quaternion and isinstance(mount_quaternion[0], list) else [0.0, 0.0, 0.0, 1.0]
             gripper_obj = objects[gid] if gid in objects else SceneObject.model_validate({
@@ -318,11 +372,11 @@ class OlsRobotAssemblyAdapter:
                 pedestal_ids.append(identifier)
         target_pedestal = self._items.get(f"robot:{int(pedestal_id)}") if pedestal_id is not None else None
         if (arm_changed and has_pedestal and target_pedestal is not None
-                and table_box is not None and target_arm.aabb is not None):
+                and table_box is not None and target_arm.local_aabb_min_m is not None):
             arm_pose, _ = self._arm_pose(table_box, percent, 1)
-            arm_bottom = arm_pose[2] + min(target_arm.aabb[4], target_arm.aabb[5])
+            arm_bottom = arm_pose[2] + min(target_arm.local_aabb_min_m[2], target_arm.local_aabb_max_m[2])
             pedestal_asset = self.assets.resolve(target_pedestal.metadata_ref, asset_type="robot")
-            pedestal_id_in_scene = pedestal_ids[0] if pedestal_ids else (max(objects, default=-1) + 1)
+            pedestal_id_in_scene, next_object_id = (pedestal_ids[0], next_object_id) if pedestal_ids else self._next_id(objects, next_object_id)
             pedestal_z = arm_bottom - pedestal_asset.local_aabb_max_m[2] * float(pedestal_scale[2])
             pedestal_values = {"position": [arm_pose[0], arm_pose[1], pedestal_z],
                                "quaternion_xyzw": [0.0, 0.0, 0.0, 1.0],
@@ -345,7 +399,7 @@ class OlsRobotAssemblyAdapter:
         elif arm_changed:
             for identifier in pedestal_ids:
                 objects.pop(identifier, None)
-        if target_camera:
+        if camera_changed:
             cameras = current["camera"]
             if not cameras:
                 raise ValueError("robot_assembly_camera_ambiguous")
@@ -357,7 +411,7 @@ class OlsRobotAssemblyAdapter:
         payload.pop("scene_version", None)
         payload["scene_version"] = scene.scene_version
         candidate = SceneConfig.model_validate(payload)
-        return candidate, {"robot_asset": target_arm.semantic_name,
+        return candidate, {"noop": False, "changed_roles": changed_roles, "robot_asset": target_arm.semantic_name,
                            "gripper_asset": target_gripper.semantic_name if target_gripper else (current["gripper"][0][1].semantic_name if current["gripper"] else None),
                            "camera_asset": target_camera.semantic_name if target_camera else (current["camera"][0][1].semantic_name if current["camera"] else None),
                            "asset_revision": self.revision}

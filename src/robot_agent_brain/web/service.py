@@ -301,6 +301,11 @@ class AgentService:
             # bootstrap path below owns creation of the initial scene and will publish it through
             # the same lease; accepting it here would incorrectly require table/robot ids.
             session.session_phase = "agent_owned"
+            # Trusted, process-local owner context.  This is populated only
+            # after the TaskStore row, browser binding and Gateway lease have
+            # all been validated; model output cannot manufacture it.
+            session.active_task_owner = identifier
+            session.active_task_browser = request.browserID
             report = self.app.handle(request.command, session_id=request.sessionID)
             record_path = self.output / request.sessionID / report.request_id / "request_record.json"
             turn_record = json.loads(record_path.read_text(encoding="utf-8"))
@@ -351,6 +356,8 @@ class AgentService:
                               "reply":"浏览器编辑锁状态待确认，请勿继续修改场景。",
                               "error":{"code":"gateway_unlock_unconfirmed", "message":"Browser edit lock requires explicit recovery"}}
             if session is not None:
+                session.active_task_owner = None
+                session.active_task_browser = None
                 if uncertain:
                     session.sync_state = "unknown"
                 else:

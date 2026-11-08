@@ -12,7 +12,7 @@ class MockScenePlatform:
         self.manager: SceneManager | None = None
         self.rgb = rgb
 
-    def load_scene(self, scene: SceneConfig) -> SceneSnapshot:
+    def load_scene(self, scene: SceneConfig, *, change_kind: str = "scene_edit") -> SceneSnapshot:
         self.manager = SceneManager(scene)
         return SceneSnapshot(scene_id=scene.scene_id, scene_version=scene.scene_version,
                              scene_sub_version=scene.scene_sub_version)

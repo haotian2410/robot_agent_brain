@@ -43,6 +43,11 @@ class BrainSession:
         self.dispatched_requests = set()
         self.pending_commands = None
         self.pending_execution_request = None
+        # Ephemeral trusted context set by AgentService only after a task owns
+        # the session lease.  It is intentionally not persisted or accepted
+        # from natural-language/model payloads.
+        self.active_task_owner = None
+        self.active_task_browser = None
         self.recovery_context = None
         if scene is not None:
             self.initialize_scene(scene)
@@ -142,6 +147,8 @@ class BrainSession:
             candidate_pair = (candidate.scene_version, candidate.scene_sub_version)
             current_pair = (current.scene_version, current.scene_sub_version)
             if platform_rebind:
+                manifest_ids = self._validate_platform_rebind_scope(
+                    current, candidate, self.robot_assembly_adapter)
                 if candidate_pair != (current_pair[0], current_pair[1] + 1):
                     raise ValueError("browser_platform_rebind_revision_invalid")
                 if self.robot_assembly_adapter is None:
@@ -149,11 +156,10 @@ class BrainSession:
                 binding = self.robot_assembly_adapter.scene_binding(candidate)
                 if not binding.get("robot_asset"):
                     raise ValueError("browser_platform_rebind_arm_missing")
-                expected_platform_ids = self.robot_assembly_adapter.platform_object_ids(
-                    candidate, previous=self.platform_object_ids
-                ) if self.robot_assembly_adapter is not None else manifest_ids
-                if self.platform_object_ids is not None and manifest_ids != expected_platform_ids:
-                    raise ValueError("browser_platform_rebind_platform_ids_changed")
+                # ``manifest_ids`` is now derived by the shared scope
+                # validator from the trusted before snapshot.  Do not compare
+                # it with a browser-supplied manifest or candidate-derived
+                # role set a second time; that would re-admit ordinary IDs.
             if self.session_phase == "agent_owned" and candidate_pair[0] == current_pair[0] and candidate_pair[1] > current_pair[1]:
                 raise ValueError("manual_edit_forbidden")
             if candidate_pair < current_pair or (candidate_pair == current_pair and changed):
@@ -192,9 +198,9 @@ class BrainSession:
         if current is None:
             self.platform_object_ids = set(platform_object_ids)
         elif platform_rebind and self.robot_assembly_adapter is not None:
-            self.platform_object_ids = self.robot_assembly_adapter.platform_object_ids(
-                candidate, previous=self.platform_object_ids
-            )
+            # Use the same trusted scope that validated the candidate; never
+            # carry a browser-supplied all-object manifest forward.
+            self.platform_object_ids = set(manifest_ids)
         if changed:
             self.dialogue.last_entity_ids = [i for i in self.dialogue.last_entity_ids if i in known]
             if self.dialogue.last_entity_id not in known:
@@ -207,7 +213,7 @@ class BrainSession:
             self.gripper_asset = binding.get("gripper_asset")
             self.camera_asset = binding.get("camera_asset")
             self.platform_rebind_revision += 1
-            self.execution_capability = self._platform_execution_capability()
+            self.execution_capability = self._platform_execution_capability(candidate)
             self.robot_setup = None
             self.robot_setup_revision += 1
             self.arm_states = None
@@ -216,12 +222,43 @@ class BrainSession:
             self.last_exported_request = self.last_request_id = None
         return changed
 
-    def _platform_execution_capability(self):
-        """OLS assembly metadata is not itself a planning profile."""
+    def _platform_execution_capability(self, scene=None):
+        """Return planning compatibility, separately from display assembly.
+
+        OLS metadata proves that a platform can be displayed and mounted; it
+        does not register a planning group or Control mapping.  Explicit
+        profiles therefore win.  The historic single-arm path remains a
+        narrowly checked UR5e legacy descriptor rather than a name-only
+        shortcut.
+        """
+        scene = scene or self.scene
+        if not self.robot_asset or scene is None or self.robot_assembly_adapter is None:
+            return "unsupported"
+        if self.robot_profiles and self.robot_profiles.profiles:
+            for profile in self.robot_profiles.profiles.values():
+                try:
+                    profile.validate_scene(scene)
+                except Exception:
+                    continue
+                if profile.setup.mode == "single":
+                    return "supported"
+            return "unsupported"
         configured_robot = getattr(self.pipeline, "robot", "ur5e").casefold().replace("-", "_")
-        return ("supported" if self.robot_asset == "ur5e_arm"
-                and (bool(self.robot_profiles and self.robot_profiles.profiles) or configured_robot == "ur5e")
-                else "unsupported")
+        if configured_robot != "ur5e" or self.robot_asset != "ur5e_arm":
+            return "unsupported"
+        try:
+            expected = self.robot_assembly_adapter.resolve("ur5e_arm", role="arm")
+            from ..scene.component_access import SceneIndex
+            actual = SceneIndex(scene).robot_driver(
+                self.robot_assembly_adapter.classify_scene(scene)["arm"][0][0])
+            if actual is None or actual.joint_sequence != (expected.driver or {}).get("joint_sequence", []):
+                return "unsupported"
+            expected_limits = (expected.driver or {}).get("joint_limits", {})
+            if actual.joint_limits != expected_limits:
+                return "unsupported"
+        except Exception:
+            return "unsupported"
+        return "supported"
 
     def _commit_manager(self, manager):
         self.scene_manager = manager
@@ -236,23 +273,76 @@ class BrainSession:
                 expected.scene_id, expected.scene_version, expected.scene_sub_version):
             raise ValueError("scene_platform_snapshot_mismatch")
 
-    def rebind_platform_assets(self, adapter, request):
+    def _validate_platform_rebind_scope(self, before, candidate, adapter):
+        """Reject ordinary browser edits hidden inside a platform rebind."""
+        before_by_id = {obj.object_id_in_scene: obj for obj in before.objects}
+        candidate_by_id = {obj.object_id_in_scene: obj for obj in candidate.objects}
+        classified = adapter.classify_scene(before)
+        trusted = {identifier for role in ("arm", "gripper", "camera")
+                   for identifier, _ in classified.get(role, [])}
+        from ..scene.component_access import SceneIndex
+        before_index = SceneIndex(before)
+        trusted.update(identifier for identifier in before_by_id
+                       if before_index.metadata_type(identifier) == "robot"
+                       and (before_index.semantic(identifier) is not None
+                            and before_index.semantic(identifier).category in {"support", "pedestal", "robot_support"}))
+        # Existing platform IDs are trusted from the before snapshot.  Do not
+        # let candidate Semantic.category turn an ordinary object into a
+        # platform object. New IDs are admitted only for an OLS gripper
+        # attached to a trusted arm or an OLS-declared support/pedestal.
+        approved = set(trusted)
+        candidate_roles = adapter.classify_scene(candidate)
+        candidate_index = SceneIndex(candidate)
+        for role in ("gripper", "prop"):
+            for identifier, _asset in candidate_roles.get(role, []):
+                if identifier in before_by_id:
+                    continue
+                if role == "gripper":
+                    attachment = candidate_index.component(identifier, "RobotAttachment")
+                    if attachment is None or attachment.properties.get("parent_object_id") not in trusted:
+                        continue
+                elif not (candidate_index.semantic(identifier) is not None
+                           and candidate_index.semantic(identifier).category in {"support", "pedestal", "robot_support"}):
+                    continue
+                approved.add(identifier)
+        # Previously trusted platform objects may be deliberately removed by
+        # the target assembly (for example an UR5e pedestal when switching to
+        # Piper).  They remain in the approved scope for deletion checks.
+        scope = approved | trusted
+        for identifier in (set(before_by_id) | set(candidate_by_id)) - scope:
+            old = before_by_id.get(identifier)
+            new = candidate_by_id.get(identifier)
+            if old is None or new is None or old.model_dump(mode="json") != new.model_dump(mode="json"):
+                raise ValueError("browser_platform_rebind_scope_invalid")
+        if not (approved - trusted) <= set(candidate_by_id):
+            raise ValueError("browser_platform_rebind_platform_ids_invalid")
+        for identifier in set(candidate_by_id) - set(before_by_id):
+            if identifier not in approved:
+                raise ValueError("browser_platform_rebind_object_not_allocated")
+        return approved & set(candidate_by_id)
+
+    def rebind_platform_assets(self, adapter, request, *, owner_task_id=None):
         """Atomically apply an OLS robot/gripper/camera assembly change."""
-        if self.pending_execution_request is not None or self.session_phase == "agent_owned":
+        owner = getattr(self, "active_task_owner", None)
+        if self.pending_execution_request is not None:
+            raise ValueError("platform_rebind_task_busy")
+        if self.session_phase == "agent_owned" and (owner is None or owner_task_id != owner):
             raise ValueError("platform_rebind_task_busy")
         if self.sync_state != "synchronized" or self.recovery_context is not None:
             raise ValueError("platform_rebind_sync_state_blocked")
         scene = self.require_scene()
         candidate, binding = adapter.rebind_scene(
             scene, robot_asset=request.robot_asset, gripper_asset=request.gripper_asset,
-            camera_asset=request.camera_asset)
+            camera_asset=request.camera_asset, next_object_id=self.next_scene_object_id)
+        if binding.get("noop"):
+            return binding
+        validated_platform_ids = self._validate_platform_rebind_scope(scene, candidate, adapter)
         manager = self._candidate_manager(candidate)
         try:
-            loader = self.platform.load_scene
-            try:
-                snapshot = loader(candidate, change_kind="platform_rebind")
-            except TypeError:
-                snapshot = loader(candidate)
+            # ScenePlatformPort has one explicit keyword contract.  A
+            # platform that does not implement platform_rebind must fail
+            # before any write rather than being retried as a normal edit.
+            snapshot = self.platform.load_scene(candidate, change_kind="platform_rebind")
             self._check_snapshot(snapshot, candidate)
         except SceneCommitRejected:
             raise
@@ -264,14 +354,12 @@ class BrainSession:
         # gripper and camera ids remain stable.  Keep the session manifest in
         # lock-step with that candidate so the next browser report is not
         # rejected for carrying a stale pedestal id.
-        self.platform_object_ids = adapter.platform_object_ids(
-            candidate, previous=self.platform_object_ids
-        )
+        self.platform_object_ids = set(validated_platform_ids)
         self.platform_rebind_revision += 1
         self.robot_asset = binding.get("robot_asset")
         self.gripper_asset = binding.get("gripper_asset")
         self.camera_asset = binding.get("camera_asset")
-        self.execution_capability = self._platform_execution_capability()
+        self.execution_capability = self._platform_execution_capability(candidate)
         # A platform resource change invalidates any previous planning profile and commands.
         self.robot_setup = None
         self.robot_setup_revision += 1
@@ -356,7 +444,8 @@ class BrainSession:
             if self.robot_assembly_adapter is None:
                 raise ValueError("robot_assembly_adapter_unavailable")
             from ..pipeline import BrainResult
-            binding = self.rebind_platform_assets(self.robot_assembly_adapter, turn.robot_asset_switch)
+            binding = self.rebind_platform_assets(self.robot_assembly_adapter, turn.robot_asset_switch,
+                                                  owner_task_id=getattr(self, "active_task_owner", None))
             return self._accept_result(request_id, BrainResult(turn_kind=turn.turn_kind, platform_rebind=binding))
         if turn.robot_setup_request is not None:
             return self._process_setup_turn(request_id, turn, bindings_override=bindings_override)
@@ -643,7 +732,7 @@ class BrainSession:
             self.robot_asset = binding.get("robot_asset")
             self.gripper_asset = binding.get("gripper_asset")
             self.camera_asset = binding.get("camera_asset")
-            self.execution_capability = self._platform_execution_capability()
+            self.execution_capability = self._platform_execution_capability(remapped.scene)
         self.dialogue = DialogueState()
         self.exported_commands.clear()
         self.last_exported_request = None

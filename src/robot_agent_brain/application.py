@@ -446,12 +446,31 @@ class BrainApplication:
                     if turn.robot_asset_switch is not None:
                         if active_bootstrapper.template_scene is None:
                             raise ValueError("robot_asset_switch_requires_scene")
+                        # Construct the requested assembly in memory first.
+                        # The old path published the default template and then
+                        # performed a second platform write for the switch,
+                        # leaving a wrong first manifest/original on failures.
                         template = active_bootstrapper.template_scene.model_copy(
                             update={"scene_id": randbits(self.config.scene_id_bits), "scene_version": 1, "scene_sub_version": 0})
-                        session.initialize_scene(template)
+                        candidate, binding = self.robot_assembly.rebind_scene(
+                            template, robot_asset=turn.robot_asset_switch.robot_asset,
+                            gripper_asset=turn.robot_asset_switch.gripper_asset,
+                            camera_asset=turn.robot_asset_switch.camera_asset,
+                            next_object_id=max((o.object_id_in_scene for o in template.objects), default=-1) + 1)
+                        candidate_payload = candidate.raw_document()
+                        candidate_payload["scene_sub_version"] = 0
+                        candidate = type(template).model_validate(candidate_payload)
+                        session.initialize_scene(candidate)
+                        session.robot_assembly_adapter = self.robot_assembly
+                        session.robot_asset = binding.get("robot_asset")
+                        session.gripper_asset = binding.get("gripper_asset")
+                        session.camera_asset = binding.get("camera_asset")
+                        session.platform_object_ids = self.robot_assembly.platform_object_ids(candidate)
+                        session.execution_capability = session._platform_execution_capability(candidate)
                         report.scene_created = True
                         report.scene_commit_status = "committed"
                         report.scene_source = "generated"
+                        report.platform_rebind_revision = session.platform_rebind_revision
                         initial = None
                     else:
                         setup_request = turn.robot_setup_request
@@ -505,13 +524,14 @@ class BrainApplication:
                 if result.robot_setup_was_changed:
                     report.scene_commit_status = "committed"
                 if result.platform_rebind is not None:
-                    report.scene_commit_status = "committed"
+                    report.scene_commit_status = ("committed" if report.scene_created
+                                                  else ("unchanged" if result.platform_rebind.get("noop") else "committed"))
                     report.execution_capability = session.execution_capability
                     report.robot_asset = session.robot_asset
                     report.gripper_asset = session.gripper_asset
                     report.camera_asset = session.camera_asset
                     report.platform_rebind_revision = session.platform_rebind_revision
-                if report.scene_created:
+                if report.scene_created and result.platform_rebind is None:
                     session.platform_object_ids = ({o.object_id_in_scene for o in active_bootstrapper.template_scene.objects}
                         if active_bootstrapper.template_scene is not None else {self.defaults.table_object_id, self.defaults.robot_object_id})
                 if result.commands is not None:
@@ -523,7 +543,9 @@ class BrainApplication:
                                     else "已是该机器人配置，场景未改变。")
                 elif result.platform_rebind is not None:
                     report.delivery_status = "robot_configured"
-                    if report.execution_capability == "unsupported":
+                    if result.platform_rebind.get("noop") and not report.scene_created:
+                        report.reply = "已是该机器人及配件装配，场景未改变。"
+                    elif report.execution_capability == "unsupported":
                         report.reply = "场景平台已切换，但该机器人平台暂不支持 Brain 规划或执行。"
                     else:
                         report.reply = "机器人及配件装配已切换（未执行机器人动作）。"
