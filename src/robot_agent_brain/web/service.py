@@ -89,6 +89,35 @@ class AgentService:
             session.platform = self.platform()
         return session
 
+    def _initial_platform(self, scene):
+        template = self.app.bootstrapper.template_scene
+        manifest = self.config.scene_platform_object_ids
+        if template is not None and self.config.editor_scene_manifests:
+            manifest = self.config.editor_scene_manifests.get(scene.scene_name)
+            if manifest is None:
+                raise ValueError("web_platform_profile_unsupported")
+            index = json.loads((Path(self.config.asset_library_root) / "scenes/scene_index.json").read_text(encoding="utf-8"))
+            item = next(i for i in index if i["name"] == scene.scene_name)
+            template = self.app.codec.load(Path(self.config.asset_library_root) / "scenes" / str(item["id"]) / (item["name"] + ".json"))
+        catalog = {item["asset_key"] for item in self.app.robot_assembly.catalog()}
+        if template is not None and catalog:
+            actual = SceneIndex(scene)
+            robot_ids = set()
+            for obj in scene.objects:
+                identifier = obj.object_id_in_scene
+                if actual.metadata_type(identifier) != "robot":
+                    continue
+                ref = actual.metadata_ref(identifier)
+                if not ref or "robot:" + ref.rsplit("/", 1)[-1] not in catalog:
+                    raise ValueError("web_platform_profile_unsupported")
+                robot_ids.add(identifier)
+            expected = SceneIndex(template)
+            # A new conversation imports its current OLS assembly. Preset robot
+            # ids may have been retired; never protect a task prop in their place.
+            manifest = {identifier for identifier in manifest or set()
+                        if expected.metadata_type(identifier) != "robot"} | robot_ids
+        return template, manifest
+
     def validate_scene(self, scene, session=None):
         scene = validate_web_scene(scene, self.joints, self.references)
         if session is not None and session.scene is not None:
@@ -121,20 +150,15 @@ class AgentService:
         # platform scene when the first command is processed.
         if scene.scene_id == 0 and not scene.objects:
             return scene
-        # This release imports UR5e only. Dual scenes remain display-only.
+        # Importing an assembly for scene edits does not grant robot execution.
         if self.app.bootstrapper.template_scene is not None:
-            template_scene = self.app.bootstrapper.template_scene
-            manifest = self.config.scene_platform_object_ids
-            if self.config.editor_scene_manifests:
-                manifest = self.config.editor_scene_manifests.get(scene.scene_name)
-                if manifest is None:
-                    raise ValueError("web_platform_profile_unsupported")
-                index = json.loads((Path(self.config.asset_library_root) / "scenes/scene_index.json").read_text(encoding="utf-8"))
-                item = next(i for i in index if i["name"] == scene.scene_name)
-                template_scene = self.app.codec.load(Path(self.config.asset_library_root) / "scenes" / str(item["id"]) / (item["name"] + ".json"))
+            template_scene, manifest = self._initial_platform(scene)
             template = SceneIndex(template_scene)
             actual = SceneIndex(scene)
+            template_ids = {obj.object_id_in_scene for obj in template_scene.objects}
             for identifier in manifest or []:
+                if self.app.robot_assembly.catalog() and (identifier not in template_ids or template.metadata_type(identifier) == "robot"):
+                    continue
                 if {c.component_type for c in actual.object(identifier).components} != {c.component_type for c in template.object(identifier).components}:
                     raise ValueError("web_platform_profile_unsupported")
                 if actual.metadata_ref_properties(identifier) != template.metadata_ref_properties(identifier):
@@ -295,8 +319,7 @@ class AgentService:
                     check_ols(client, self.ols_url, self.config.asset_library_root)
             platform.acquire_lease(identifier, scene)
             if scene.objects:
-                manifest = session.platform_object_ids if session.scene is not None else (
-                    self.config.editor_scene_manifests.get(scene.scene_name) if self.config.editor_scene_manifests else self.config.scene_platform_object_ids)
+                manifest = session.platform_object_ids if session.scene is not None else self._initial_platform(scene)[1]
                 self.app.accept_browser_scene(request.sessionID, scene, platform_object_ids=manifest,
                                                change_kind=request.change_kind)
             # An empty browser document has no platform manifest to accept.  The application

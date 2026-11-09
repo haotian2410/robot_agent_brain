@@ -81,6 +81,10 @@ class RobotDriverProperties(StrictModel):
     initial_joint_positions_rad: dict[str, float] | None = None
     now_joint_positions_rad: dict[str, float] | None = None
     available_connect_joints: list[str] | None = None
+    # OLS mount poses belong to RobotDriver properties, not object Transform.
+    available_connect_link: list[str] | None = None
+    position: list[tuple[float, float, float]] | None = None
+    quaternion_xyzw: list[tuple[float, float, float, float]] | None = None
     role: str = "arm"
 
     @model_validator(mode="after")

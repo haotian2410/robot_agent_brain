@@ -281,8 +281,15 @@ class BrainApplication:
             manifest = platform_object_ids if platform_object_ids is not None else self.config.scene_platform_object_ids
             if manifest is None:
                 raise ValueError("browser_platform_manifest_required")
+            initial_import = session.scene is None
             changed = session.accept_browser_scene(candidate, platform_object_ids=manifest,
                                                    change_kind=change_kind)
+            if initial_import and self.robot_assembly.classify_scene(candidate)["arm"]:
+                binding = self.robot_assembly.scene_binding(candidate)
+                session.robot_asset = binding.get("robot_asset")
+                session.gripper_asset = binding.get("gripper_asset")
+                session.camera_asset = binding.get("camera_asset")
+                session.execution_capability = session._platform_execution_capability(candidate)
             self._save_session(session_id)
             self._capture_original(session_id, request_id="browser-import-" + uuid.uuid4().hex, source="uploaded", allow_empty=True)
             self._save_session(session_id)

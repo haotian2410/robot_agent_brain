@@ -432,7 +432,10 @@ class BrainSession:
     def check_turn(self, turn):
         if turn.scene_edit is not None and turn.scene_edit.scene_basis == "original" and self.original_scene_manifest is None:
             raise ValueError("original_scene_unavailable")
-        if turn.turn_kind == "robot_task" and self.robot_asset is not None and self.execution_capability != "supported":
+        if turn.turn_kind == "robot_task" and self.execution_capability != "supported" and (
+                self.robot_asset is not None or self.scene is not None
+                and self.robot_assembly_adapter is not None
+                and self.robot_assembly_adapter.classify_scene(self.scene)["arm"]):
             raise ValueError("capability_unsupported")
         if turn.robot_asset_switch is not None:
             if self.release_policy is not None:
