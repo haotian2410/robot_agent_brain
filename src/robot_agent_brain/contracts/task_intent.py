@@ -72,6 +72,8 @@ class TaskEntity(StrictModel):
     dialogue_ref: bool = False
     dialogue_ref_set: bool = False
     all_available: bool = False
+    select_count_from_candidates: bool = False
+    scene_object_ids: list[SceneId] = Field(default_factory=list)
     category_only: bool = False
     exclude_scene_object_ids: list[SceneId] = Field(default_factory=list)
 

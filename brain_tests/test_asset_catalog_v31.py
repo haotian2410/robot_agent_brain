@@ -120,8 +120,8 @@ def test_asset_prompt_labels_passive_platform_and_tabletop_usage():
     from robot_agent_brain.models.prompts import build_asset_catalog_prompt
     prompt, _ = build_asset_catalog_prompt(adapter)
     assert "model:29" in prompt and "usage=support_surface" in prompt
-    assert "model:25" in prompt and "usage=passive_mechanism_capability_boundary" in prompt
-    assert "model:30" in prompt and "availability=passive_mechanism_only" in prompt
+    assert "model:25" in prompt and "usage=scene_object_without_joint_control" in prompt
+    assert "model:30" in prompt and "availability=passive_scene_model" in prompt
     assert "robot:1" in prompt and "usage=robot_platform_capability_boundary" in prompt
 
 

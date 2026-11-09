@@ -73,7 +73,9 @@ def build_asset_catalog_prompt(assets, aliases=None, *, snapshot=None, registere
         # tabletop scene; passive URDF mechanisms and robot platforms need a
         # distinct usage label so Qwen does not treat every catalog row as a
         # normal scene-edit candidate.
-        if item.availability_reason == "passive_mechanism_only":
+        if item.availability_reason == "passive_scene_model":
+            usage = "scene_object_without_joint_control"
+        elif item.availability_reason == "passive_mechanism_only":
             usage = "passive_mechanism_capability_boundary"
         elif item.asset_type == "robot" or item.availability_reason == "robot_platform_only":
             usage = "robot_platform_capability_boundary"

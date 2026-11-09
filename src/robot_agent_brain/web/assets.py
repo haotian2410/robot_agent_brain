@@ -13,10 +13,14 @@ def check_ols(client, base_url, root):
         index = json.loads((root / plural / filename).read_text(encoding="utf-8"))
         expected = ({int(i):name for i,name in index["by_id"].items()} if kind != "scene"
                     else {item["id"]:item["name"] for item in index})
+        # /list hides no_display assets; direct ID lookup still exposes them.
+        hidden = ({int(i) for i, value in index.get("no_display", {}).items() if value}
+                  if kind != "scene" else {item["id"] for item in index if item.get("no_display", False)})
+        listed = {identifier: name for identifier, name in expected.items() if identifier not in hidden}
         response = client.get(base_url + "/list", params={"type":kind,"uid":0})
         response.raise_for_status()
         items = response.json()["items"]
-        if len(items) != len(expected) or {item["id"]:item["name"] for item in items} != expected:
+        if len(items) != len(listed) or {item["id"]:item["name"] for item in items} != listed:
             raise ValueError("ols_catalog_mismatch:" + kind)
         for identifier,name in expected.items():
             remote = client.get(base_url + "/" + kind, params={"id":identifier,"uid":0})

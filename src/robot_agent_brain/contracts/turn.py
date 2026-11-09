@@ -61,7 +61,8 @@ _SCENE_LAYOUT_RELATION_ALIASES = {
 class SceneEditIntent(BaseModel):
     """One operation in a SceneEditPlan; never a standalone turn payload."""
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["add", "remove", "replace", "translate", "rotate", "move_relative", "update_properties", "update", "scale"]
+    operation: Literal["add", "remove", "replace", "translate", "rotate", "orient", "move_relative", "update_properties", "update", "scale"]
+    posture: Literal["flat", "upright"] | None = None
     operation_id: str | None = Field(default=None, pattern=r"^op-[\w-]+$")
     depends_on: list[str] = Field(default_factory=list)
     replacement_entity: str | None = None
@@ -211,6 +212,8 @@ class SceneEditIntent(BaseModel):
     @model_validator(mode="after")
     def paired_relation(self):
         import math
+        if (self.operation == "orient") != (self.posture is not None):
+            raise ValueError("scene_edit_posture_required_or_forbidden")
         if (self.operation == "replace") != (self.replacement_entity is not None):
             raise ValueError("scene_replace_entity_required_or_forbidden")
         if self.replacement_entity == self.target:
@@ -240,7 +243,7 @@ class SceneEditIntent(BaseModel):
             "add": {"relation", "reference"}, "remove": set(), "replace": set(),
             "translate": {"direction", "distance_m", "motion_scale"},
             "move_relative": {"relation", "reference"},
-            "rotate": {"axis", "angle_deg"}, "update_properties": set(), "scale": set(),
+            "rotate": {"axis", "angle_deg"}, "orient": set(), "update_properties": set(), "scale": set(),
             "update": {"relation", "reference"},  # combined layout/property operation
         }[self.operation]
         if any(value is not None and key not in allowed for key, value in fields.items()):
@@ -296,9 +299,10 @@ class SceneEditPlan(BaseModel):
         # later; rejecting them here would lose the useful
         # ``scene_reference_unresolved`` diagnostic.
         internal_relations = [relation for relation in self.relations
-                              if relation.reference is None or relation.reference in ids
-                              or catalog.lookup(relation.reference) is not None
-                              or relation.reference in declared_scene_refs]
+                              if relation.reference is None or relation.reference in ids]
+        for relation in self.relations:
+            if relation.subject not in ids:
+                raise ValueError("scene_edit_unknown_selector: " + relation.subject)
         TaskIntent(instruction="scene selection", entities=self.entities,
                    operations=[], spatial_relations=internal_relations)
         for identifier in ids:

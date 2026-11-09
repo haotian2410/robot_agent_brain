@@ -122,7 +122,7 @@ def test_prompt_json_examples_validate_against_their_wire_subschemas():
         "relation": None, "reference": None, "direction": None,
         "distance_m": None, "motion_scale": None, "coordinate_frame": "world",
         "axis": None, "angle_deg": None, "placement_hint": None,
-        "placement_region": None,
+            "placement_region": None, "posture": None,
     }
     for index in (6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19):
         operation = dict(scene_operation_defaults)

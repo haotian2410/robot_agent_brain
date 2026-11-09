@@ -1,6 +1,7 @@
 """P0 regression fixtures for environment references in scene edits."""
 
 import json
+import pytest
 
 from robot_agent_brain.models.task_understanding import parse_qwen_turn
 from robot_agent_brain.config import BrainConfig
@@ -159,3 +160,60 @@ def test_selection_relation_can_use_environment_table_reference():
         "apple", entities, relations, scene
     )
     assert [obj.object_id_in_scene for obj in selected] == [1]
+
+
+@pytest.mark.parametrize("operation", ["remove", "replace", "update_properties"])
+@pytest.mark.parametrize("reference", ["table", "banana"])
+def test_wire_edit_filters_external_reference_before_selecting_single(operation, reference):
+    from test_scene_edit_selection_counts import scene_with_apples
+    scene = scene_with_apples()
+    payload = _scene_edit_payload()
+    edit = payload["scene_edit"]
+    edit["entities"] = [{"entity_id": "target", "semantic_name": "apple", "category": "fruit"}]
+    edit["relations"] = [{"subject": "target", "relation": "left_of", "reference": reference},
+                         {"subject": "target", "relation": "backmost"}]
+    op = {"operation": operation, "target": "target"}
+    if operation == "replace":
+        edit["entities"].append({"entity_id": "replacement", "semantic_name": "apple", "category": "fruit"})
+        op["replacement_entity"] = "replacement"
+    if operation == "update_properties":
+        op["properties"] = {"color": "blue"}
+    edit["operations"] = [op]
+    plan = parse_qwen_turn(payload, "edit selected apple").scene_edit
+    result = SceneEditor(BrainConfig().load_assets()).edit_result(plan, scene, next_scene_object_id=10)
+    updated = SceneManager(scene).apply_patch(result.patch)
+    target_id = 1 if reference == "table" else 4
+    assert set(range(6)) - {target_id} <= {obj.object_id_in_scene for obj in updated.objects}
+    if operation == "update_properties":
+        from robot_agent_brain.scene.component_access import SceneIndex
+        assert SceneIndex(updated).component(target_id, "MeshRenderer").properties["forceOverrideColor"] == "#0000FF"
+    else:
+        assert result.deleted_object_ids == [target_id]
+        assert result.created_object_ids == ([10] if operation == "replace" else [])
+
+
+@pytest.mark.parametrize("count,expected", [(None, [1, 3, 4]), (2, [1, 3])])
+def test_external_reference_all_and_subset_selection(count, expected):
+    from test_scene_edit_selection_counts import scene_with_apples, apples
+    from robot_agent_brain.contracts.task_intent import QuantityMode
+    entity = apples(mode=QuantityMode.ALL, count=count or 1,
+                    all_available=count is None, subset=count is not None)
+    selected = SceneObjectSelector(assets=BrainConfig().load_assets()).resolve(
+        "target", [entity], [SpatialRelation(subject="target", relation="left_of", reference="banana")],
+        scene_with_apples(), allow_partial=True)
+    assert [obj.object_id_in_scene for obj in selected] == expected
+
+
+@pytest.mark.parametrize("reference,error", [("missing", "scene_reference_unresolved"),
+                                            ("banana", "scene_reference_ambiguous")])
+def test_external_reference_failure_does_not_change_scene(reference, error):
+    from test_scene_edit_selection_counts import scene_with_apples, apples
+    scene = scene_with_apples()
+    duplicate = scene.objects[2].model_copy(deep=True)
+    duplicate.object_id_in_scene = 6
+    scene.objects.append(duplicate)
+    original = scene.model_dump()
+    with pytest.raises(Exception, match=error):
+        SceneObjectSelector(assets=BrainConfig().load_assets()).resolve(
+            "target", [apples()], [SpatialRelation(subject="target", relation="left_of", reference=reference)], scene)
+    assert scene.model_dump() == original

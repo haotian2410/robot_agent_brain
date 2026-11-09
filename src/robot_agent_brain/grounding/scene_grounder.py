@@ -21,12 +21,12 @@ class SceneGrounder:
 
     discover_candidates = staticmethod(discover_candidates)
 
-    def ground(self, intent: TaskIntent, scene: SceneConfig, bindings_override=None) -> GroundedTask:
+    def ground(self, intent: TaskIntent, scene: SceneConfig, bindings_override=None, *, resolved_relations=None) -> GroundedTask:
         selector = SemanticEntitySelector(self.relations, aliases=self.aliases, category_aliases=self.category_aliases, assets=self.assets)
         def bind(entity_id):
             entity = next(e for e in intent.entities if e.entity_id == entity_id)
             candidates = selector.select(entity_id, intent.entities, intent.spatial_relations, scene,
-                                         bindings_override=bindings_override)
+                                         bindings_override=bindings_override, resolved_relations=resolved_relations)
             if not candidates:
                 raise ValueError("grounding_missing: " + entity_id)
             if entity.quantity_mode == QuantityMode.ALL:

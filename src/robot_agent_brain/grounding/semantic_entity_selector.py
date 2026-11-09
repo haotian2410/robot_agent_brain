@@ -81,7 +81,7 @@ class SemanticEntitySelector:
         self.reference_resolver = SceneReferenceResolver(scene_reference_catalog,
                                                          table_metadata_ref=table_metadata_ref)
 
-    def select(self, entity_id, entities, relations, scene, *, bindings_override=None):
+    def select(self, entity_id, entities, relations, scene, *, bindings_override=None, resolved_relations=None):
         overrides = bindings_override or {}
         by_entity = {entity.entity_id: entity for entity in entities}
         by_object = {obj.object_id_in_scene: obj for obj in scene.objects}
@@ -104,6 +104,12 @@ class SemanticEntitySelector:
             visiting.add(identifier)
             entity = by_entity[identifier]
             eligible = discover_candidates(entity, scene, self.category_aliases, aliases=self.aliases, assets=self.assets)
+            if entity.scene_object_ids:
+                requested_ids = entity.scene_object_ids
+                if (len(requested_ids) != len(set(requested_ids))
+                        or not set(requested_ids) <= {obj.object_id_in_scene for obj in eligible}):
+                    raise ValueError("grounding_binding_invalid: " + identifier)
+                eligible = [obj for obj in eligible if obj.object_id_in_scene in set(requested_ids)]
             if identifier in overrides:
                 ids = overrides[identifier]
                 if not ids or any(type(value) is not int or value not in by_object for value in ids):
@@ -113,7 +119,9 @@ class SemanticEntitySelector:
                 candidates = [by_object[value] for value in ids]
             else:
                 candidates = eligible
-            selected_relations = []
+            # Scene reference filters must narrow the pool before extrema and
+            # before SceneGrounder checks the requested result cardinality.
+            selected_relations = list((resolved_relations or {}).get(identifier, []))
             for relation in relations:
                 if relation.scope != "selection" or relation.subject != identifier:
                     continue

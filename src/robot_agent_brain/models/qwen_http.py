@@ -29,6 +29,413 @@ class QwenProviderError(RuntimeError):
         self.code = code
 
 
+def _color_mentions(text):
+    from ..scene.colors import ALIASES, PALETTE, color_name
+    labels = sorted(set((*ALIASES, *PALETTE)), key=len, reverse=True)
+    pattern = re.compile("|".join(re.escape(label) for label in labels), re.IGNORECASE)
+    return [(match.start(), match.end(), color_name(match.group())) for match in pattern.finditer(text)]
+
+
+def _repair_live_color_update_selector(value, instruction, catalog):
+    """Convert Qwen's unreferenced ``near`` noise into the explicit color selector."""
+    if not isinstance(value, dict):
+        return value
+    edit = value.get("scene_edit")
+    operations = edit.get("operations") if isinstance(edit, dict) else None
+    entities = edit.get("entities") if isinstance(edit, dict) else None
+    if value.get("status") != "accepted" or len(operations or []) != 1 or len(entities or []) != 1:
+        return value
+    operation, entity = operations[0], entities[0]
+    if (not isinstance(operation, dict) or not isinstance(entity, dict)
+            or operation.get("operation") != "update_properties" or set(operation.get("properties") or {}) != {"color"}
+            or operation.get("target") != entity.get("entity_id")):
+        return value
+    markers = ("改成", "改为", "变成", "换成", "涂成", "染成", "to ", "into ")
+    marker = next((instruction.find(word) for word in markers if instruction.find(word) >= 0), -1)
+    if marker < 0:
+        return value
+    before = instruction[:marker]
+    after = instruction[marker:]
+    semantic = str(entity.get("semantic_name") or "").casefold()
+    names = {label.casefold() for item in catalog.models if item.name.casefold() == semantic
+             for label in (item.name, *item.aliases) if label}
+    if not names:
+        return value
+    source_colors = []
+    for _, end, color in _color_mentions(before):
+        for name in names:
+            noun = before.casefold().find(name)
+            if noun >= end and before[end:noun].strip() in {"", "的"}:
+                source_colors.append(color)
+                break
+    destination = next((color for _, _, color in _color_mentions(after)), None)
+    output_colors = _color_mentions(str(operation.get("properties", {}).get("color", "")))
+    if not source_colors or destination is None or not output_colors or destination != output_colors[0][2]:
+        return value
+    source_color = source_colors[0]
+    relations = edit.get("relations") or []
+    invalid = [rel for rel in relations if rel.get("subject") == entity.get("entity_id")
+               and rel.get("relation") == "near" and not rel.get("reference")]
+    if not invalid:
+        return value
+    updated_entity = {**entity, "color": source_color}
+    return {**value, "scene_edit": {**edit,
+            "entities": [updated_entity],
+            "relations": [rel for rel in relations if rel not in invalid]}}
+
+
+def _repair_live_color_add_clarification(value, instruction, catalog):
+    """Use a unique listed model and instance color for an explicit color add."""
+    if not isinstance(value, dict) or value.get("status") != "clarification_required":
+        return value
+    question = str(value.get("clarification_question") or "").casefold()
+    catalog_mismatch = (("目录" in question or "资产" in question or "catalog" in question)
+                        and ("没有" in question or "不存在" in question or "not available" in question
+                             or "not found" in question))
+    if not catalog_mismatch:
+        return value
+    if not any(word in instruction.casefold() for word in
+               ("生成", "创建", "添加", "增加", "放置", "摆放", "create", "add ", "place ")):
+        return value
+    mentions = _color_mentions(instruction)
+    if not mentions:
+        return value
+    folded = instruction.casefold()
+    matches = []
+    for item in catalog.models:
+        if not item.selectable_for_add:
+            continue
+        description = " ".join((item.name, *item.aliases)).casefold()
+        if ((item.category or "").casefold() in {"surface", "support_surface", "table"}
+                or any(term in description for term in ("table", "desktop", "work table", "桌面", "桌子", "台面"))):
+            continue
+        positions = [folded.find(label.casefold()) for label in (item.name, *item.aliases)
+                     if label and folded.find(label.casefold()) >= 0]
+        if positions and any(end <= min(positions) for _, end, _ in mentions):
+            matches.append(item)
+    unique = {item.asset_key: item for item in matches}
+    if len(unique) != 1:
+        return value
+    item = next(iter(unique.values()))
+    name_positions = [folded.find(label.casefold()) for label in (item.name, *item.aliases)
+                      if label and folded.find(label.casefold()) >= 0]
+    if not name_positions:
+        return value
+    noun_position = min(name_positions)
+    colors_before_noun = [color for _, end, color in mentions if end <= noun_position]
+    if not colors_before_noun:
+        return value
+    for other in catalog.models:
+        if other.asset_key == item.asset_key:
+            continue
+        mentioned = any(label and label.casefold() in folded for label in (other.name, *other.aliases))
+        is_surface = ((other.category or "").casefold() in {"surface", "support_surface", "table"}
+                      or "table" in other.name.casefold() or "desk" in other.name.casefold())
+        if mentioned and not is_surface:
+            return value
+    if any(term in folded for term in ("里面", "内部", "附近", "旁边", "左侧", "右侧", "左边", "右边",
+                                       "前面", "后面", "inside", "near", "beside", "left of", "right of")):
+        return value
+    if (re.search(r"(?:放在|摆在|置于|放到|摆到|置放于|在)\s*", folded)
+            and not any(term in folded for term in ("桌", "台面", "table", "desktop", "work table"))):
+        return value
+    color = colors_before_noun[-1]
+    entity_id = re.sub(r"\W+", "_", item.name.casefold()).strip("_") or "target"
+    edit = {"scene_basis": "current",
+            "entities": [{"entity_id": entity_id, "semantic_name": item.name,
+                          "category": item.category or "object", "count": 1,
+                          "quantity_mode": "single"}],
+            "relations": [],
+            "asset_choices": [{"entity_id": entity_id, "asset_key": item.asset_key}],
+            "operations": [{"operation": "add", "target": entity_id, "relation": "on",
+                            "reference": "table", "placement_hint": "any",
+                            "placement_region": None, "properties": {"color": color}}]}
+    return {**value, "status": "accepted", "turn_kind": "scene_edit",
+            "clarification_question": None, "scene_edit": edit, "scene_query": None,
+            "session_control": None, "robot_setup_request": None,
+            "robot_asset_switch": None, "robot_asset": None, "gripper_asset": None,
+            "camera_asset": None, "profile_id": None, "entities": [], "operations": [], "relations": []}
+
+
+def _catalog_match(text, catalog):
+    folded = text.casefold()
+    found = {}
+    for item in catalog.models:
+        if any(label and label.casefold() in folded for label in (item.name, *item.aliases)):
+            found[item.asset_key] = item
+    return list(found.values())
+
+
+def _parse_scene_quantity(token):
+    if token.isdigit():
+        return int(token)
+    digits = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3,
+              "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    if token == "十":
+        return 10
+    if "十" in token:
+        tens, _, ones = token.partition("十")
+        return (digits.get(tens, 1) * 10) + digits.get(ones, 0)
+    return digits.get(token)
+
+
+def _repair_live_scene_edit_quantity(value, instruction, catalog):
+    """Preserve explicit modification counts and all-objects wording."""
+    if (not isinstance(value, dict) or value.get("status") != "accepted"
+            or value.get("turn_kind") != "scene_edit" or not isinstance(value.get("scene_edit"), dict)
+            or catalog is None):
+        return value
+    edit = value["scene_edit"]
+    operations = edit.get("operations") or []
+    entities = [dict(entity) for entity in edit.get("entities") or [] if isinstance(entity, dict)]
+    if not operations or not entities:
+        return value
+    folded = instruction.casefold()
+    explicit_ids = re.search(r"(?:object_?id|instance_?id|(?<![a-z])ids?\s*(?:为|是|=|:|\d)|对象编号|实例编号)", folded)
+    stripped_ids = False
+    if not explicit_ids:
+        for entity in entities:
+            if entity.get("scene_object_ids"):
+                entity["scene_object_ids"] = []
+                stripped_ids = True
+    # Explicit instance lists carry IDs, not an arbitrary quantity request.
+    if re.search(r"(?:\bobject\s*_?id\b|\binstance\s*_?id\b|\bid\s*(?:为|是|=|:)|对象编号|实例编号)", folded):
+        return value
+    by_id = {entity.get("entity_id"): entity for entity in entities}
+    changed = stripped_ids
+    all_words = re.compile(r"(?:所有|全部|每个|\ball\b|\bevery\b)")
+    count_pattern = re.compile(
+        r"(\d+|[零〇一二两三四五六七八九十]+)\s*(?:个|只|件|颗|枚|支|台)?\s*$"
+    )
+    english_counts = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+                      "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
+    for operation in operations:
+        if not isinstance(operation, dict) or operation.get("operation") not in {
+                "remove", "replace", "update_properties", "update", "scale", "orient"}:
+            continue
+        entity = by_id.get(operation.get("target"))
+        if entity is None:
+            continue
+        if entity.get("quantity_mode") == "candidate_pool" and re.search(r"(?:中|among).*(?:那个|one)", folded) and any(
+                relation.get("subject") == entity.get("entity_id")
+                and relation.get("relation") in {
+                    "leftmost", "rightmost", "frontmost", "backmost", "highest", "lowest",
+                    "nearest", "farthest",
+                }
+                for relation in edit.get("relations") or [] if isinstance(relation, dict)):
+            entity["select_count_from_candidates"] = False
+            continue
+        semantic = str(entity.get("semantic_name") or "").casefold()
+        labels = {label.casefold() for item in catalog.models
+                  if item.name.casefold() == semantic
+                  or semantic in {alias.casefold() for alias in item.aliases}
+                  for label in (item.name, *item.aliases) if label}
+        mentions = [(folded.find(label), label) for label in labels if folded.find(label) >= 0]
+        if not mentions:
+            continue
+        # Use the closest noun mention to the operation's local wording.
+        positions = sorted({position for position, _ in mentions})
+        candidates = []
+        for position in positions:
+            nearby = folded[max(0, position - 24):position]
+            nearby = re.split(r"(?:,|，|;|；|然后|接着|再|\band\b|和)", nearby)[-1].strip()
+            if all_words.search(nearby):
+                if not re.search(r"(?:not|no|不是|并非)\s*(?:all|所有|全部)", nearby):
+                    candidates.append((position, None, True))
+                continue
+            quantity = count_pattern.search(nearby)
+            if quantity:
+                count = _parse_scene_quantity(quantity.group(1))
+                if count is not None:
+                    candidates.append((position, count, False))
+                    continue
+            english = re.search(r"\b(one|two|three|four|five|six|seven|eight|nine|ten)(?:\s+of\s+(?:the\b\s*)?)?\s*$", nearby)
+            if english:
+                candidates.append((position, english_counts[english.group(1)], False))
+        if not candidates:
+            if entity.get("select_count_from_candidates"):
+                entity["select_count_from_candidates"] = False
+                changed = True
+            if (entity.get("quantity_mode") == "all" and entity.get("count", 1) == 1
+                    and not entity.get("all_available")):
+                entity["quantity_mode"] = "single"
+                changed = True
+            continue
+        # A single entity may be repeated in a compound instruction. Require
+        # a consistent explicit quantity rather than guessing which clause wins.
+        quantities = {(count, all_available) for _, count, all_available in candidates}
+        if len(quantities) != 1:
+            continue
+        count, all_available = next(iter(quantities))
+        entity["quantity_mode"] = "all"
+        if all_available:
+            entity["count"] = 1
+            entity["all_available"] = True
+            entity["select_count_from_candidates"] = False
+        else:
+            entity["count"] = count
+            entity["all_available"] = False
+            entity["select_count_from_candidates"] = True
+            if count > 1:
+                selectors = {"最前面": "frontmost", "最前边": "frontmost", "最上面": "frontmost",
+                             "最后面": "backmost", "最左边": "leftmost", "最右边": "rightmost"}
+                prefix = folded[:positions[0]]
+                kinds = {kind for label, kind in selectors.items() if label in prefix}
+                if len(kinds) == 1:
+                    relations = list(edit.get("relations") or [])
+                    kind = next(iter(kinds))
+                    if not any(r.get("subject") == entity.get("entity_id") and r.get("relation") == kind for r in relations):
+                        relations.append({"scope": "selection", "subject": entity["entity_id"], "relation": kind})
+                    edit = {**edit, "relations": relations}
+        changed = True
+    return {**value, "scene_edit": {**edit, "entities": entities}} if changed else value
+
+
+def _repair_live_top_view_replace_clarification(value, instruction, catalog):
+    """Interpret unqualified tabletop 'topmost' as frontmost in the top view."""
+    if not isinstance(value, dict) or value.get("status") != "clarification_required":
+        return value
+    question = str(value.get("clarification_question") or "")
+    if not ("最上面" in instruction or "最上方" in instruction) or not ("Y" in question and "Z" in question):
+        return value
+    if any(token in instruction for token in ("最高", "高度", "Z轴", "z轴")):
+        return value
+    match = re.search(r"(?:换成|替换成|替换为|更换为)\s*([\w一-龥 -]+)", instruction)
+    if not match:
+        return value
+    source_text, replacement_text = instruction[:match.start()], match.group(1).strip(" ，,。.!！?？\t\n")
+    source = _catalog_match(source_text, catalog)
+    replacement = _catalog_match(replacement_text, catalog)
+    replacement = [item for item in replacement if item.selectable_for_add]
+    if len(source) != 1 or len(replacement) != 1:
+        return value
+    source_item, replacement_item = source[0], replacement[0]
+    source_id = re.sub(r"\W+", "_", source_item.name.casefold()).strip("_") or "source"
+    replacement_id = re.sub(r"\W+", "_", replacement_item.name.casefold()).strip("_") or "replacement"
+    edit = {"scene_basis": "current",
+            "entities": [{"entity_id": source_id, "semantic_name": source_item.name,
+                          "category": source_item.category or "object", "count": 1,
+                          "quantity_mode": "candidate_pool"},
+                         {"entity_id": replacement_id, "semantic_name": replacement_item.name,
+                          "category": replacement_item.category or "object", "count": 1,
+                          "quantity_mode": "single"}],
+            "relations": [{"scope": "selection", "subject": source_id,
+                           "relation": "frontmost", "reference": None}],
+            "asset_choices": [{"entity_id": replacement_id, "asset_key": replacement_item.asset_key}],
+            "operations": [{"operation": "replace", "target": source_id,
+                            "replacement_entity": replacement_id}]}
+    return {**value, "status": "accepted", "turn_kind": "scene_edit",
+            "clarification_question": None, "scene_edit": edit, "scene_query": None,
+            "session_control": None, "robot_setup_request": None,
+            "robot_asset_switch": None, "robot_asset": None, "gripper_asset": None,
+            "camera_asset": None, "profile_id": None, "entities": [], "operations": [], "relations": []}
+
+
+def _repair_live_posture_clarification(value, instruction, catalog):
+    """Recover only a simple, explicit supported target-posture request."""
+    if not isinstance(value, dict) or value.get("status") not in {"accepted", "clarification_required"}:
+        return value
+    match = re.fullmatch(r"\s*(?:把|将)?\s*(.+?)\s*(放平|放倒|平放|立起来|竖起来|竖放|立起)\s*[。！!]?\s*", instruction)
+    if not match or catalog is None:
+        return value
+    subject, word = match.groups()
+    items = _catalog_match(subject, catalog)
+    if len(items) != 1 or subject.strip() not in {items[0].name, *items[0].aliases}:
+        return value
+    item = items[0]
+    posture = "flat" if word in {"放平", "放倒", "平放"} else "upright"
+    if value.get("status") == "accepted":
+        edit = value.get("scene_edit")
+        if value.get("turn_kind") != "scene_edit" or not isinstance(edit, dict):
+            return value
+        operations = edit.get("operations") or []
+        entities = edit.get("entities") or []
+        if len(operations) != 1 or len(entities) != 1:
+            return value
+        operation, entity = operations[0], entities[0]
+        if (not isinstance(operation, dict) or not isinstance(entity, dict)
+                or operation.get("operation") != "orient" or operation.get("posture") is not None
+                or operation.get("target") != entity.get("entity_id")
+                or entity.get("semantic_name") != item.name):
+            return value
+        return {**value, "scene_edit": {**edit, "operations": [{**operation, "posture": posture}]}}
+    edit = {"scene_basis": "current", "entities": [{"entity_id": "target",
+            "semantic_name": item.name, "category": item.category or "object"}],
+            "relations": [], "asset_choices": [], "operations": [{"operation": "orient",
+            "target": "target", "posture": posture}]}
+    return {**value, "status": "accepted", "turn_kind": "scene_edit", "clarification_question": None,
+            "scene_edit": edit, "scene_query": None, "session_control": None,
+            "robot_setup_request": None, "robot_asset_switch": None,
+            "entities": [], "operations": [], "relations": []}
+
+
+def _repair_live_explicit_instance_delete(value, instruction, scene_context, catalog):
+    """Resolve an explicit scene-instance ID when Qwen asks what it means."""
+    if not isinstance(value, dict) or value.get("status") != "clarification_required":
+        return value
+    text = instruction.casefold()
+    if not re.search(r"\b(delete|remove)\b|删除|移除|删掉|去掉", text):
+        return value
+    if re.search(r"(?:不要|别|禁止)\s*(?:删除|移除|删掉|去掉)|\b(do not|don't)\s+(?:delete|remove)\b", text):
+        return value
+    id_list = r"((?:#?\d+)(?:\s*(?:[,，、和及]\s*|\s+)#?\d+)*)"
+    patterns = (
+        rf"(?:scene\s*object|object|instance)\s*_?\s*ids?\s*(?:are|为|是|=|:)?\s*{id_list}",
+        rf"(?:对象\s*id|实例\s*id|对象编号|实例编号)\s*(?:为|是|=|:)?\s*{id_list}",
+        rf"(?<![A-Za-z0-9_])id\s*(?:为|是|=|:)?\s*{id_list}",
+    )
+    id_groups = [match.group(1) for pattern in patterns for match in re.finditer(pattern, text)]
+    ids = list(dict.fromkeys(int(value) for group in id_groups
+                             for value in re.findall(r"\d+", group)))
+    if not ids or not isinstance(scene_context, dict):
+        return value
+    objects = scene_context.get("objects")
+    if not isinstance(objects, list):
+        return value
+    by_id = {item["object_id"]: item for item in objects if isinstance(item, dict)
+             and type(item.get("object_id")) is int}
+    if any(identifier not in by_id for identifier in ids):
+        return value
+    matches = [by_id[identifier] for identifier in ids]
+    semantics = {str(item.get("semantic_name") or "").strip().casefold() for item in matches}
+    categories = {str(item.get("category") or "").strip() for item in matches}
+    if len(semantics) != 1 or not next(iter(semantics)) or len(categories) != 1 or not next(iter(categories)):
+        return value
+    semantic_name = str(matches[0]["semantic_name"]).strip()
+    category = str(matches[0]["category"]).strip()
+    semantic_folded = semantic_name.casefold()
+    if catalog is not None:
+        named_assets = _catalog_match(instruction, catalog)
+        named = [item for item in named_assets
+                 if item.name.casefold() == semantic_folded
+                 or semantic_folded in {alias.casefold() for alias in item.aliases}]
+        extras = [item for item in named_assets if item not in named
+                  and (item.category or "").casefold() not in {"surface", "support_surface", "table"}]
+        if len(named) > 1 or extras:
+            return value
+        object_names = {str(item.get("object_name") or "").casefold() for item in matches}
+        if not named and semantic_folded not in text and not any(name and name in text for name in object_names):
+            return value
+    else:
+        object_names = {str(item.get("object_name") or "").casefold() for item in matches}
+        if semantic_folded not in text and not any(name and name in text for name in object_names):
+            return value
+    entity_id = re.sub(r"\W+", "_", semantic_name.casefold()).strip("_") or "target"
+    edit = {
+        "scene_basis": "current",
+        "entities": [{"entity_id": entity_id, "semantic_name": semantic_name,
+                      "category": category, "count": len(ids),
+                      "quantity_mode": "all" if len(ids) > 1 else "single",
+                      "scene_object_ids": ids}],
+        "asset_choices": [], "relations": [],
+        "operations": [{"operation": "remove", "target": entity_id}],
+    }
+    return {**value, "status": "accepted", "turn_kind": "scene_edit",
+            "clarification_question": None, "scene_edit": edit, "scene_query": None,
+            "session_control": None, "robot_setup_request": None,
+            "robot_asset_switch": None, "entities": [], "operations": [], "relations": []}
+
+
 class QwenHTTPProvider:
     """OpenAI-compatible Qwen adapter with strict Brain contracts."""
 
@@ -234,7 +641,18 @@ class QwenHTTPProvider:
                 value = _repair_explicit_replace(value, request.instruction)
                 value = _repair_explicit_selector_clarification(value, request.instruction)
             else:
-                value = _repair_live_replace_entity(value, request.instruction)
+                value = _repair_live_posture_clarification(value, request.instruction, request.asset_catalog)
+                value = _repair_live_replace_entity(value, request.instruction, request.asset_catalog)
+                value = _repair_live_scene_edit_quantity(value, request.instruction,
+                                                         request.asset_catalog)
+                value = _repair_live_top_view_replace_clarification(
+                    value, request.instruction, request.asset_catalog)
+                value = _repair_live_color_update_selector(value, request.instruction,
+                                                           request.asset_catalog)
+                value = _repair_live_color_add_clarification(value, request.instruction,
+                                                             request.asset_catalog)
+                value = _repair_live_explicit_instance_delete(
+                    value, request.instruction, request.scene_context, request.asset_catalog)
             turn = parse_qwen_turn(value, request.instruction)
             if request.asset_catalog is not None:
                 self._validate_live_asset_choices(value, request)
@@ -452,7 +870,7 @@ def _repair_explicit_replace(value: dict[str, Any], instruction: str) -> dict[st
     return {**value, "scene_edit": scene_edit}
 
 
-def _repair_live_replace_entity(value: dict[str, Any], instruction: str) -> dict[str, Any]:
+def _repair_live_replace_entity(value: dict[str, Any], instruction: str, catalog=None) -> dict[str, Any]:
     """Fill a missing ``replacement_entity`` for live turns when the entity already exists.
 
     Live turns must not invent new entities, but Qwen occasionally omits the
@@ -484,9 +902,14 @@ def _repair_live_replace_entity(value: dict[str, Any], instruction: str) -> dict
     raw_name = re.sub(r"^(一个|两个|三个|几个|这个|那个)\s*", "", raw_name)
     if not raw_name:
         return value
-    name_map = {"苹果": "apple", "香蕉": "banana", "篮子": "basket", "托盘": "tray",
-                "棒球": "baseball", "钢笔": "pen", "马克笔": "marker", "马克杯": "mug", "杯子": "mug"}
-    semantic_name = name_map.get(raw_name, raw_name)
+    catalog_matches = _catalog_match(raw_name, catalog) if catalog is not None else []
+    if len(catalog_matches) > 1:
+        return value
+    semantic_name = catalog_matches[0].name if catalog_matches else {
+        "苹果": "apple", "香蕉": "banana", "篮子": "basket", "托盘": "tray",
+        "棒球": "baseball", "钢笔": "pen", "马克笔": "marker", "马克杯": "mug", "杯子": "mug",
+        "魔方": "rubiks_cube", "rubiks cube": "rubiks_cube",
+    }.get(raw_name.casefold(), raw_name)
     for entity in entities:
         if isinstance(entity, dict):
             entity_id = entity.get("entity_id", "")
@@ -494,7 +917,22 @@ def _repair_live_replace_entity(value: dict[str, Any], instruction: str) -> dict
             if (entity_id == semantic_name or entity_id == raw_name or
                 entity_semantic == semantic_name.casefold() or entity_semantic == raw_name.casefold()):
                 replacement_id = entity.get("entity_id")
-                scene_edit = {**scene_edit,
+                choices = list(scene_edit.get("asset_choices") or [])
+                if catalog_matches:
+                    existing = {choice.get("entity_id") for choice in choices if isinstance(choice, dict)}
+                    if replacement_id not in existing:
+                        choices.append({"entity_id": replacement_id,
+                                        "asset_key": catalog_matches[0].asset_key})
+                required_entities = {
+                    item.get("target") for item in operations
+                    if isinstance(item, dict) and item.get("operation") == "add"
+                } | {
+                    item.get("replacement_entity") or replacement_id for item in operations
+                    if isinstance(item, dict) and item.get("operation") == "replace"
+                }
+                choices = [choice for choice in choices if isinstance(choice, dict)
+                           and choice.get("entity_id") in required_entities]
+                scene_edit = {**scene_edit, "asset_choices": choices,
                               "operations": [({**item, "replacement_entity": replacement_id}
                                                if isinstance(item, dict) and item.get("operation") == "replace" and not item.get("replacement_entity")
                                                else item) for item in operations]}

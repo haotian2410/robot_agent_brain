@@ -16,6 +16,7 @@ from .layout_geometry import SceneLayoutGeometryRegistry
 from .scene_manager import SceneManager
 from .spatial_facts import SpatialFactResolver
 from .transform_editor import translate, rotate
+from .posture import fit_support, posture_transform
 from .scale_policy import SceneScalePolicy
 from .colors import ColorResolver
 from ..grounding.scene_reference_resolver import SceneReferenceResolver
@@ -73,7 +74,7 @@ class SceneEditor:
                 if set(edit.properties) != {"color"}:
                     raise ValueError("scene_edit_property_unsupported: only color is supported")
                 ColorResolver.resolve(edit.properties["color"])
-            elif edit.properties:
+            elif edit.properties and not (edit.operation == "add" and set(edit.properties) == {"color"}):
                 raise ValueError("scene_edit_properties_unsupported: shared Scene has no arbitrary properties")
             current = preview.scene
             reference = None
@@ -98,13 +99,27 @@ class SceneEditor:
                 reference = references[0]
             entity = next(item for item in intent.entities if item.entity_id == edit.target)
             if edit.operation == "add":
+                if "color" in edit.properties:
+                    color = edit.properties["color"]
+                    resolved_color = ColorResolver.resolve(color)
+                    if entity.color is not None and ColorResolver.resolve(entity.color) != resolved_color:
+                        raise ValueError("scene_edit_color_conflict")
+                    entity = entity.model_copy(update={"color": color})
                 operations, add_assumptions = self._add(edit, entity, current, preview.next_scene_object_id, reference, defaults,
                                                         asset_key=asset_choices.get(entity.entity_id))
                 assumptions.extend(add_assumptions)
             else:
+                target_entity = next(item for item in intent.entities if item.entity_id == edit.target)
+                allow_partial = (
+                    edit.operation in {"remove", "replace", "update_properties", "update", "scale", "orient"}
+                    and target_entity.quantity_mode == "all"
+                    and target_entity.select_count_from_candidates
+                    and not target_entity.all_available
+                )
                 matches = ([SceneIndex(current).object(i) for i in selected_targets[edit.target]]
                            if edit.target in selected_targets else
-                           selector.resolve(edit.target, intent.entities, intent.relations, current, dialogue, bindings))
+                           selector.resolve(edit.target, intent.entities, intent.relations, current, dialogue, bindings,
+                                            allow_partial=allow_partial))
                 selected_targets[edit.target] = [obj.object_id_in_scene for obj in matches]
                 if edit.operation == "replace":
                     replacement = next(e for e in intent.entities if e.entity_id == edit.replacement_entity)
@@ -121,7 +136,7 @@ class SceneEditor:
             for identifier in affected:
                 index = SceneIndex(candidate)
                 obj = index.object(identifier)
-                if edit.operation in {"translate", "rotate", "move_relative", "update"}:
+                if edit.operation in {"translate", "rotate", "orient", "move_relative", "update"}:
                     self._validate_transform_bounds(identifier, current, candidate, defaults)
                 ignore = {reference.object_id_in_scene} if edit.relation == "inside" and reference is not None else set()
                 if self._overlaps(obj, candidate, ignore_ids=ignore):
@@ -293,8 +308,6 @@ class SceneEditor:
                 raise ValueError("scene_edit_workspace_exceeded")
 
     def _replace(self, matches, entity, scene, next_id, *, asset_key=None):
-        if len(matches) != entity.count or entity.all_available:
-            raise ValueError("scene_replace_cardinality_mismatch")
         model = AssetResolver(self.assets, aliases=self.aliases, category_aliases=self.category_aliases).resolve(
             entity, asset_key=asset_key).model
         if getattr(model, "asset_type", None) == "robot":
@@ -328,9 +341,9 @@ class SceneEditor:
             bounds = world_bounds(model, world)
             if support_id is not None:
                 support = index.object(support_id)
-                top = world_bounds(facts.asset(support, scene), world_transform(scene, support_id))[1][2]
-                moved = WorldTransform((world.position[0], world.position[1], world.position[2] + top - bounds[0][2]), world.linear)
-                transform.properties["position"] = list(local_from_world(candidate, identifier, moved).position)
+                fitted = fit_support(model, world_transform(candidate, identifier),
+                                     facts.asset(support, scene), world_transform(scene, support_id))
+                transform.properties.update(local_from_world(candidate, identifier, fitted).model_dump(mode="json"))
                 if not facts.footprint_contains(obj, support, candidate) or facts.infer_support(obj, candidate) != support_id:
                     raise ValueError("scene_replace_support_footprint_invalid")
                 defaults = self.scale_defaults
@@ -378,6 +391,45 @@ class SceneEditor:
                 moved = translate(world, edit.direction, distance, edit.coordinate_frame)
             elif edit.operation == "rotate":
                 moved = rotate(world, edit.axis, edit.angle_deg, edit.coordinate_frame)
+            elif edit.operation == "orient":
+                index = SceneIndex(scene)
+                if index.robot_driver(identifier) or index.component(identifier, "RobotAttachment"):
+                    raise ValueError("scene_edit_posture_robot_unsupported")
+                for other in scene.objects:
+                    other_id = other.object_id_in_scene
+                    if other_id == identifier:
+                        continue
+                    other_semantic = index.semantic(other_id)
+                    if (index.transform(other_id).parent == identifier
+                            or other_semantic and other_semantic.support == identifier):
+                        raise ValueError("scene_edit_posture_dependent_object_unsupported")
+                semantic = index.semantic(identifier)
+                if semantic is None or semantic.support is None:
+                    raise ValueError("scene_edit_support_unknown")
+                support = index.object(semantic.support)
+                if not facts.is_surface(support, scene) or facts.infer_support(obj, scene) != semantic.support:
+                    raise ValueError("scene_edit_support_invalid")
+                model = facts.asset(obj, scene)
+                pose = posture_transform(model, world, edit.posture)
+                fitted_any = False
+                for yaw in (0, 90, 180, 270):
+                    try:
+                        moved = fit_support(model, rotate(pose, "z", yaw),
+                                            facts.asset(support, scene), world_transform(scene, semantic.support))
+                    except ValueError as exc:
+                        if str(exc) == "scene_edit_support_footprint_exceeded":
+                            continue
+                        raise
+                    fitted_any = True
+                    trial = scene.model_copy(deep=True)
+                    trial_obj = SceneIndex(trial).object(identifier)
+                    SceneIndex(trial).component(identifier, "Transform").properties.update(
+                        local_from_world(scene, identifier, moved).model_dump(mode="json"))
+                    if not self._overlaps(trial_obj, trial):
+                        break
+                else:
+                    raise ValueError("scene_edit_transform_collision" if fitted_any
+                                     else "scene_edit_support_footprint_exceeded")
             elif edit.operation in {"move_relative", "update"} and reference is not None:
                 moved = self._choose_relative_transform(edit, obj, reference, scene, world)
             else:

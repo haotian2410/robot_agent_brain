@@ -61,7 +61,7 @@ def task_understanding_v3_wire_schema():
     if edit is not None:
         _require_schema_fields(edit, "asset_choices", "relation", "reference", "direction", "distance_m",
                                "motion_scale", "coordinate_frame", "axis", "angle_deg",
-                               "placement_hint", "placement_region")
+                               "placement_hint", "placement_region", "posture")
     return schema
 
 
@@ -677,10 +677,11 @@ def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str)
             operations.append(raw)
             continue
         item = dict(raw)
-        # A model may already have attached a region to this operation.  It is
-        # authoritative.  Never overwrite it with the first region found in
-        # the natural-language sentence.
-        if item.get("placement_region") is not None:
+        # Explicit single-clause tabletop wording takes precedence over a
+        # contradictory provider region. Multi-clause plans stay untouched.
+        if item.get("placement_region") is not None and not (
+            operation_count == 1 and has_table and region is not None
+        ):
             operations.append(raw)
             continue
         # With multiple add clauses there is no safe positional correspondence
