@@ -4,6 +4,6 @@
   "杯子":"mug", "马克杯":"mug", "cup":"mug", "coffee_cup":"mug", "coffee cup":"mug", "mug":"mug", "螺丝刀":"screwdriver", "魔方":"rubiks_cube", "rubikscube":"rubiks_cube",
   "糖盒":"sugar_box", "sugarbox":"sugar_box", "托盘":"tray", "马克笔":"marker", "笔":"pen", "钢笔":"pen", "fountain pen":"pen", "fountain_pen":"pen",
   "试管":"test_tube", "试管架":"test_tube_rack", "铃铛":"school_bell", "茶几":"coffee_table",
-  "微波炉":"microwave", "瓶子":"bottle", "按钮":"button", "罐子":"can", "玩偶":"doll",
+  "微波炉":"microwave", "瓶子":"bottle", "水瓶":"bottle", "按钮":"button", "罐子":"can", "玩偶":"toy_panda", "熊猫":"toy_panda",
   "胶瓶":"gum_bottle", "护肤霜":"cream"
 }

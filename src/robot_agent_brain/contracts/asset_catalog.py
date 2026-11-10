@@ -19,6 +19,7 @@ class CatalogAsset(BaseModel):
     asset_key: str = Field(pattern=r"^(model|robot):[0-9]+$")
     name: str = Field(min_length=1)
     display_name: str | None = None
+    display_name_chinese: str | None = None
     aliases: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
     category: str | None = None
@@ -28,6 +29,7 @@ class CatalogAsset(BaseModel):
     availability_reason: str | None = None
     scalable: bool | None = None
     scale_range: tuple[float, float] | None = None
+    can_place: bool = True
 
 
 class CatalogScene(BaseModel):

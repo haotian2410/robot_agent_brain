@@ -87,6 +87,7 @@ class BrainApplication:
                                                           (self.defaults.workspace_min[1] + self.defaults.workspace_max[1]) / 2),
                                       placement_policy_version="grid-v2",
                                       motion_policy_version="motion-v1",
+                                      scene_reference_catalog=scene_reference_catalog,
                                       catalog_for_provider=getattr(provider, "live_catalog", True))
         bootstrap = self.config.bootstrap_settings()
         self.bootstrapper = SceneBootstrapper(self.assets, self.defaults, robot=self.config.robot, seed=self.config.seed,

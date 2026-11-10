@@ -4,6 +4,7 @@ import json
 from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .task_intent import Direction
+from .spatial import PlacementTargetKind, TabletopRegion
 from .scene import SceneId
 from .skill_plan import SkillName
 
@@ -110,9 +111,12 @@ class Command(BaseModel):
 class CommandPlacementTarget(BaseModel):
     """Concrete Control target; never reuse semantic Task PlacementTarget."""
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["container_interior", "support_surface", "relative_object", "free_space"]
+    kind: PlacementTargetKind
     reference: SceneId | None = None
     relation: str | None = None
+    # Carried from the semantic request; the robot path does not compute a
+    # collision-free landing point for it.
+    region: TabletopRegion | None = None
 
     @model_validator(mode="after")
     def validate_semantics(self):

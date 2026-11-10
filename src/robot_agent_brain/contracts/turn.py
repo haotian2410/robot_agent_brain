@@ -3,7 +3,7 @@ from enum import StrEnum
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from .task_intent import TaskIntent, TaskEntity, Direction, MotionScale
-from .spatial import SpatialRelation
+from .spatial import PlacementHint, SpatialRelation, TabletopRegion
 from .robot_setup import RobotSetupRequest, RobotAssetSwitchRequest
 from ..semantics.scene_references import CanonicalReference
 
@@ -71,12 +71,8 @@ class SceneEditIntent(BaseModel):
     scale_direction: Literal["enlarge", "shrink"] | None = None
     scale_amount: Literal["small", "medium", "large"] | None = None
     # Placement controls are deliberately separate from generic properties.
-    # ``center`` is a hard constraint; ``any`` permits deterministic grid search.
-    placement_hint: Literal["center", "any"] | None = None
-    placement_region: Literal[
-        "left_half", "right_half", "front_half", "back_half",
-        "left_front", "right_front", "left_back", "right_back",
-    ] | None = None
+    placement_hint: PlacementHint | None = None
+    placement_region: TabletopRegion | None = None
     target: str = Field(min_length=1)
     placement_goal: PlacementGoal | None = None
     relation: SceneLayoutRelation | None = None

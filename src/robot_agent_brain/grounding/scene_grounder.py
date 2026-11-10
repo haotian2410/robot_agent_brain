@@ -13,16 +13,21 @@ class GroundingAmbiguous(ValueError):
         super().__init__(f"grounding_ambiguous: entity={entity.entity_id} candidates={[o.object_id_in_scene for o in candidates]}")
 
 class SceneGrounder:
-    def __init__(self, relation_resolver=None, *, aliases=None, category_aliases=None, assets=None):
+    def __init__(self, relation_resolver=None, *, aliases=None, category_aliases=None, assets=None,
+                 scene_reference_catalog=None, table_metadata_ref=None):
         self.assets = assets
         self.relations = relation_resolver or SceneRelationResolver()
         self.aliases = aliases or {}
         self.category_aliases = category_aliases or {}
+        self.scene_reference_catalog = scene_reference_catalog
+        self.table_metadata_ref = table_metadata_ref
 
     discover_candidates = staticmethod(discover_candidates)
 
     def ground(self, intent: TaskIntent, scene: SceneConfig, bindings_override=None, *, resolved_relations=None) -> GroundedTask:
-        selector = SemanticEntitySelector(self.relations, aliases=self.aliases, category_aliases=self.category_aliases, assets=self.assets)
+        selector = SemanticEntitySelector(self.relations, aliases=self.aliases, category_aliases=self.category_aliases,
+                                         assets=self.assets, scene_reference_catalog=self.scene_reference_catalog,
+                                         table_metadata_ref=self.table_metadata_ref)
         def bind(entity_id):
             entity = next(e for e in intent.entities if e.entity_id == entity_id)
             candidates = selector.select(entity_id, intent.entities, intent.spatial_relations, scene,
@@ -40,18 +45,37 @@ class SceneGrounder:
             return candidates
         entities = []
         index = SceneIndex(scene)
-        for entity in intent.entities:
-            members = bind(entity.entity_id)
+        def grounded(entity_id, members, category_only=False):
             primary = members[0].object_id_in_scene
             semantic = index.semantic(primary)
-            entities.append(GroundedEntity(
-                entity_id=entity.entity_id, semantic_name=semantic.semantic_name,
+            return GroundedEntity(
+                entity_id=entity_id, semantic_name=semantic.semantic_name,
                 scene_object_id=primary,
                 scene_object_ids=[o.object_id_in_scene for o in members],
                 metadata_ref=index.metadata_ref(primary), metadata_type=index.metadata_type(primary), category=semantic.category,
-                category_only=entity.category_only,
+                category_only=category_only,
                 model_scale=world_transform(scene, primary).scale,
-            ))
+            )
+        for entity in intent.entities:
+            entities.append(grounded(entity.entity_id, bind(entity.entity_id), entity.category_only))
+        # An operation role may name an environment reference the contract accepts without a
+        # declared entity, and TaskExpander indexes every role, so those references bind here too.
+        declared = {entity.entity_id for entity in intent.entities}
+        referenced = set()
+        for operation in intent.operations:
+            referenced.update(value for value in (operation.source, operation.target, operation.destination,
+                                                   operation.reference) if value)
+            if operation.placement_target is not None and operation.placement_target.reference:
+                referenced.add(operation.placement_target.reference)
+        for relation in intent.spatial_relations:
+            if relation.reference:
+                referenced.add(relation.reference)
+        for identifier in sorted(referenced - declared):
+            members = selector.select(identifier, intent.entities, intent.spatial_relations, scene,
+                                      bindings_override=bindings_override, resolved_relations=resolved_relations)
+            if len(members) != 1:
+                raise ValueError("scene_reference_unresolved: " + identifier)
+            entities.append(grounded(identifier, members))
         return GroundedTask(instruction=intent.instruction, entities=entities,
                             hold_constraints=intent.hold_constraints,
                             operations=intent.operations, spatial_relations=intent.spatial_relations,

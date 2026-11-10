@@ -64,7 +64,9 @@ class SceneObjectSelector:
         dialogue_intent = intent.model_copy(update={"entities": [e for e in intent.entities if e.entity_id not in local]})
         overrides = dialogue.bindings(dialogue_intent, scene) if dialogue else {}
         overrides.update(local)
-        task = SceneGrounder(aliases=self.aliases, category_aliases=self.category_aliases, assets=self.assets).ground(
+        task = SceneGrounder(aliases=self.aliases, category_aliases=self.category_aliases, assets=self.assets,
+                             scene_reference_catalog=self.reference_resolver.catalog,
+                             table_metadata_ref=self.reference_resolver.table_metadata_ref).ground(
             intent, scene, overrides, resolved_relations=external_relations)
         ids = next(e.scene_object_ids for e in task.entities if e.entity_id == target)
         by_id = {obj.object_id_in_scene: obj for obj in scene.objects}

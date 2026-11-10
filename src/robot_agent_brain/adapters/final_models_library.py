@@ -78,6 +78,11 @@ class FinalModelsLibraryAdapter:
                 passive_mechanism = kind == "model" and "robot_driver" in data
                 if passive_mechanism:
                     self._passive_mechanism_keys.add(key)
+                display_name_chinese = semantic.get("object_name_Chinese")
+                can_place = semantic.get("can_place", True)
+                placement_quat_raw = data.get("geometric_properties", {}).get("placement_quaternion_xyzw")
+                placement_quaternion_xyzw = tuple(placement_quat_raw) if placement_quat_raw else None
+                no_display = index.get("no_display", {}).get(str(identifier), False)
                 view = BrainAssetView(
                     **geometry.model_dump(), library_asset_id=identifier,
                     metadata_ref=f"{self.prefix}{identifier}", semantic_name=name,
@@ -88,6 +93,10 @@ class FinalModelsLibraryAdapter:
                               or index_categories.get(str(identifier))),
                     physical_properties=data.get("physical_properties", {}),
                     grasp_properties=data.get("grasp_properties", {}),
+                    display_name_chinese=display_name_chinese,
+                    can_place=can_place,
+                    placement_quaternion_xyzw=placement_quaternion_xyzw,
+                    no_display=no_display,
                 )
                 self._assets[key] = view
 
@@ -197,6 +206,23 @@ class FinalModelsLibraryAdapter:
         return [view.model_copy(deep=True) for view in self._assets.values()
                 if view.asset_type == asset_type and value in view.tags]
 
+    def find_by_tag_overlap(self, entity_tags):
+        """Return all models scored by tag overlap, descending.
+
+        Each result is a (view, overlap_count) tuple.  Only models with
+        overlap > 0 are returned.  no_display assets are excluded.
+        """
+        from ..scene.asset_features import tag_overlap_score
+        scored = []
+        for view in self._assets.values():
+            if view.no_display or view.asset_type != "model":
+                continue
+            score = tag_overlap_score(view, entity_tags)
+            if score > 0:
+                scored.append((view.model_copy(deep=True), score))
+        scored.sort(key=lambda pair: pair[1], reverse=True)
+        return scored
+
     def configuration_payload(self):
         return {"library_ref_prefix": self.prefix, "assets": [
             view.model_dump(mode="json", exclude={"metadata_path", "physical_properties", "grasp_properties"})
@@ -214,21 +240,24 @@ class FinalModelsLibraryAdapter:
         alias_map = {str(k).casefold(): str(v).casefold()
                      for k, v in (configured_aliases or {}).items()}
         models, robots = [], []
-        canonical_names = {view.semantic_name.casefold() for view in self._assets.values()}
-        for view in sorted(self._assets.values(), key=lambda item: (item.asset_type, item.library_asset_id)):
+        visible_assets = [view for view in self._assets.values() if not view.no_display]
+        canonical_names = {view.semantic_name.casefold() for view in visible_assets}
+        for view in sorted(visible_assets, key=lambda item: (item.asset_type, item.library_asset_id)):
             aliases_for_name = tuple(sorted({key for key, value in alias_map.items()
                                                if value == view.semantic_name.casefold()
                                                and key not in canonical_names}))
             passive_mechanism = f"{view.asset_type}:{view.library_asset_id}" in self._passive_mechanism_keys
             item = CatalogAsset(
                 asset_key=f"{view.asset_type}:{view.library_asset_id}", name=view.semantic_name,
-                display_name=view.semantic_name, aliases=aliases_for_name,
+                display_name=view.semantic_name, display_name_chinese=view.display_name_chinese,
+                aliases=aliases_for_name,
                 tags=tuple(view.tags), category=view.category, asset_type=view.asset_type,
                 metadata_ref=view.metadata_ref,
                 selectable_for_add=(view.asset_type == "model"),
                 availability_reason=("passive_scene_model" if passive_mechanism
                                      else (None if view.asset_type == "model" else "robot_platform_only")),
-                scalable=view.scalable, scale_range=view.scale_range)
+                scalable=view.scalable, scale_range=view.scale_range,
+                can_place=view.can_place)
             (models if view.asset_type == "model" else robots).append(item)
         return AssetCatalogSnapshot.from_items(models, robots, scenes=self._scenes,
                                                registered_profiles=registered_profiles or ())

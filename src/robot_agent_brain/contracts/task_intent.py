@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from .spatial import SpatialRelation
+from .spatial import (PLACEMENT_TARGET_KINDS, SpatialRelation, TabletopRegion)
 from .scene import SceneId
 
 
@@ -45,9 +45,12 @@ class QuantityMode(StrEnum):
 
 
 class PlacementTarget(StrictModel):
-    kind: str = Field(pattern=r"^(container_interior|support_surface|relative_object|free_space)$")
+    kind: str = Field(pattern=r"^(" + "|".join(PLACEMENT_TARGET_KINDS) + r")$")
     reference: str | None = None
     relation: str | None = None
+    # A robot placement records the requested tabletop region; unlike the
+    # editor it does not compute or guarantee a collision-free landing point.
+    region: TabletopRegion | None = None
 
     @model_validator(mode="after")
     def validate_semantics(self):
@@ -62,7 +65,7 @@ class PlacementTarget(StrictModel):
 
 class TaskEntity(StrictModel):
     entity_id: str = Field(pattern=r"^[\w-]+$")
-    semantic_name: str = Field(min_length=1)
+    semantic_name: str = Field(default="")
     category: str = Field(min_length=1)
     color: str | None = None
     tags: list[str] = Field(default_factory=list)

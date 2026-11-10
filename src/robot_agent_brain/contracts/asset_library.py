@@ -66,6 +66,10 @@ class BrainAssetView(AssetGeometry):
     scale_range: tuple[float, float] | None = None
     physical_properties: dict = Field(default_factory=dict)
     grasp_properties: dict = Field(default_factory=dict)
+    display_name_chinese: str | None = None
+    can_place: bool = True
+    placement_quaternion_xyzw: tuple[float, float, float, float] | None = None
+    no_display: bool = False
 
     @model_validator(mode="after")
     def valid_scale_range(self):

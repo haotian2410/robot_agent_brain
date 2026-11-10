@@ -41,6 +41,9 @@ def test_unregistered_pour_cannot_be_disguised_as_grasp_by_model():
 
 
 def test_explicit_scene_placement_is_not_downgraded_by_interaction_word():
+    # Routing separates the two domains by whether a new object is created,
+    # not by the verb: this sentence introduces an apple, so the model's
+    # scene_edit choice stands even though 放置 is an interaction verb.
     text = "在桌面上放置一个苹果"
     turn = BrainTurn(status="accepted", turn_kind="scene_edit", instruction=text,
         scene_edit={"entities": [

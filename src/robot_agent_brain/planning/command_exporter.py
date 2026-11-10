@@ -79,7 +79,8 @@ class CommandExporter:
                 raise ValueError("command_export_placement_binding_invalid")
             reference = reference_values[0]
         return CommandPlacementTarget(
-            kind=placement.kind, reference=reference, relation=placement.relation)
+            kind=placement.kind, reference=reference, relation=placement.relation,
+            region=placement.region)
 
     @staticmethod
     def _semantic_intent(operation, bindings):

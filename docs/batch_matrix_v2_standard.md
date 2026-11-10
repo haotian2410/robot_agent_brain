@@ -31,6 +31,10 @@ Brain 首轮任务理解会把当前 OLS 的规范资产名、标签、类别和
 
 本期场景编辑统一在桌面或桌面容器中解释：右为世界 `+X`，前为 `+Y`，竖直上为 `+Z`。`桌子左侧`、`桌面左侧`、`左上角`都表示桌面区域，不再询问桌外地面。仍需澄清不存在/不唯一的参照物、缺少容器内部几何、无合法网格位置和明确机器人执行请求。
 
+同一组区域词、相对位置和极值表达也适用于机器人任务和查询：路由只由“动作由谁完成、句中是否
+诞生新物体”决定，方位词不参与路由判定。区别只在字段——场景编辑写 `placement_region`，
+机器人任务写 `placement_target.region`（本期仅记录请求，不保证落点几何），三者共用同一份取值表。
+
 ## `matrix` 列
 
 基础列：`enabled`、`test_id`、`flow_id`、`parent_test_id`、`parent_flow_id`、`difficulty`、`stage`、`round_index`、`category`、`sample_count`、`branch_policy`、`notes`。

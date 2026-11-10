@@ -22,28 +22,58 @@ def discover_candidates(entity, scene: SceneConfig, category_aliases=None, *, al
                  if category(index.semantic(obj.object_id_in_scene).category) == category(entity.category)]
     def features(candidates):
         from ..scene.colors import ColorEvidenceResolver, PALETTE, color_name
-        from ..scene.asset_features import matches_features
+        from ..scene.asset_features import tag_overlap_score
         colors = ([entity.color] if entity.color else []) + [tag for tag in entity.tags if color_name(tag) in PALETTE]
         other_tags = [tag for tag in entity.tags if color_name(tag) not in PALETTE]
         evidence = ColorEvidenceResolver(assets)
-        result = []
+        kept = []
         for obj in candidates:
             # Evaluate all relevant candidates so unknown evidence isn't counted as false.
             color_matches = [evidence.matches(value, obj, index) for value in colors]
-            tag_match = True
+            if not all(color_matches):
+                continue
+            score = 0
             if other_tags:
                 if assets is None or index.metadata_ref(obj.object_id_in_scene) is None:
                     raise ValueError("grounding_evidence_missing: tags")
                 kind = index.metadata_type(obj.object_id_in_scene)
                 ref = index.metadata_ref(obj.object_id_in_scene)
                 asset = assets.resolve(ref, kind) if kind else assets.resolve(ref)
-                tag_match = matches_features(asset, entity.model_copy(update={"color": None, "tags": other_tags}))
-            if all(color_matches) and tag_match:
-                result.append(obj)
-        return result
+                score = tag_overlap_score(asset, other_tags)
+                if score == 0:
+                    continue
+            kept.append((obj, score))
+        if not kept:
+            return []
+        # A synonym tag such as "杯子" is shared by every mug, so overlap alone
+        # cannot separate them. Only the distinguishing tags raise one asset
+        # above the rest; keeping the best score avoids a false ambiguity.
+        best = max(score for _, score in kept)
+        return [obj for obj, score in kept if score == best]
     if entity.category_only:
         return features(available)
     name = canonicalize_name(entity.semantic_name)
+
+    # Tag-based matching path: when semantic_name is empty but tags are present
+    if not name and entity.tags and assets is not None:
+        from ..scene.asset_features import tag_overlap_score
+        scored = []
+        for obj in available:
+            ref = index.metadata_ref(obj.object_id_in_scene)
+            if ref is None:
+                continue
+            kind = index.metadata_type(obj.object_id_in_scene)
+            try:
+                asset = assets.resolve(ref, kind) if kind else assets.resolve(ref)
+                score = tag_overlap_score(asset, entity.tags)
+                if score > 0:
+                    scored.append((obj, score))
+            except (ValueError, AttributeError):
+                continue
+        if scored:
+            max_score = max(s for _, s in scored)
+            return [obj for obj, s in scored if s == max_score]
+
     # Scene v1 assets may use a broad protocol category such as ``object``
     # while the task parser uses a useful lexical category such as ``fruit``.
     # An explicit semantic name is stronger evidence than that optional hint;

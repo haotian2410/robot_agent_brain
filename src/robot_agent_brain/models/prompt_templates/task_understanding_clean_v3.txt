@@ -76,32 +76,40 @@
 
 ## 2. Turn 路由
 
-### `scene_edit`
-
-用户要求直接改变场景状态，但没有要求机器人抓取、拿起、释放、按压、开关或使用机械臂时，使用 `scene_edit`。
-
-场景编辑统一假定对象位于桌面或桌面上的容器中。桌子左/右、桌面左/右、左上角、右下角等都解释为桌面区域，不询问桌外地面。
-
-包括：
-
-- 增加、删除、替换物体；
-- 直接移动、相对移动、旋转物体；
-- 缩放和改色；
-- “直接修改场景”或“场景中增加/移动/删除”。
+路由只有一条判据：**这句话要求的动作由谁完成**。方位词、区域词、极值词、参照物
+一律不参与路由判定，它们只决定字段怎么填（见第 7 节）。
 
 ### `robot_task`
 
-只有用户明确要求机器人/机械臂作为行为主体执行动作时，才使用
-`robot_task`。抓取、拿起、释放、按压、推拉、打开/关闭等词在明确指向
-机器人执行时属于此路由；单独出现“放、放置、移动”不能决定路由。
+用户要求机器人/机械臂搬运或操作一个**已经存在的物体**时使用 `robot_task`：
+
+- 用户明确要求机器人/机械臂/左臂/右臂执行；
+- 或对已有物体使用搬运动词：放进、放入、放到、放置、放下、拿走、取走、拿起、搬到；
+- 或执行抓取、释放、按压、推拉、打开/关闭等动作。
+
+### `scene_edit`
+
+用户要求直接改变场景状态、不要求机器人执行时使用 `scene_edit`：
+
+- 增加、添加、生成、删除、替换、改色、缩放、旋转物体；
+- 用“移动、移到、挪”直接改写已有物体的位置；
+- “直接修改场景”“场景中增加/移动/删除”。
+
+场景编辑统一假定对象位于桌面或桌面上的容器中。桌子左/右、桌面左/右、左上角、右下角等都解释为桌面区域，不询问桌外地面。
+
+区分搬运与陈设，看句子里是否**诞生一个新物体**：新物体（不定指的“一个苹果”“一只篮子”）
+一律是 `scene_edit`，即使动词是放置/放到；只有物体本来就在场景里、只改变它的位置时才是
+`robot_task`。
 
 例如：
 
-- “把苹果放进篮子”是 `robot_task`（对已有物体提出机器人搬运目标）；
+- “把苹果放进篮子”是 `robot_task`（苹果已存在，由机器人搬运）；
+- “把杯子放到桌子左下角”是 `robot_task`（左下角只是落点，不改变路由）；
+- “把苹果放到香蕉右边”是 `robot_task`；
 - “让机械臂把苹果移到香蕉右边”是 `robot_task`；
 - “在篮子里增加一个苹果”是 `scene_edit`（直接改变场景陈设）；
-- “在桌面上放置一个篮子还有苹果和香蕉”是 `scene_edit`；
-- “把苹果移到香蕉右边”是 `scene_edit`（直接修改场景位置）。
+- “在桌面上放置一个苹果”“在桌面上生成一个篮子还有苹果和香蕉”是 `scene_edit`（新物体诞生）；
+- “把苹果移到香蕉右边”是 `scene_edit`（用户没有要求机器人执行，只要求场景状态改变）。
 
 如果同一句同时要求创建/修改场景和机器人执行（例如“增加香蕉然后让机械臂
 把它放进盒子”），或无法确定行为主体，返回 `clarification_required`，不得
@@ -112,7 +120,7 @@
 用户只是在查询当前或原始场景，不改变场景，也不生成机器人动作。
 
 确定性路由规则：包含“有没有”“是否存在”“是否有”“有几个”“多少个”“哪些”或“查询”
-时，优先输出 `scene_query`；包含“增加”“添加”“生成”“放置”“移动”“删除”“改成”等
+时，优先输出 `scene_query`；包含“增加”“添加”“生成”“移动”“删除”“改成”等
 明确编辑动词时才输出 `scene_edit`。同一句同时包含查询和编辑动词时返回
 `clarification_required`，不要把查询改写成新增对象。
 
@@ -156,12 +164,17 @@ Python 返回 `capability_unsupported`，不能生成 UR5e 假 Commands。多个
   "entity_id": "apple",
   "semantic_name": "apple",
   "category": "fruit",
+  "tags": ["苹果"],
   "count": 1,
   "quantity_mode": "single"
 }
 ```
 
 内部优先使用 `entity_id`、`semantic_name`。不要使用随机 UUID、资产 object ID 或资产文件名；已有场景对象的实例编号仅按上文显式编号规则填写 `scene_object_ids`。
+
+**标签 (tags) 是物体匹配的主要信号**。`tags` **只从用户指令本身的用词提取**：用户说出的物体名、类别、材质、形状等描述词。系统会用你的 tags 与 OLS 资产目录中每个资产的 tags 计算重叠数量，重叠最多的资产被选中。`semantic_name` 仅用于前端展示，不参与匹配。
+
+示例：用户说"把苹果放到桌上" → `tags: ["苹果"]`；用户说"增加一个杯子" → `tags: ["杯子"]`；用户说"红色马克杯" → `tags: ["马克杯"]` 并把颜色写进 `color`。**不要**为了命中某个资产而补上用户没有说过的标签，也**不要**把目录里某个资产的完整 `tags=` 列表照抄进 `tags`：目录中的 tags 是系统匹配用的参照数据，不是输出模板。用户词与目录标签构成同义关系时（如"杯子"与"马克杯"），保留用户的原词即可，资产目录侧已经带上同义词。
 
 实体 ID 必须简短、稳定、snake_case。没有用户明确区分时，同类数量优先使用一个实体加 `count`：
 
@@ -185,7 +198,7 @@ Python 返回 `capability_unsupported`，不能生成 UR5e 假 Commands。多个
 - “所有苹果”：`all_available=true`、`quantity_mode="all"`；
 - “删除/替换/改色三个苹果”表示从匹配对象中精确选三个；未指定位置时可选任意三个，不得因候选更多而澄清。此时使用 `count=3`、`quantity_mode="all"`、`select_count_from_candidates=true`、`all_available=false`；Python 先按选择关系和颜色/标签筛选，再按 object_id 升序确定稳定子集。普通未说明数量的单数目标使用 `quantity_mode="single"`、`select_count_from_candidates=false`，候选不唯一时必须澄清。
 - “其中两个”“其中 N 个”同样表示精确数量的子集，使用 `quantity_mode="all"`、`count=N`、`select_count_from_candidates=true`、`all_available=false`；除非同时说“所有”，不得设置 `all_available=true`。若 N=1 但明确表示从多个候选中任取一个，也设置 `select_count_from_candidates=true`，不可误作未限定的普通单数目标。
-- `leftmost/rightmost/frontmost/backmost/highest/lowest` 选择条件适用于删除、替换、改色、缩放和平移；不得因为多个候选而澄清。桌面顶视语境中的“最上面/最靠上”按 `frontmost`（Y 最大）解释；“最高/高度最高”才是 `highest`（Z 最大）。
+- `leftmost/rightmost/frontmost/backmost/highest/lowest` 选择条件适用于删除、替换、改色、缩放、平移，也适用于机器人搬运和查询；它们一律写进 `relations`（`scope=selection`），不得因为多个候选而澄清。桌面顶视语境中的“最上面/最靠上”按 `frontmost`（Y 最大）解释；“最高/高度最高”才是 `highest`（Z 最大）。
 - 已有场景中，只有用户明确说出实例 `id`/对象编号时，才可把该编号写入 `scene_object_ids`；编号必须来自请求中的 `scene_context.objects`，且与名称/颜色等筛选条件共同生效。不得猜测或自行生成实例编号。
 - `replace` 必须声明 `replacement_entity`，并为该实体从目录给出一个 `asset_choices`。替换数量由被选中的源对象数量决定，与 replacement 实体自身 count 无关。
 - 不得把用户明确的 count 改成 1。
@@ -267,6 +280,9 @@ table、desk、desktop、桌子、桌面、台面
 
 它们在 Python 中会被解析为 `scene_ref` 或 `anchor`，不是本次任务自动创建的实体。
 
+同一组环境引用也用于机器人落点：`placement_target.reference`、`operations[].reference`
+和 `relations[].reference` 都可以写 `table`，不需要把它声明成实体，Python 会绑定真实主桌面。
+
 当用户说：
 
 ```text
@@ -286,14 +302,6 @@ table、desk、desktop、桌子、桌面、台面
 ```
 
 不要在 `entities` 中增加一个没有被用户要求创建的 `table`，也不要输出 `add table`。
-
-当用户说：
-
-```text
-增加一张桌子
-```
-
-这时 `table` 是真正的新增实体，必须声明实体并输出 `add table`。不要把它转换成已有环境 anchor。
 
 当用户只说：
 
@@ -509,9 +517,42 @@ update
 就请求替换模型。只有用户明确给出新的物体名称（例如“把苹果换成香蕉”“换成一个杯子”）
 时才使用 `replace`；如果“换成”后只有颜色词，按颜色修改处理。
 
-## 7. Scene Edit 关系
+## 7. 空间语义（所有路由共用）
 
-允许：
+方位词、相对位置、极值对 `scene_edit`、`robot_task`、`scene_query` 同等可用。路由只由第 2
+节的行为主体决定，本节只决定写到哪个字段；全部取值见文末“空间语义取值表”。
+
+关系条目的形状在三种路由中完全一致：
+
+```text
+{"scope":"selection","subject":"<entity_id>","relation":"<关系取值>","reference":"<entity_id 或已注册环境引用>"}
+```
+
+半区关系（`left`、`right`、`front`、`back`、`up`、`down`）的 `reference` 可选：为 `null`
+时按世界原点切分候选，写支撑面（例如 `table`）时按该支撑面中心切分并排除支撑面自身；
+极值关系（`leftmost`、`rightmost`、`frontmost`、`backmost`、`highest`、`lowest`）的
+`reference` 必须为 `null`，解析器只在候选集合内部比较坐标；二元关系（`nearest`、
+`farthest`、`near`、`left_of`、`right_of`、`front_of`、`behind`、`above`、`below`、`on`、
+`inside`）必须带 `reference`。`relations` 只用于**操作前筛选候选物体**，绝不表示动作要放到哪里。
+
+三个维度各自的落点字段：
+
+```text
+绝对区域（左下角、右侧、中间）
+  作为筛选条件 -> 三种路由一致用 relations[]：写一元关系（left、right、front、back、
+                   frontmost、leftmost…），reference=table 表示“桌面的那一半/那一边”
+  作为落点     -> scene_edit: operations[].placement_region，“中间”用 placement_hint=center
+                   robot_task: operations[].placement_target.region（仅记录用户请求，本期不保证落点几何）
+                   scene_query: 没有落点，查询本来不移动物体
+相对位置（香蕉右边、篮子旁边）
+  scene_edit  -> operations[].relation + operations[].reference（相对落点用 move_relative）
+  robot_task  -> placement_target.kind=relative_object + placement_target.reference + placement_target.relation
+  scene_query -> scene_query.relations，或 query_type=relation 的 predicate + reference
+极值与最近最远（最左边、离篮子最近）
+  三种路由一致 -> relations[]，scope=selection，subject=被选中的实体
+```
+
+`scene_edit.operations[].relation` 允许：
 
 ```text
 left_of、right_of、front_of、behind、above、below、near、on、inside
@@ -534,6 +575,8 @@ left_of、right_of、front_of、behind、above、below、near、on、inside
   “最靠北/最北边”=`frontmost`，“最靠南/最南边”=`backmost`。
   例如“将最靠西的苹果设为蓝色”必须选择候选苹果中 X 坐标最小的一个，
   不得追问参照物；只有用户说“苹果在某物体西边”时才使用 `left_of` 加 reference。
+  同一条规则适用于机器人任务，例如“把最靠西的苹果放进篮子”把 `leftmost`
+  写进顶层 `relations`，不改成场景编辑，也不追问参照物。
 
 `scene_edit.relations` 只用于操作前的选择条件；操作要放置到哪里，必须写在 operation 的 `relation/reference` 中。
 
@@ -558,7 +601,7 @@ left_of、right_of、front_of、behind、above、below、near、on、inside
 
 用户说“同时添加篮子、苹果和香蕉”时，不要只输出一个实体或一个操作；必须保留三个实体和三个有序 `add` 操作。
 
-用户说“先增加篮子，再把苹果放进篮子”时，先生成 basket，再让 apple 的 operation reference=basket。必要时使用 `operation_id` 和 `depends_on`，但不得让后续操作引用尚未声明的实体。
+用户说“先增加篮子，再在篮子内部增加苹果”时，先生成 basket，再让 apple 的 operation reference=basket。必要时使用 `operation_id` 和 `depends_on`，但不得让后续操作引用尚未声明的实体。
 
 用户没有明确同时执行机器人动作时，不添加 `parallel_group`。
 
@@ -568,16 +611,30 @@ left_of、right_of、front_of、behind、above、below、near、on、inside
 
 ## 9. Robot Task
 
-机器人任务使用顶层 `entities` 和 `operations`。
+机器人任务使用顶层 `entities`、`relations` 和 `operations`。
 
 常用操作：
 
 - `grasp`、`release`、`locate`、`move`、`pick_and_place`、`press`、`open`、`close`；
 - `pick_and_place` 的 `source` 是被搬运对象，`destination` 是容器/目标；
 - `placement_target.reference` 必须与 destination 一致；
-- “放进篮子”是 `placement_target.kind=container_interior`、`relation=inside`；
-- “放到桌面上”是 `placement_target.kind=support_surface`、`reference=table`、`relation=on`；
 - 不输出 XYZ、固定距离、抬升、后退或轨迹。
+
+机器人任务的空间表达与场景编辑完全同源（第 7 节），只是写入的字段不同：
+
+```text
+“放进篮子”        -> placement_target.kind=container_interior、relation=inside、reference=basket
+“放到桌面上”      -> placement_target.kind=support_surface、reference=table、relation=on
+“放到桌子左下角”  -> 上一行再加 region=left_back（记录用户请求，本期不保证落点几何）
+“放到香蕉右边”    -> placement_target.kind=relative_object、reference=banana、relation=right_of
+“放到桌子旁边的空位” -> placement_target.kind=free_space、reference=table、relation=null
+“把离篮子最近的杯子拿走” -> 顶层 relations 写 {scope:selection,subject:cup,relation:nearest,reference:basket}
+“把最靠西的苹果放进篮子” -> 顶层 relations 写 {scope:selection,subject:apple,relation:leftmost,reference:null}
+```
+
+`region` 只能取桌面区域词表里的值；用户说的是“中间/正中央”时本期没有机器人落点字段，
+不要伪造 `region`，也不要把句子改写成场景编辑。方位词不改变路由：物体已存在且由机器人
+搬运时，即使带“左下角”也仍是 `robot_task`。
 
 打开/关闭必须同时有 target 和用户明确说出的 reference。缺少门把手、旋钮或明确操作部件时，返回 clarification_required，不要猜 reference。
 
@@ -607,9 +664,25 @@ left_of、right_of、front_of、behind、above、below、near、on、inside
 
 “哪个苹果离篮子最近？”使用 `query_type=selection`，关系放在 `scene_query.relations`，不要写到顶层 `relations`。
 
+“桌面左边有哪些苹果？”同样使用 `query_type=selection`，并在 `scene_query.relations` 写
+`{"scope":"selection","subject":"apple","relation":"left","reference":"table"}`；区域和极值
+在查询里也是可用的，不要因为它们是方位词就把查询改成场景编辑。
+
 “有没有蓝色钢笔？”使用 `query_type=existence`，不要生成 `add` 操作；“有几个苹果？”
 使用 `query_type=count`。实体仍必须来自当前 OLS 资产词表或当前场景对象，环境引用按
 Python 的场景解析器处理。
+
+`predicate` 只允许和 `query_type=relation` 一起出现，取值仅限文末取值表列出的那些；
+其它查询类型的 `predicate` 必须为 `null`，空间约束写进 `scene_query.relations`。
+`count`/`existence` 的 `reference` 表示支撑面限定（例如“桌面上有几个苹果”写
+`reference="table"`）。
+
+`near`、`nearest`、`farthest` 在 `relations` 里的含义是“在候选集合中取最近/最远的一个”，
+用于 `selection` 查询；它们不能验证“是否真的靠近”。因此“篮子旁边有没有苹果”用
+`query_type=neighbors`、`target=basket`（答案会列出参照物旁边的物体），不要写成
+`existence` 加 `predicate`。半区与极值关系是真正的筛选条件，`existence`/`count` 可以直接用，
+例如“桌面左边有几个苹果”写 `count`、`reference="table"`（限定支撑面）加
+`{"scope":"selection","subject":"apple","relation":"left","reference":"table"}`（限定左半区）。
 
 ## 11. 澄清规则
 
@@ -633,11 +706,12 @@ Python 的场景解析器处理。
 1. 只有一个 `turn_kind`。
 2. `accepted` 时对应 payload 存在，其他 payload 为 null/空数组。
 3. `clarification_required` 和 `unsupported_task` 没有任何可执行 payload。
-4. 每个 target、source、destination、replacement_entity 都能在本轮实体中找到。
+4. 每个 target、source、destination、replacement_entity 要么在本轮实体中声明，要么是第 5 节允许的环境引用（例如机器人落点 `destination="table"`）。
 5. 环境 reference 可以不在 entities 中，但必须是用户表达或已注册引用。
 6. `relation` 和 `reference` 同时存在或同时为 null。
-7. 所有用户明确对象、数量、顺序和操作都保留。
-8. 不生成 object_id、XYZ、关节、轨迹、固定规避动作或资产信息。
+7. 方位词、区域词和极值写在正确的字段里，并且没有改变 `turn_kind`。
+8. 所有用户明确对象、数量、顺序和操作都保留。
+9. 不生成 object_id、XYZ、关节、轨迹、固定规避动作或资产信息。
 
 最小合法 scene_edit 示例（字段使用 canonical entity_id/semantic_name）：
 `operation=add` 的位置字段只使用 `relation/reference/placement_hint/placement_region`。
@@ -648,3 +722,71 @@ Python 的场景解析器处理。
 {"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"basket","semantic_name":"basket","category":"container"},{"entity_id":"apple","semantic_name":"apple","category":"fruit"},{"entity_id":"banana","semantic_name":"banana","category":"fruit"}],"asset_choices":[{"entity_id":"basket","asset_key":"model:4"},{"entity_id":"apple","asset_key":"model:1"},{"entity_id":"banana","asset_key":"model:2"}],"relations":[],"operations":[{"operation":"add","target":"basket","relation":"on","reference":"table","placement_hint":"any"},{"operation":"add","target":"apple","relation":"on","reference":"table","placement_hint":"any"},{"operation":"add","target":"banana","relation":"on","reference":"table","placement_hint":"any"}]}}
 {"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"banana","semantic_name":"banana","category":"fruit"}],"relations":[],"operations":[{"operation":"translate","target":"banana","direction":"right","distance_m":0.02,"coordinate_frame":"object_local","relation":null,"reference":null}]}}
 {"status":"accepted","turn_kind":"scene_edit","scene_edit":{"scene_basis":"current","entities":[{"entity_id":"apple","semantic_name":"apple","category":"fruit"},{"entity_id":"basket","semantic_name":"basket","category":"container"}],"relations":[],"operations":[{"operation":"move_relative","target":"apple","relation":"left_of","reference":"basket"}]}}
+
+## 13. 空间语义整合示例（机器人任务）
+
+方位词与区域词不改变路由。以下两句都带桌面区域或相对落点，但行为主体是机器人，
+所以仍是 `robot_task`；未声明的 `table` 是环境引用，由 Python 绑定真实主桌面。
+
+“把带花纹的杯子放到桌子左下角”：
+
+```json
+{
+  "protocol_version": "task_understanding.v3.1",
+  "status": "accepted",
+  "turn_kind": "robot_task",
+  "arm_usage": "unspecified",
+  "hold_constraints": [],
+  "clarification_question": null,
+  "scene_edit": null,
+  "scene_query": null,
+  "session_control": null,
+  "robot_setup_request": null,
+  "robot_asset_switch": null,
+  "robot_asset": null,
+  "gripper_asset": null,
+  "camera_asset": null,
+  "profile_id": null,
+  "entities": [
+    {"entity_id":"mug_patterned","semantic_name":"mug","category":"container","tags":["杯子","花纹"],"count":1,"quantity_mode":"single"}
+  ],
+  "operations": [
+    {"operation":"pick_and_place","source":"mug_patterned","destination":"table",
+     "placement_target":{"kind":"support_surface","reference":"table","relation":"on","region":"left_back"}}
+  ],
+  "relations": []
+}
+```
+
+“把最靠西的苹果放到香蕉右边”：极值筛选写 `relations`，相对落点写 `placement_target`。
+
+```json
+{
+  "protocol_version": "task_understanding.v3.1",
+  "status": "accepted",
+  "turn_kind": "robot_task",
+  "arm_usage": "unspecified",
+  "hold_constraints": [],
+  "clarification_question": null,
+  "scene_edit": null,
+  "scene_query": null,
+  "session_control": null,
+  "robot_setup_request": null,
+  "robot_asset_switch": null,
+  "robot_asset": null,
+  "gripper_asset": null,
+  "camera_asset": null,
+  "profile_id": null,
+  "entities": [
+    {"entity_id":"apple","semantic_name":"apple","category":"fruit","tags":["苹果"],"count":1,"quantity_mode":"candidate_pool"},
+    {"entity_id":"banana","semantic_name":"banana","category":"fruit","tags":["香蕉"],"count":1,"quantity_mode":"single"}
+  ],
+  "operations": [
+    {"operation":"pick_and_place","source":"apple","destination":"banana",
+     "placement_target":{"kind":"relative_object","reference":"banana","relation":"right_of"}}
+  ],
+  "relations": [
+    {"scope":"selection","subject":"apple","relation":"leftmost","reference":null}
+  ]
+}
+```

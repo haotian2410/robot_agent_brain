@@ -92,7 +92,7 @@ def test_prompt_json_examples_validate_against_their_wire_subschemas():
     prompt_path = Path(__file__).parents[1] / "src/robot_agent_brain/models/prompt_templates/task_understanding_clean_v3.txt"
     blocks = [json.loads(value) for value in re.findall(
         r"```json\s*\n(.*?)```", prompt_path.read_text(encoding="utf-8"), re.S)]
-    assert len(blocks) >= 22
+    assert len(blocks) >= 24
     schema = task_understanding_v3_wire_schema()
 
     def validator(definition):
@@ -137,6 +137,22 @@ def test_prompt_json_examples_validate_against_their_wire_subschemas():
         ]
         validator("SceneEditWire").validate(payload)
     validator("SceneQueryWire").validate(blocks[21])
+    # The two appended robot envelopes are complete turns: they keep the shared
+    # spatial vocabulary (tabletop region, object-relative landing, extremum
+    # selection) executable on the robot route instead of the editor only.
+    for index in (22, 23):
+        validator_root.validate(blocks[index])
+    region_turn = TaskParseWireOutput.model_validate(blocks[22]).to_brain_turn(
+        "把带花纹的杯子放到桌子左下角")
+    assert region_turn.turn_kind == "robot_task"
+    assert region_turn.task_intent.operations[0].placement_target.region == "left_back"
+    relative_turn = TaskParseWireOutput.model_validate(blocks[23]).to_brain_turn(
+        "把最靠西的苹果放到香蕉右边")
+    placement = relative_turn.task_intent.operations[0].placement_target
+    assert (placement.kind, placement.reference, placement.relation) == (
+        "relative_object", "banana", "right_of")
+    assert placement.region is None
+    assert relative_turn.task_intent.spatial_relations[0].relation.value == "leftmost"
 
 
 def test_scene_payloads_are_structured_wire_models():

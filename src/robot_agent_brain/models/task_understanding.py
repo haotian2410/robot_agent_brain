@@ -12,6 +12,7 @@ from ..contracts.spatial import RelationScope, SpatialRelation, SpatialRelationT
 from ..contracts.task_intent import Direction, MotionScale, Operation, PlacementTarget, QuantityMode, TaskEntity, TaskIntent, TaskType
 from ..errors import BrainError
 from ..semantics.scene_references import CanonicalReference, RefScope, SceneReferenceCatalog
+from ..semantics import spatial_phrases
 from ..contracts.asset_catalog import AssetCatalogSnapshot
 from ..contracts.workspace import WorkspaceSemanticPolicy
 
@@ -338,7 +339,7 @@ class TaskParseOutput(BaseModel):
         ) for item in self.relations]
         if any(item.subject not in entity_ids or (item.reference and item.reference not in entity_ids) for item in relations):
             raise ValueError("task_semantic_invalid: relation references unknown entities")
-        return TaskIntent(
+        return apply_tabletop_placement_region(TaskIntent(
             instruction=instruction,
             arm_usage=self.arm_usage,
             hold_constraints=self.hold_constraints,
@@ -355,7 +356,7 @@ class TaskParseOutput(BaseModel):
             ) for item in self.entities],
             operations=operation_values,
             spatial_relations=relations,
-        )
+        ))
 
     def to_brain_turn(self, instruction: str) -> BrainTurn:
         task = self.to_task_intent(instruction) if self.status == TurnStatus.ACCEPTED and self.turn_kind == TurnKind.ROBOT_TASK else None
@@ -493,9 +494,10 @@ class TaskParseWireOutput(BaseModel):
         relations = [SpatialRelation(scope=item.scope, subject=item.subject,
                                      relation=item.relation, reference=item.reference)
                      for item in self.relations]
-        return TaskIntent(instruction=instruction, arm_usage=self.arm_usage,
-                          hold_constraints=self.hold_constraints, entities=entities,
-                          operations=operation_values, spatial_relations=relations)
+        return apply_tabletop_placement_region(TaskIntent(
+            instruction=instruction, arm_usage=self.arm_usage,
+            hold_constraints=self.hold_constraints, entities=entities,
+            operations=operation_values, spatial_relations=relations))
 
     def to_brain_turn(self, instruction: str) -> BrainTurn:
         task = self.to_task_intent(instruction) if self.status == TurnStatus.ACCEPTED and self.turn_kind == TurnKind.ROBOT_TASK else None
@@ -599,6 +601,33 @@ def _parse_robot_task_wire(value: dict[str, Any], instruction: str) -> BrainTurn
         raise
 
 
+def apply_tabletop_placement_region(task: TaskIntent) -> TaskIntent:
+    """Record an explicit tabletop region the provider left out of a placement.
+
+    Unlike the editor, the robot path keeps the requested region without
+    computing a landing point.  Only a single placement clause can safely
+    inherit a sentence-level phrase, so multi-step plans stay untouched.
+    """
+    placements = [operation for operation in task.operations
+                  if operation.placement_target is not None]
+    if len(placements) != 1:
+        return task
+    placement = placements[0].placement_target
+    text = task.instruction.casefold()
+    match = spatial_phrases.match_tabletop_region(text)
+    if placement.region is not None or match is None or match[1]:
+        return task
+    # ``香蕉右边`` is an object-relative landing, not a tabletop half; only a
+    # sentence anchored on the support surface may inherit a region token.
+    if placement.kind == "relative_object" or str(placement.reference or "").casefold() \
+            not in spatial_phrases.TABLE_REFERENCE_TOKENS:
+        return task
+    operations = [operation.model_copy(update={"placement_target":
+                operation.placement_target.model_copy(update={"region": match[0]})})
+                if operation is placements[0] else operation for operation in task.operations]
+    return task.model_copy(update={"operations": operations})
+
+
 def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str) -> dict[str, Any]:
     """Normalize the narrow, unambiguous corner-placement language.
 
@@ -622,46 +651,11 @@ def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str)
     # validation, because the provider is expected to emit the same canonical
     # relation/reference pair as the downstream editor consumes.
     live_tabletop = value.get("protocol_version") == "task_understanding.v3.1"
-    region = None
-    center = False
-    for phrases, candidate in (
-        # Chinese users and the clean-v3 prompt use both the top-view
-        # ``上/下`` wording and the explicit ``前/后`` wording.  Keep these
-        # aliases in the deterministic canonicalizer so a Qwen response of
-        # ``back_half`` cannot erase the requested left/right half.
-        (("左上角", "左上方", "左前角", "左前方"), "left_front"),
-        (("右上角", "右上方", "右前角", "右前方"), "right_front"),
-        (("左下角", "左下方", "左后角", "左后方"), "left_back"),
-        (("右下角", "右下方", "右后角", "右后方"), "right_back"),
-    ):
-        if any(phrase in text for phrase in phrases):
-            region = candidate
-            break
-    if region is None:
-        for phrases, candidate in (
-            (("东北角", "东北方", "右上"), "right_front"),
-            (("西北角", "西北方", "左上"), "left_front"),
-            (("东南角", "东南方", "右下"), "right_back"),
-            (("西南角", "西南方", "左下"), "left_back"),
-            (("右侧", "右边", "东侧", "东边"), "right_half"),
-            (("左侧", "左边", "西侧", "西边"), "left_half"),
-            (("前侧", "前方", "北侧", "北边"), "front_half"),
-            (("后侧", "后方", "南侧", "南边"), "back_half"),
-        ):
-            if any(phrase in text for phrase in phrases):
-                region = candidate
-                break
-    if region is None and any(phrase in text for phrase in ("中间", "正中央", "中心位置")):
-        center = True
-        region = "center"
-    object_relative_words = (
-        "旁边", "附近", "靠近", "最近", "最远", "左边", "右边", "左侧", "右侧",
-        "前面", "后面", "前方", "后方", "上面", "下面", "里面", "内", "放进",
-        "near", "nearest", "farthest", "left of", "right of", "behind", "inside",
-    )
-    table_words = ("桌", "桌面", "台面", "table", "desktop", "work table")
-    has_table = any(word in text for word in table_words)
-    has_object_relative_language = any(word in text for word in object_relative_words)
+    match = spatial_phrases.match_tabletop_region(text)
+    region = match[0] if match else None
+    center = match[1] if match else False
+    has_table = spatial_phrases.references_table(text)
+    has_object_relative_language = spatial_phrases.has_object_relative_language(text)
     # No region phrase is still meaningful for the bare-add default.  Do not
     # apply it when the instruction contains object-relative language but the
     # model omitted the reference; that case must remain a clarification or a
@@ -697,7 +691,7 @@ def _normalize_scene_edit_layout_output(value: dict[str, Any], instruction: str)
         # the same directional token.
         raw_relation = item.get("relation")
         raw_reference = str(item.get("reference") or "").casefold()
-        table_reference = raw_reference in {"table", "desk", "desktop", "work_table", "桌子", "桌面", "台面"}
+        table_reference = raw_reference in spatial_phrases.TABLE_REFERENCE_TOKENS
         if raw_relation not in (None, "on", "left_of", "right_of", "front_of", "behind"):
             operations.append(raw)
             continue

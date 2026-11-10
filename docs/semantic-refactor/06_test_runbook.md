@@ -252,7 +252,13 @@ A/B相对方向与桌面方位分开；near表示近邻位置，仍在同一桌�
 - `T08.V03` 把{object_a}移到{object_b}后面 → `relative_move_behind` / `scene_updated`
 - `T08.V04` 将{object_a}挪到{object_b}南侧 → `relative_move_behind` / `scene_updated`
 - `T08.V05` 把{object_a}移到{object_b}旁边 → `relative_move_near` / `scene_updated`
-- `T08.V06` 将{object_a}放到{object_b}附近 → `relative_move_near` / `scene_updated`
+- `T08.V06` 将{object_a}放到{object_b}附近 → `robot_task` `pick_and_place` / `plan_ready`
+
+`T08.V06` 的“放到”是对已有物体的搬运动词，按第 2 节路由判据属于 `robot_task`；相对落点写
+`placement_target.kind=relative_object`，只是字段填写，不再作为改判 `scene_edit` 的理由。
+矩阵里该行的 `expected_json` 同步换成机器人契约（`route=robot_task`、`operation=pick_and_place`、
+`executed=false`），`expected_outcome` 改为 `plan_ready`（语义 accepted 且产出可执行计划，场景由
+执行端改写），其余五条仍断言 `scene_updated`。
 
 ### T09 极值与相对选择后改色（8 条表达）
 

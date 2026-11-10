@@ -735,10 +735,21 @@ class QwenHTTPProvider:
             if entity is None:
                 raise QwenProviderError(f"asset_choice_unknown_entity:{entity_id}", code="provider_output_schema_invalid")
             semantic_name = entity.get("semantic_name")
-            if isinstance(semantic_name, str) and semantic_name.casefold() != catalog_item.name.casefold():
-                raise QwenProviderError(
-                    f"asset_choice_name_mismatch:{entity_id}:{semantic_name}!={catalog_item.name}",
-                    code="asset_catalog_key_invalid")
+            entity_tags = entity.get("tags") or []
+            if isinstance(semantic_name, str) and semantic_name.strip():
+                # Legacy path: semantic_name must match catalog name
+                if semantic_name.casefold() != catalog_item.name.casefold():
+                    raise QwenProviderError(
+                        f"asset_choice_name_mismatch:{entity_id}:{semantic_name}!={catalog_item.name}",
+                        code="asset_catalog_key_invalid")
+            elif entity_tags:
+                # Tag-based path: verify at least one tag overlaps with catalog item tags
+                catalog_tags = {t.strip().casefold() for t in catalog_item.tags}
+                entity_tag_set = {t.strip().casefold() for t in entity_tags}
+                if not catalog_tags & entity_tag_set:
+                    raise QwenProviderError(
+                        f"asset_choice_tag_mismatch:{entity_id}:tags={entity_tags}!={catalog_item.tags}",
+                        code="asset_catalog_key_invalid")
             by_entity[entity_id] = key
         required = []
         for op in payload.get("operations") or []:

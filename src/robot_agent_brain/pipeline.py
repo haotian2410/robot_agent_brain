@@ -157,7 +157,7 @@ class BrainPipeline:
                  query_near_distance_m=.2, registered_profiles=None,
                  primary_table_metadata_ref=None, workspace_center_m=None,
                  placement_policy_version="grid-v2", motion_policy_version="motion-v1",
-                 catalog_for_provider: bool = True):
+                 scene_reference_catalog=None, catalog_for_provider: bool = True):
         self.understanding = understanding
         self.assets = assets
         # This is the configured command/export profile, not a guess from the
@@ -192,7 +192,9 @@ class BrainPipeline:
             placement_policy_version=placement_policy_version,
             motion_policy_version=motion_policy_version)
         self.category_aliases = getattr(getattr(assets, "metadata", None), "category_aliases", {})
-        self.grounder = SceneGrounder(aliases=self.aliases, category_aliases=self.category_aliases, assets=assets)
+        self.grounder = SceneGrounder(aliases=self.aliases, category_aliases=self.category_aliases, assets=assets,
+                                      scene_reference_catalog=scene_reference_catalog,
+                                      table_metadata_ref=primary_table_metadata_ref)
         self.motion = MotionScaleResolver(assets)
         self.planner = RecipePlanner()
         self.skill_planner = SkillPlannerRouter(mode=planner_mode, recipe_planner=self.planner,
@@ -266,6 +268,15 @@ class BrainPipeline:
                 }
             if is_table:
                 table_ids.append(oid)
+            # Resolve asset tags for scene context so Qwen can distinguish
+            # objects by their semantic tags (e.g., "花纹" vs "浮雕纹")
+            asset_tags = []
+            if metadata_ref and self.assets is not None:
+                try:
+                    asset = self.assets.resolve(metadata_ref, metadata_type) if metadata_type else self.assets.resolve(metadata_ref)
+                    asset_tags = list(asset.tags) if asset else []
+                except (ValueError, AttributeError):
+                    pass
             objects.append({
                 "object_id": oid,
                 "object_name": item.object_name_in_scene,
@@ -274,6 +285,7 @@ class BrainPipeline:
                 "support": semantic.support if semantic is not None else None,
                 "parent": transform.parent if transform is not None else None,
                 "color_override": renderer.forceOverrideColor if renderer is not None else None,
+                "tags": asset_tags,
             })
         return {
             "basis": "current",

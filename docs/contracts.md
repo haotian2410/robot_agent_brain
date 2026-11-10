@@ -57,6 +57,10 @@ description、requires_target、allowed_regions、preconditions、effects、plan
 move 可用 grasp_region/placement_region/button_surface；release 可用 placement_region；
 其他 skill 不接受 region。目录只描述技能，不内嵌高层 recipe，不依赖 Control 源码。
 
+注意两个 `region` 是不同字段：技能步骤的 `region` 是里程碑名（grasp_region/placement_region/
+button_surface），`placement_target.region` 是用户要求的桌面象限（left_half…right_back 八个
+取值，与场景编辑 `placement_region` 共用词表），只表达落点意图，不代表 Python 已算出可用位置。
+
 ### HTTP、校验和失败边界
 
 第二次仍 POST 同一 `/chat/completions`，model/key/timeout 共用；temperature=0。
