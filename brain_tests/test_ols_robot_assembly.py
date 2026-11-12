@@ -73,7 +73,9 @@ def test_platform_rebind_preserves_ids_and_increments_only_subversion(adapter):
     assert (session.robot_asset, session.gripper_asset, session.camera_asset) == (
         "piper", "robotiq_2f140", "d455"
     )
-    assert session.execution_capability == "unsupported"
+    # The gate asks "is this exactly one arm whose driver matches OLS", not
+    # "is this a UR5"; Piper's own URDF reaches the control runtime either way.
+    assert session.execution_capability == "supported"
     assert 6 not in session.platform_object_ids  # Piper has no pedestal in OLS 1.0.8
     assert binding["asset_revision"]
 

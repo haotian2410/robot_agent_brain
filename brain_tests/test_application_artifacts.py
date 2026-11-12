@@ -26,7 +26,7 @@ def robot():
 
 def test_no_scene_robot_publishes_matching_snapshot_and_commands(tmp_path):
     provider = Provider(robot())
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path)), provider=provider)
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path)), provider=provider)
     report = app.handle("把两个苹果放进篮子")
     assert report.run_status == "success", report
     assert provider.count == 1
@@ -43,7 +43,7 @@ def test_no_scene_robot_publishes_matching_snapshot_and_commands(tmp_path):
 def test_no_scene_query_blocked_but_uploaded_empty_returns_zero(tmp_path):
     provider = Provider(BrainTurn(status="accepted", turn_kind="scene_query", instruction="count",
                                   scene_query=SceneQueryIntent(query_type="count", target="apple", entities=[dict(entity_id="apple", semantic_name="apple", category="fruit")])))
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path / "out")), provider=provider)
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path / "out")), provider=provider)
     report = app.handle("有几个苹果")
     assert report.run_status == "blocked" and report.error.code == "scene_required"
     assert report.scene_created is False and "scene_config" not in report.artifacts
@@ -58,7 +58,7 @@ def test_no_scene_query_blocked_but_uploaded_empty_returns_zero(tmp_path):
 def test_loaded_empty_robot_never_generates_objects(tmp_path):
     path = tmp_path / "empty.json"
     path.write_text(SceneConfig(scene_schema_version=1, scene_version=1, scene_id=0, scene_name="empty", objects=[]).model_dump_json(), encoding="utf-8")
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path / "out")), provider=Provider(robot()))
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path / "out")), provider=Provider(robot()))
     report = app.handle("抓苹果", scene_path=path)
     assert report.run_status == "blocked" and report.scene_created is False
     assert "commands" not in report.artifacts
@@ -77,7 +77,7 @@ def test_uploaded_true_empty_scene_edit_explains_missing_default_surface(tmp_pat
             operations=[SceneEditIntent(operation="add", target="apple")],
         ),
     ))
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path / "out")),
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path / "out")),
                            provider=provider)
     report = app.handle("增加苹果", scene_path=path)
     assert report.run_status == "blocked"
@@ -108,7 +108,7 @@ def test_first_turn_empty_scene_edit_bootstraps_three_unrelated_objects(tmp_path
             ],
         ),
     ))
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path / "out")),
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path / "out")),
                            provider=provider)
     report = app.handle("同时在空场景放篮子、苹果、香蕉")
     assert report.run_status == "success", report.reply
@@ -121,7 +121,7 @@ def test_first_turn_empty_scene_edit_bootstraps_three_unrelated_objects(tmp_path
 def test_platform_commit_survives_publication_failure(tmp_path, monkeypatch):
     provider = Provider(BrainTurn(status="accepted", turn_kind="scene_edit", instruction="add",
                                   scene_edit=SceneEditPlan(entities=[dict(entity_id="target", semantic_name='apple', category='fruit', count=1, quantity_mode='single')], operations=[SceneEditIntent(operation='add', target="target")])))
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path)), provider=provider)
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path)), provider=provider)
     def fail(*args, **kwargs):
         raise OSError("disk full")
     monkeypatch.setattr(app.writer, "publish", fail)
@@ -134,4 +134,4 @@ def test_platform_commit_survives_publication_failure(tmp_path, monkeypatch):
 def test_local_platform_does_not_silently_enable_fake_vision(tmp_path):
     from robot_agent_brain.errors import BrainError
     with pytest.raises(BrainError, match="Vision requires"):
-        BrainApplication(BrainConfig(provider="replay", vision=True, output_dir=str(tmp_path)), provider=Provider(robot()))
+        BrainApplication(BrainConfig(provider="replay", planner="recipe", vision=True, output_dir=str(tmp_path)), provider=Provider(robot()))

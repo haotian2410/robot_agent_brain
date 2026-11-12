@@ -33,11 +33,12 @@ def test_query_filters_world_relation_and_returns_ids_for_count():
     assert value.model_dump() == before
 
 
-def test_color_constraint_without_evidence_is_not_a_zero_count():
+def test_an_unverifiable_colour_counts_the_subject_instead_of_refusing():
     value = query()
     value.entities[0].color = "red"
-    with pytest.raises(ValueError, match="grounding_evidence_missing: color"):
-        SceneQueryEngine().query(value, scene())
+    # No apple declares a colour, so the colour word is dropped rather than turned
+    # into an error or a zero: the question stays answerable about the apples.
+    assert SceneQueryEngine().query(value, scene()).count == 2
 
 
 def test_zero_matches_and_no_scene_are_distinct():

@@ -211,8 +211,19 @@ class SessionStore:
                 stream.flush()
                 os.fsync(stream.fileno())
             check = SessionState.model_validate_json(Path(temporary).read_text(encoding="utf-8"))
-            if check.model_dump(mode="json") != state.model_dump(mode="json"):
-                raise ValueError("session_state_readback_mismatch")
+            if state != check:
+                # The dumps of two *equal* states can still differ: a set built by incremental
+                # adds iterates in its own table order, and a reload from the written list can
+                # rebuild that same content in another sequence.  Comparing documents therefore
+                # invented a mismatch out of a set field (``dispatched_requests`` after a
+                # multi-step round), aborted the rename, and the task reported 会话保存失败 over
+                # the real verdict.  Compare the states, and name the offenders set-aware.
+                def comparable(value):
+                    return sorted(value, key=str) if isinstance(value, (set, frozenset)) else value
+                offenders = sorted(name for name in type(state).model_fields
+                                   if comparable(getattr(state, name, None))
+                                   != comparable(getattr(check, name, None)))
+                raise ValueError("session_state_readback_mismatch: " + ",".join(offenders))
             os.replace(temporary, parent / "session_state.json")
         finally:
             Path(temporary).unlink(missing_ok=True)

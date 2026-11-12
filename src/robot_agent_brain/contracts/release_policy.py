@@ -11,14 +11,12 @@ class ReleasePolicy(BaseModel):
     dynamic_platform_rebind: bool = False
     runtime_robot_setup_change: bool = False
     nl_initial_platform_selection: bool = False
-    control_dispatch: bool = False
 
     @model_validator(mode="after")
     def published_defaults_are_closed(self):
         if self.version == "v0.2" and any((self.dynamic_platform_rebind,
                                            self.runtime_robot_setup_change,
-                                           self.nl_initial_platform_selection,
-                                           self.control_dispatch)):
+                                           self.nl_initial_platform_selection)):
             raise ValueError("release_policy_v02_capability_must_be_disabled")
         return self
 

@@ -34,7 +34,9 @@ class DualSkillPlanningRequest(BaseModel):
 
 def dual_context(task, runtime):
     from ..planning.context_builder import build_planner_context
-    context = build_planner_context(task).model_dump(mode="json")
+    # ``exclude_none`` keeps the omitted-optional projection out of the prompt:
+    # the dual dialect has no scene-ID surface at all.
+    context = build_planner_context(task, include_scene_ids=False).model_dump(mode="json", exclude_none=True)
     context.pop("initial_state")
     context["hold_constraints"] = [hold.model_dump(mode="json", exclude_none=True) for hold in task.hold_constraints]
     by_object = {e.scene_object_id: e.entity_id for e in task.entities}

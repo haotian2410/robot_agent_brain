@@ -29,6 +29,7 @@ class Browser:
         self.scene = scene or supported_scene()
         self.calls, self.receipt = [], None
         self.fault = None
+        self.trajectories = []
         self.next_id = max(o.object_id_in_scene for o in self.scene.objects) + 1
 
     def handle(self, request):
@@ -37,6 +38,7 @@ class Browser:
         document = self.world()
         identity = {"browserID":"b","scene_id":self.scene.scene_id,"scene_version":self.scene.scene_version,
                     "sceneDigest":digest(document),"playback_state":"stopped"}
+        if self.fault == "paused":identity["playback_state"] = "paused"
         if route == "/brainCapabilities":
             return httpx.Response(200,json={"protocol":"brain-web/2","browserID":"b","capabilities":[
                 "atomic_commit","sub_versioned_scene_identity","setup_only_local_edits",
@@ -53,6 +55,7 @@ class Browser:
             if self.fault == "cache":headers["X-World-Source"]="cache"
             if self.fault == "browser":headers["X-Browser-ID"]="other"
             if self.fault == "playing":headers["X-Playback-State"]="playing"
+            if self.fault == "paused":headers["X-Playback-State"]="paused"
             return httpx.Response(200,json=document,headers=headers)
         if route == "/commitWorld":
             body=json.loads(request.content)
@@ -83,6 +86,21 @@ class Browser:
         if route == "/get2DAABB":
             return httpx.Response(200,json=identity|{"width":640,"height":480,"visible":self.fault!="invisible",
                 "box":{"x_min":64,"y_min":48,"x_max":128,"y_max":96}})
+        if route == "/updateTraj":
+            # The real gateway refuses any part not named "trajs" and any body whose
+            # part count disagrees with ?count=; counting the dispositions here keeps
+            # both rules checkable without reimplementing multipart parsing.
+            parts = request.content.count(b'name="trajs"')
+            declared = request.url.params.get("count")
+            if self.fault == "traj_reject":
+                return httpx.Response(400, json={"code": "INVALID_PARAM", "message": "trajectory rejected"})
+            if declared is not None and not declared.isdigit():
+                return httpx.Response(400, json={"code": "INVALID_PARAM", "message": "count must be a uint"})
+            if declared is not None and int(declared) != parts:
+                return httpx.Response(400, json={"code": "INVALID_PARAM",
+                                                 "message": f"count={declared} but {parts} trajs parts"})
+            self.trajectories.append(request.content)
+            return httpx.Response(200, json={"ok": True, "count": parts, "ignored_objects": []})
         raise AssertionError(route)
 
 
@@ -96,6 +114,22 @@ def test_stale_or_wrong_viewer_rejected(fault):
     browser=Browser();browser.fault=fault
     with pytest.raises(ValueError):adapter(browser).adopt(browser.scene)
     assert not any(method=="POST" for method,_ in browser.calls)
+
+
+def test_a_paused_clip_reads_the_committed_world_but_not_its_pixels():
+    # Watching the trajectory from the previous turn used to silence this one: the
+    # frozen play bar reported "paused" and every world read refused.  The document
+    # beside a paused frame is still the committed scene, so it reads -- while the
+    # pixels of that same frame still show the arm mid-move and stay refused.
+    from test_component_runtime import object_
+    browser=Browser();browser.fault="paused"
+    camera=object_(5,"camera","sensor")
+    camera.components.append(SceneComponent(component_type="Camera",properties={"type":"rgb","resolution":[640,480],"fov":60,"near":.01,"far":10}))
+    browser.scene.objects.append(camera)
+    platform=adapter(browser)
+    assert platform.read_live().scene_id==browser.scene.scene_id
+    platform.adopt(browser.scene)
+    with pytest.raises(ValueError,match="camera_frame_scene_mismatch"):platform.capture(CameraRequest())
 
 
 @pytest.mark.parametrize("fault",[None,"timeout","unknown","reject"])

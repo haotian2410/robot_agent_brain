@@ -38,7 +38,7 @@ def turn(kind="grasp"):
 
 def test_profile_bootstrap_keeps_both_arms_and_commits_after_planning(tmp_path):
     provider = Provider(turn())
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path), robot_profiles=registry(),
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path), robot_profiles=registry(),
         release_policy=ReleasePolicy(version="experiment", runtime_robot_setup_change=True,
                                      dynamic_platform_rebind=True)), provider=provider)
     report = app.handle("用双臂的右臂抓苹果")
@@ -55,7 +55,7 @@ def test_profile_bootstrap_keeps_both_arms_and_commits_after_planning(tmp_path):
 
 def test_profile_bootstrap_failed_plan_never_loads_scene(tmp_path):
     # Release without a held object is a deterministic planning failure.
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path), robot_profiles=registry(),
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path), robot_profiles=registry(),
         release_policy=ReleasePolicy(version="experiment", runtime_robot_setup_change=True,
                                      dynamic_platform_rebind=True)), provider=Provider(turn("release")))
     report = app.handle("用双臂的右臂释放苹果")
@@ -66,7 +66,7 @@ def test_profile_bootstrap_failed_plan_never_loads_scene(tmp_path):
 
 def test_configuration_only_first_turn_does_not_freeze_platform(tmp_path):
     config_turn = TaskParseOutput(turn_kind="robot_config", robot_setup_request={"mode": "dual"}).to_brain_turn("换成双臂")
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path), robot_profiles=registry(),
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path), robot_profiles=registry(),
         release_policy=ReleasePolicy(version="experiment", runtime_robot_setup_change=True,
                                      dynamic_platform_rebind=True)), provider=Provider(config_turn))
     report = app.handle("换成双臂")

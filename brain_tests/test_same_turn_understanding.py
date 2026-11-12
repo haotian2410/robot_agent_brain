@@ -31,6 +31,49 @@ def test_understanding_allows_local_add_reference_without_previous_focus():
     assert len({op.object_id_in_scene for op in result.scene_patch.operations}) == 1
 
 
+def test_the_pronoun_a_split_leaves_alone_binds_the_object_that_split_added():
+    """「再新增一个香蕉，把它放到篮子里」 names one determinate object, not two candidates.
+
+    Every subtask of one sentence walks through the same session, so the focus the add
+    left behind is what 「它」 resolves to.  That is only reachable while the split keeps
+    the pronoun: rewriting it to 「香蕉」 -- what step 4 of the five-clause run got -- turns a
+    determinate reference into a name that matches both bananas and the walk stops to ask
+    which one.  「他」 is the same pronoun mistyped, and 「其他」 is not a pronoun at all.
+    """
+    from robot_agent_brain.adapters.mock_scene_platform import MockScenePlatform
+    from robot_agent_brain.session.brain_session import BrainSession
+    session = BrainSession(supported_scene(), BrainPipeline(None, BrainConfig().load_assets()),
+                           MockScenePlatform())
+    added = session.process_turn("add", BrainTurn(status="accepted", turn_kind="scene_edit",
+        instruction="新增一个香蕉", scene_edit=SceneEditPlan(entities=[
+            TaskEntity(entity_id="a", semantic_name="apple", category="fruit"),
+            TaskEntity(entity_id="b", semantic_name="banana", category="fruit")],
+            operations=[SceneEditIntent(operation="add", target="b", reference="a",
+                                        relation="right_of")])))
+    assert len(added.focus_object_ids) == 1
+    assert session.dialogue.last_entity_id == added.focus_object_ids[0]
+    assert session.dialogue.contextualize("把它放到篮子里", session.scene) == "把它放到篮子里 [dialogue_ref=banana]"
+    assert session.dialogue.contextualize("再把他拿出来", session.scene) == "再把他拿出来 [dialogue_ref=banana]"
+    assert "[dialogue_ref" not in session.dialogue.contextualize("把其他的香蕉改成绿色", session.scene)
+
+
+def test_color_then_robot_pronoun_keeps_the_selected_object():
+    """The first edit's unique focus is the source of the following robot step."""
+    from robot_agent_brain.adapters.mock_scene_platform import MockScenePlatform
+    from robot_agent_brain.session.brain_session import BrainSession
+    session = BrainSession(supported_scene(), BrainPipeline(None, BrainConfig().load_assets()),
+                           MockScenePlatform())
+    first = session.process_turn("color", BrainTurn(status="accepted", turn_kind="scene_edit",
+        instruction="把最左边的苹果改成绿色", scene_edit=SceneEditPlan(entities=[
+            TaskEntity(entity_id="apple", semantic_name="apple", category="fruit", count=1,
+                       quantity_mode="candidate_pool", select_count_from_candidates=True),
+        ], operations=[SceneEditIntent(operation="update_properties", target="apple",
+                                       properties={"color": "green"})])))
+    assert first.focus_object_ids == [1]
+    assert session.dialogue.last_entity_id == 1
+    assert session.dialogue.contextualize("把他放到托盘里", session.scene) == "把他放到托盘里 [dialogue_ref=apple]"
+
+
 def test_unresolved_cross_turn_pronoun_still_rejected():
     class Provider:
         def understand_turn(self, request):

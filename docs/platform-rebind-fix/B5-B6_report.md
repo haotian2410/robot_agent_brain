@@ -21,3 +21,14 @@
 本阶段没有接入真实 Qwen、Gateway 8099、OLS 8000、浏览器、Control、IK、
 MuJoCo 或真实机械臂。因此真实服务链按模板标记 `not_run`，不能据此宣称
 L3 联调验收完成。
+
+## 后续更正（2026-11-11）
+
+上面「Piper、CobotMagic 等规划结果为 unsupported」的结论已作废：那条判据把
+UR5 型号名当成了能力白名单，而控制端运行时的 URDF 与关节表完全由场景文件选型。
+`_platform_execution_capability()` 现在只要求场景恰好一台 `role=arm` 且其
+`RobotDriver` 与 OLS 条目自洽（joint sequence/limits 一致），任何型号的单臂都可
+进入规划；`RobotProfile` 缺失不再是单臂的前置条件。双臂依旧必须有显式 Profile。
+仍然成立的是外部硬约束：非 UR 关节命名、非 6 个 revolute 关节的单臂能通过门禁，
+却会在控制端碰撞检查/关节约束处失败，那属于另一轮处理。同口径见
+`docs/webeditor_integration.md`「能力与现场读取」前的门禁说明。

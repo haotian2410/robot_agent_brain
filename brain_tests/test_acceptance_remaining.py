@@ -17,7 +17,7 @@ from test_query_scene_continuity import transform
 
 
 def app_at(path, turn):
-    return BrainApplication(BrainConfig(provider="replay", output_dir=str(path)), provider=Provider(turn))
+    return BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(path)), provider=Provider(turn))
 
 
 def test_b02_initial_geometry_is_outside_target_container(tmp_path):

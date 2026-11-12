@@ -174,18 +174,27 @@ robot-brain chat --provider qwen --planner qwen \
   --model "$QWEN_MODEL" --output-dir var/qwen-planner --debug
 ```
 
-第二阶段复用同一模型/地址/key，只收精简语义上下文和 7 个原子技能的摘要目录，
-输出每个 operation 内的 skill/role/region 顺序。实体绑定、数量、放置目标和距离
-仍由第一阶段与 Python 确定。Python 严格校验后才生成 Commands v2。
+第二阶段复用同一模型/地址/key，只收精简语义上下文（实体带整数 `scene_object_id`），
+输出控制端原子方言 `{"commands":[...]}`：`approach`、`pick`、`lift_up`、`retreat`、
+`move_to`、`put`、`pull`、`push` 八个技能，prompt 里放 skill.md 全文和一张由
+`contracts/commands_atomic.py` 现场生成的参数表，所以规范正文与校验器不会各说一套话。
+装配规则由 `planning/atomic_plan_validator.py` 校验，违反一次只多花一轮修复。
+实体绑定、数量、放置目标仍由第一阶段与 Python 确定；`put` 的相对落点以任务为准，
+Brain 会补上固定边距并覆盖模型自己写的 `relation`/`distance_m`，任务没要求相对落点时
+一律清掉。`put` 的 `front`/`behind`/`left`/`right` 走目的地水平外侧（需要可见支撑面），
+`above`/`below` 自控制端 `b24cc3f` 起沿世界 Z 轴直接给出可悬空的空间释放点，不再被
+规划阶段拒绝；只有「桌子左上角」这类需要两个方向才能确定的落点仍然报错，不会带着猜测
+下发。
 Query、Scene Edit、会话控制、澄清都不调用第二阶段。
 
-目前 recipe 支持 locate/move/grasp/release/pick_and_place/press/open/close，因此
-auto 对这些任务仍使用 recipe。Search 尚无 Control wire，所有模式都明确拒绝，
-不会让 Qwen 编造 search 技能。Replay 只支持理解回放；`--planner qwen` 会报
-`skill_planning_provider_missing`，而 recipe/auto 可继续回放。
+`--planner recipe` 走同一套校验的确定性展开，覆盖 grasp/release/pick_and_place 与
+open/close（后者按 approach→pick→pull/push→retreat 抓把手推拉）；locate/move/press/search
+仍返回 `atomic_capability_unsupported`，不会让 Qwen 勉强凑成六个抓放命令。
+Replay 只支持理解回放；`--planner qwen` 会报 `skill_planning_provider_missing`，
+而 recipe/auto 可继续回放。
 
 `result.json.metrics` 记录逐阶段调用数和实际 planner；`--debug` 额外保存
-planner_context、planner_skill_catalog、raw_skill_plan、normalized_skill_plan、
+planner_context、raw_skill_plan、normalized_skill_plan、
 skill_plan_validation。失败不输出本轮 commands、不链接旧 commands、不伪造执行；
 无场景首轮机器人任务在规划通过后才提交初始场景。
 完整字段与限制见 [contracts](docs/contracts.md)，验收见 [报告](docs/implementation_report.md)。
@@ -213,6 +222,41 @@ OUTPUT/SESSION/REQUEST/query_result.json   # 查询时
 
 详细参数、错误与可复制流程见 [手动测试](docs/manual_testing.md)；协议和反馈接口见
 [契约说明](docs/contracts.md)。
+
+### 执行子进程里的感知模型
+
+控制端在 `approach`/`pick`/`put` 里用 VLM 从相机帧上取抓取点。它自带一个写死的
+DashScope base URL，密钥已不可用，因此本部署把这条感知也接到本机 Qwen：大脑把自己
+配置里的 `base_url` 与 `model` 随执行子进程下发（`ROBOT_LINK_VLM_BASE_URL`、
+`QWEN_MODEL`），`robot_agent_link` 在 `demo.run_demo` 导入之前替换掉控制端那个客户端
+工厂。控制端仓库保持零本地改动，`DASHSCOPE_API_KEY` 不再参与执行。
+
+换地址只是必要的一半：本地模型回答 JSON 请求时会在对象外面套 Markdown 围栏，而控制端
+的解析器要求字符串第一个字符就是 `{`，一个正确的抓取点也会被判定成无效回复，所以
+返回文本在进入控制端前已被裁成纯 JSON 对象。
+
+排查只看子进程日志的第一行 `link: perception VLM -> <base_url>`；补丁打不上时它改为
+`... FAILED` 并继续按控制端原端点跑，感知端点不是执行的前置条件。
+
+### 执行失败怎么说话
+
+`report.json` 里的错误是控制端的结构化 payload（`error_code`、`failed_stage`、
+`error_message`、`details`），裸读出来是英文加一串碰撞对象，浏览器里没法看。
+`robot_agent_link/link/error_descriptions.py` 因此按路径读出控制端自己的
+`demo/error_messages.py`，并用 `ast` 从 `demo/run_demo.py` 里取出
+`ERROR_DESCRIPTIONS`/`STAGE_DESCRIPTIONS` 两张字面量表——不 import 控制端包（它会拉起
+MuJoCo/FCL），也不在 Brain 里抄一份会过期的词表——于是任务错误信息与子进程控制台打印的
+那句完全一致，例如：
+
+```text
+Apple 与 WorkTable 穿透 3.142 mm，无法按指定路径运动（PATH_CONSTRAINT_INFEASIBLE）
+RRT-Connect 在 5 s 规划预算内未找到无碰撞路径（PATH_NOT_FOUND）
+持物相对夹爪滑移 8.40 mm（GRASP_FAILED）
+```
+
+三条兜底：报告顶层没有 error 时取第一个失败命令的 error（否则只剩一串日志尾巴）；
+`runner_report_missing`、超时这些控制端来不及写的原因由桥自己造句；控制端目录读不到时
+`describe_for` 返回 None，退回原始报文——措辞可以缺，失败原因不能缺。
 
 ## Architecture invariant
 

@@ -38,7 +38,7 @@ def test_generated_quantity_goal_separation_and_candidate_selection(pool):
             raise AssertionError("must not understand again")
     output = BrainPipeline(NoProvider(), assets).process_turn("r", turn, result.scene,
                                                             bindings_override=result.bindings_for(result.scene))
-    grasps = [c for c in output.commands.commands if c.skill_name == "grasp"]
+    grasps = [c for c in output.commands.commands if c.skill_name == "pick"]
     assert len(grasps) == (1 if pool else 2)
     if pool:
         assert grasps[0].parameters.target == max(apples, key=lambda o:world_transform(result.scene, o.object_id_in_scene).position[0]).object_id_in_scene
@@ -82,10 +82,14 @@ def test_pure_remove_does_not_create_objects():
         bootstrap.prepare(turn, scene_id=1)
 
 
-def test_generation_bindings_do_not_bypass_color():
+def test_generation_bindings_survive_a_colour_the_scene_cannot_confirm():
     assets, bootstrap = setup()
     turn = task()
     result = bootstrap.prepare(turn, scene_id=1)
     turn.task_intent.entities[0].color = "red"
-    with pytest.raises(ValueError, match="grounding_evidence_missing: color"):
-        BrainPipeline(None, assets).process_turn("r", turn, result.scene, bindings_override=result.bindings_for(result.scene))
+    output = BrainPipeline(None, assets).process_turn(
+        "r", turn, result.scene, bindings_override=result.bindings_for(result.scene))
+    # No generated apple declares a colour, so 「red」 is dropped rather than refused
+    # and the binding keeps both apples it was generated for.
+    assert sorted(c.parameters.target for c in output.commands.commands if c.skill_name == "pick") == \
+        sorted(o.object_id_in_scene for o in named_objects(result.scene, "apple"))

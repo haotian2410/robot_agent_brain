@@ -16,7 +16,7 @@ def test_add_layout_is_seeded_and_repeatable(tmp_path):
                      scene_edit=SceneEditPlan(entities=[dict(entity_id="target", semantic_name='apple', category='fruit', count=2, quantity_mode='all')], operations=[SceneEditIntent(operation='add', target="target")]))
     positions = []
     for index, seed in enumerate((0,0,17)):
-        app = BrainApplication(BrainConfig(provider="replay", seed=seed, output_dir=str(tmp_path / str(index))), provider=Provider(turn))
+        app = BrainApplication(BrainConfig(provider="replay", planner="recipe", seed=seed, output_dir=str(tmp_path / str(index))), provider=Provider(turn))
         report = app.handle(turn.instruction)
         assert report.run_status == "success", report
         scene = app.get_session(report.session_id).scene
@@ -92,7 +92,7 @@ def test_grounding_override_does_not_bypass_category_constraint():
 def test_generated_category_alias_works_through_full_pipeline(tmp_path):
     turn = robot()
     turn.task_intent.entities[0].category = "水果"
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path)), provider=Provider(turn))
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path)), provider=Provider(turn))
     report = app.handle("two apples")
     assert report.run_status == "success", report
     assert "commands" in report.artifacts

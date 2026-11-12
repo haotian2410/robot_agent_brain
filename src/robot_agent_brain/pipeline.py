@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .contracts.camera import CameraFrame
 from .contracts.commands import CommandsFile
+from .contracts.commands_atomic import AtomicCommandsFile
 from .contracts.commands_v3 import CommandsFileV3
 from .contracts.robot_setup import RobotSetup
 from .contracts.grounded_task import GroundedTask
@@ -101,7 +102,7 @@ class BrainResult(BaseModel):
     task_intent: TaskIntent | None = Field(default=None, alias="intent")
     grounded_task: GroundedTask | None = None
     skill_plan: SkillPlan | None = None
-    commands: CommandsFile | CommandsFileV3 | None = None
+    commands: CommandsFile | CommandsFileV3 | AtomicCommandsFile | None = None
     scene_patch: ScenePatch | None = None
     scene_replacement: SceneConfig | None = None
     scene_source_snapshot: str | None = None
@@ -131,8 +132,9 @@ class BrainResult(BaseModel):
             TurnKind.SCENE_QUERY: (self.scene_query_result,),
             TurnKind.SESSION_CONTROL: (self.session_action,),
         }
-        if isinstance(self.commands, CommandsFileV3):
-            # A staged v3 plan is not a flattened v2 SkillPlan.
+        if isinstance(self.commands, (CommandsFileV3, AtomicCommandsFile)):
+            # A staged v3 plan and the control atomic document are not a
+            # flattened v2 SkillPlan.
             groups[TurnKind.ROBOT_TASK] = (self.task_intent, self.grounded_task, self.commands)
         if self.turn_kind == TurnKind.ROBOT_TASK and self.robot_setup_changed is not None:
             groups[TurnKind.ROBOT_TASK] = (*groups[TurnKind.ROBOT_TASK], self.robot_setup_changed)
@@ -297,15 +299,14 @@ class BrainPipeline:
         }
 
     def _validate_robot_platform(self, scene, robot_profile=None):
-        """Guard the legacy single-arm exporter against platform mismatch.
+        """Guard the single-arm planning path against an ambiguous platform.
 
-        Imported Web scenes carry the authoritative robot MetadataRef.  The
-        old pipeline used ``self.exporter`` whenever no RobotProfile was
-        configured, which made Piper/CobotMagic scenes look like UR5e plans.
         Only arm-like robot objects participate; grippers, cameras and passive
-        articulated models are intentionally ignored.  A configured profile
-        has already validated its manifest and is therefore the explicit
-        opt-in path for a non-default platform.
+        articulated models are intentionally ignored.  The arm model is not a
+        capability claim: the control runtime resolves the URDF and joint table
+        from the imported scene, so one arm of any family may plan.  Two or more
+        arms are a dual-arm deployment, which needs an explicit ``RobotProfile``
+        because the manifest, not the scene, declares the command groups.
         """
         if robot_profile is not None or scene is None:
             return
@@ -332,22 +333,17 @@ class BrainPipeline:
                 # diagnostic useful if a direct caller bypasses Web validation.
                 name = ref.rsplit("/", 1)[-1]
             detected.append((oid, ref, name))
-        if not detected:
+        if len(detected) <= 1:
             return
-        expected = normalize_robot_platform_name(self.robot)
-        actual = []
-        for _, _, name in detected:
-            actual.append(normalize_robot_platform_name(name))
-        if any(value == expected for value in actual):
-            return
+        names = sorted({normalize_robot_platform_name(name) for _, _, name in detected})
         raise BrainError(
             "capability_unsupported",
             "processing",
-            f"场景机器人平台 {', '.join(sorted(set(actual)))} 未注册到当前 Brain 配置，"
-            f"当前命令配置为 {expected}；不会生成伪造的 UR5e 命令。",
+            f"场景中有 {len(detected)} 台机械臂（{', '.join(names)}），"
+            "双臂任务必须绑定 RobotProfile 声明命令组；未绑定时不会用单臂通路伪造双臂命令。",
             category="capability",
-            expected_robot=expected,
-            detected_robots=sorted(set(actual)),
+            configured_robot=normalize_robot_platform_name(self.robot),
+            detected_robots=names,
         )
 
     def understand_turn(self, instruction: str, *, scene: SceneConfig | None = None,
@@ -441,6 +437,30 @@ class BrainPipeline:
         if turn.status == TurnStatus.ACCEPTED and turn.turn_kind == TurnKind.ROBOT_TASK:
             turn = turn.model_copy(update={"task_intent": normalize_motion_language(turn.task_intent)})
         return turn
+
+    def decompose(self, instruction: str, *, scene: SceneConfig | None = None):
+        """Split a multi-task utterance, or report that there is nothing to split.
+
+        ``None`` means "run this utterance the way every deployment always has"
+        -- no provider for the stage, an utterance with no sequencing in it, a
+        model that declined to split, or an answer that violates the contract.
+        The asymmetry is deliberate: a missed split only costs the user the
+        clarification they would have got anyway, while a invented split would
+        run actions nobody asked for.
+        """
+        from .models.task_decomposition import (TaskDecompositionRequest, preserve_explicit_pronoun_step,
+                                                 worth_splitting)
+
+        if not hasattr(self.understanding, "decompose") or not worth_splitting(instruction):
+            return None
+        try:
+            value = self.understanding.decompose(TaskDecompositionRequest(
+                instruction=instruction, scene_context=self._understanding_scene_context(scene)))
+        except Exception:
+            return None
+        if value is None or not value.composite:
+            return None
+        return preserve_explicit_pronoun_step(instruction, value)
 
     def process_turn(self, request_id: str, turn: BrainTurn, scene: SceneConfig | None, *,
                      dialogue=None, bindings_override=None, edit_defaults=None,
@@ -554,15 +574,15 @@ class BrainPipeline:
             return BrainResult(task_intent=intent, grounded_task=grounded, commands=commands,
                 focus_object_ids=list(dict.fromkeys(by_entity[op.source or op.target] for op in operations)),
                 planner_used=mode, planner_trace=trace.debug_payload())
-        planning = self.skill_planner.plan(grounded, held_object=held_object, scene=scene)
-        plan = planning.plan
-        exporter = CommandExporter(robot=robot_profile.v2_robot) if robot_profile is not None else self.exporter
-        commands = exporter.export(request_id, grounded, plan, scene, held_object=held_object)
+        # The control runtime consumes the atomic-skill document directly, so
+        # the semantic SkillPlan and the legacy exporter stay off this path.
+        commands = self.skill_planner.plan_atomic(request_id, grounded, scene, held_object=held_object)
+        trace = self.skill_planner.last_trace
         by_entity = {e.entity_id:e.scene_object_id for e in grounded.entities}
         focus = list(dict.fromkeys(by_entity[op.source or op.target] for op in grounded.operations))
-        return BrainResult(task_intent=intent, grounded_task=grounded, skill_plan=plan, commands=commands,
-                           focus_object_ids=focus, planner_used=planning.trace.used_planner,
-                           planner_trace=planning.trace.debug_payload())
+        return BrainResult(task_intent=intent, grounded_task=grounded, commands=commands,
+                           focus_object_ids=focus, planner_used=trace.used_planner,
+                           planner_trace=trace.debug_payload())
 
     def run(self, request_id: str, instruction: str, scene: SceneConfig, *,
             dialogue=None, capture: Callable[[], CameraFrame] | None = None,

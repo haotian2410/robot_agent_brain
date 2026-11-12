@@ -104,7 +104,7 @@ class SceneQueryEngine:
             reference_id = reference.object_id_in_scene
             if reference_id == subject.object_id_in_scene:
                 raise ValueError("query_subject_reference_same")
-            holds = bool(SceneRelationResolver().resolve([subject], [ResolvedSelectionRelation(
+            holds = bool(SceneRelationResolver(self.assets).resolve([subject], [ResolvedSelectionRelation(
                 relation=intent.predicate, reference_object_id=reference_id)], scene))
             wording = {"left_of": "左边", "right_of": "右边", "front_of": "前方", "behind": "后方",
                        "above": "上方", "below": "下方", "on": "支撑面上"}[intent.predicate]

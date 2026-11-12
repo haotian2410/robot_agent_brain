@@ -12,3 +12,5 @@ model/grasp_objects/
 model/grasp_objects.7z
 model/final_models/
 model/final_models.7z
+
+.idea/

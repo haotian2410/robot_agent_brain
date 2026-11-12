@@ -2,7 +2,6 @@ from ..contracts.camera import CameraRequest
 from ..contracts.commands import ExecutionFeedback, canonical_commands
 from ..contracts.scene import SceneConfig
 from ..scene.scene_manager import SceneManager
-from ..adapters.ols_robot_assembly import is_ur5_platform_name
 from .dialogue_state import DialogueState
 from ..errors import SceneCommitRejected
 
@@ -232,17 +231,40 @@ class BrainSession:
         return changed
 
     def _platform_execution_capability(self, scene=None):
-        """Return planning compatibility, separately from display assembly.
+        return self._execution_capability_detail(scene)[0]
 
-        OLS metadata proves that a platform can be displayed and mounted; it
-        does not register a planning group or Control mapping.  Explicit
-        profiles therefore win.  The historic single-arm path remains a
-        narrowly checked UR5e legacy descriptor rather than a name-only
-        shortcut.
+    def _execution_capability_detail(self, scene=None):
+        """Return ``(capability, reason)`` for planning on this platform.
+
+        Single-arm support is deliberately model-agnostic: the control runtime
+        resolves the URDF and joint table from the imported scene, so the gate
+        counts arms and then requires that arm's OLS driver to describe the
+        scene it was assembled into.  A platform name is never a capability
+        claim.  Dual-arm deployments still need an explicit ``RobotProfile``;
+        OLS assembly metadata alone proves display only.
+
+        Neither a missing ``robot_asset`` binding nor an arm the reader cannot
+        count blocks a task.  The catalog match only adds joint-table validation
+        when it is available, and an unreadable scene is not evidence that the
+        platform cannot act -- refusing on it turned every freshly imported scene
+        into ``platform_unbound``, which is a Brain-side guess about a control-side
+        fact.
         """
         scene = scene or self.scene
-        if not self.robot_asset or scene is None or self.robot_assembly_adapter is None:
-            return "unsupported"
+        if scene is None or self.robot_assembly_adapter is None:
+            return "unsupported", "platform_unbound"
+        arms = self.robot_assembly_adapter.classify_scene(scene).get("arm", [])
+        if not arms:
+            # An unresolvable OLS reference is not a missing arm.  Count the objects
+            # that actually carry an active RobotDriver component instead.
+            from ..scene.component_access import SceneIndex
+            index = SceneIndex(scene)
+            drivers = [(obj.object_id_in_scene, index.robot_driver(obj.object_id_in_scene))
+                       for obj in scene.objects]
+            arms = [(object_id, None) for object_id, driver in drivers
+                    if driver is not None and getattr(driver, "role", None) != "passive"]
+        if len(arms) > 1:
+            return "unsupported", f"single_arm_required: scene_has_{len(arms)}_arms"
         if self.robot_profiles and self.robot_profiles.profiles:
             for profile in self.robot_profiles.profiles.values():
                 try:
@@ -250,29 +272,37 @@ class BrainSession:
                 except Exception:
                     continue
                 if profile.setup.mode == "single":
-                    return "supported"
-            return "unsupported"
-        configured_robot = getattr(self.pipeline, "robot", "ur5e")
-        if not is_ur5_platform_name(configured_robot) or not is_ur5_platform_name(self.robot_asset):
-            return "unsupported"
+                    return "supported", ""
+            return "unsupported", "no_registered_profile_matches_scene"
+        if not self.robot_asset or not arms:
+            # Nothing further can be compared: either the platform was never bound to
+            # a catalog entry, or the scene declares no arm this reader can count.  A
+            # scene with no readable arm is not a capability claim -- the control
+            # builds its robot from the same document and owns that refusal.
+            return "supported", ""
         try:
             expected = self.robot_assembly_adapter.resolve(self.robot_asset, role="arm")
             from ..scene.component_access import SceneIndex
-            actual = SceneIndex(scene).robot_driver(
-                self.robot_assembly_adapter.classify_scene(scene)["arm"][0][0])
+            actual = SceneIndex(scene).robot_driver(arms[0][0])
             expected_driver = expected.driver or {}
-            if actual is None or list(actual.joint_sequence) != list(expected_driver.get("joint_sequence", [])):
-                return "unsupported"
-            expected_limits = expected_driver.get("joint_limits", {})
+            expected_sequence = [str(name) for name in expected_driver.get("joint_sequence", [])]
+            if actual is None:
+                return "unsupported", "scene_robot_driver_missing"
+            actual_sequence = [str(name) for name in actual.joint_sequence]
+            if actual_sequence != expected_sequence:
+                return "unsupported", ("joint_sequence_mismatch: scene="
+                                       + ",".join(actual_sequence) + " ols=" + ",".join(expected_sequence))
+            expected_limits = {str(name): tuple(float(item) for item in values)
+                               for name, values in (expected_driver.get("joint_limits") or {}).items()}
             actual_limits = {str(name): tuple(float(item) for item in values)
                              for name, values in (actual.joint_limits or {}).items()}
-            expected_limits = {str(name): tuple(float(item) for item in values)
-                               for name, values in (expected_limits or {}).items()}
             if actual_limits != expected_limits:
-                return "unsupported"
-        except Exception:
-            return "unsupported"
-        return "supported"
+                differing = sorted(name for name in set(expected_limits) | set(actual_limits)
+                                   if expected_limits.get(name) != actual_limits.get(name))
+                return "unsupported", "joint_limits_mismatch: " + ",".join(differing)
+        except Exception as exc:
+            return "unsupported", f"assembly_check_failed: {type(exc).__name__}: {exc}"
+        return "supported", ""
 
     def _commit_manager(self, manager):
         self.scene_manager = manager
@@ -432,11 +462,17 @@ class BrainSession:
     def check_turn(self, turn):
         if turn.scene_edit is not None and turn.scene_edit.scene_basis == "original" and self.original_scene_manifest is None:
             raise ValueError("original_scene_unavailable")
-        if turn.turn_kind == "robot_task" and self.execution_capability != "supported" and (
-                self.robot_asset is not None or self.scene is not None
-                and self.robot_assembly_adapter is not None
-                and self.robot_assembly_adapter.classify_scene(self.scene)["arm"]):
-            raise ValueError("capability_unsupported")
+        if turn.turn_kind == "robot_task" and self.robot_asset is not None \
+                and self.scene is not None and self.robot_assembly_adapter is not None:
+            # Only a platform this session has actually read can be refused here.
+            # A session with no scene, no assembly adapter or no catalog binding is
+            # *unknown*, not unsupported, and refusing on unknown turned every fresh
+            # scene into ``platform_unbound``: the control side reads the same
+            # document and owns that judgment.  A bound platform is different -- its
+            # joint table is a claim this Brain already made.
+            capability, reason = self._execution_capability_detail()
+            if capability != "supported":
+                raise ValueError("capability_unsupported" + (": " + reason if reason else ""))
         if turn.robot_asset_switch is not None:
             if self.release_policy is not None:
                 self.release_policy.deny_dynamic_platform()

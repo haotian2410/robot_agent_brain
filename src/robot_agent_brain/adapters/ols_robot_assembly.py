@@ -19,11 +19,14 @@ from ..scene.component_access import SceneIndex
 from ..scene.scene_graph import world_transform
 
 
+# Naming aliases of one and the same platform, used to look an OLS entry up by
+# an old name.  This is identity, never an allow-list: single-arm executability
+# is judged by the scene gate in ``BrainSession._platform_execution_capability``.
 _UR5_PLATFORM_NAMES = frozenset({"ur5", "ur5e", "ur5e_arm"})
 
 
 def normalize_robot_platform_name(value: str | None) -> str:
-    """Normalize only the known UR5/UR5e naming family.
+    """Collapse the UR5/UR5e naming family onto one platform identifier.
 
     OLS 1.0.8 renamed robot 1 from ``ur5e_arm`` to ``ur5`` while the legacy
     planning backend remains named ``ur5e``. Other platforms stay distinct.

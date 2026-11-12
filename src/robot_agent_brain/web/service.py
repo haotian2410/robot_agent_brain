@@ -10,6 +10,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 from aiohttp import web
 from pydantic import ValidationError
+from ..adapters.ols_index import index_by_id
 from ..application import BrainApplication
 from ..config import BrainConfig
 from ..scene.component_access import SceneIndex
@@ -29,6 +30,18 @@ _DEBUG_FILES = {
     "traceback.txt", "planner_context.json", "planner_skill_catalog.json",
     "raw_skill_plan.json", "normalized_skill_plan.json", "skill_plan_validation.json",
 }
+
+
+def failure_detail(reason, code, fallback="控制端未报告成功"):
+    """Quote the control's evidence sentence exactly once, keeping the code readable.
+
+    ``error_messages`` already renders 「中文句（CODE）」, so appending the code again
+    would print it twice inside one sentence the user has to read.
+    """
+    text = (reason or "").strip()
+    if not text:
+        return code or fallback
+    return text if not code or code in text else f"{text}（{code}）"
 
 
 class AgentService:
@@ -57,6 +70,10 @@ class AgentService:
         self.queue = asyncio.Queue()
         self.mutex = asyncio.Lock()
         self.worker = None
+        self.execution_port = None
+        # A dispatch freezes the browser for as long as the simulator runs, so the
+        # only useful answer to "what is it doing" is the command it is on.
+        self.progress = {}
         self.last_health = {}
         self.assets_check = None
         self.assets_refreshing = False
@@ -81,6 +98,32 @@ class AgentService:
             joint_inventory=self.joints, reference_registry=self.references,
             journal_dir=self.output / self.binding["id"] / "gateway_transactions")
 
+    def execution(self):
+        """The control runner, built on first use so an offline service needs no exec env.
+
+        The asset root is the OLS data directory the browser itself reads from:
+        the control side resolves every mesh path against it, so a second copy
+        of the library would mean two worlds that drift apart.
+        """
+        if not self.config.execution_enabled:
+            # The configuration is the only execution authorization, so a runner
+            # fitted onto a service that forbids dispatching stays unused.
+            return None
+        if self.execution_port is None:
+            from ..adapters.subprocess_execution import SubprocessExecutionAdapter
+            if not self.config.asset_library_root:
+                raise ValueError("execution_asset_root_required")
+            self.execution_port = SubprocessExecutionAdapter(
+                python=self.config.execution_python, control_root=self.config.execution_control_root,
+                library=self.config.execution_library, link_root=self.config.execution_link_root,
+                asset_root=self.config.asset_library_root, object_library_url=self.ols_url,
+                workspace_root=self.config.execution_workspace_root or str(self.output / "executions"),
+                timeout_seconds=self.config.execution_timeout_seconds,
+                # Perception is the same model the Brain plans with: the control
+                # side would otherwise reach for its own, unusable cloud key.
+                vlm_base_url=self.config.base_url, vlm_model=self.config.model)
+        return self.execution_port
+
     def _bind(self, session_id):
         self.binding = self.tasks.binding(session_id)
         session = self.app.get_session(session_id)
@@ -96,9 +139,10 @@ class AgentService:
             manifest = self.config.editor_scene_manifests.get(scene.scene_name)
             if manifest is None:
                 raise ValueError("web_platform_profile_unsupported")
-            index = json.loads((Path(self.config.asset_library_root) / "scenes/scene_index.json").read_text(encoding="utf-8"))
-            item = next(i for i in index if i["name"] == scene.scene_name)
-            template = self.app.codec.load(Path(self.config.asset_library_root) / "scenes" / str(item["id"]) / (item["name"] + ".json"))
+            scenes = {name: identifier for identifier, name in index_by_id(json.loads(
+                (Path(self.config.asset_library_root) / "scenes/scene_index.json").read_text(encoding="utf-8"))).items()}
+            identifier = scenes[scene.scene_name]
+            template = self.app.codec.load(Path(self.config.asset_library_root) / "scenes" / str(identifier) / (scene.scene_name + ".json"))
         catalog = {item["asset_key"] for item in self.app.robot_assembly.catalog()}
         if template is not None and catalog:
             actual = SceneIndex(scene)
@@ -296,6 +340,7 @@ class AgentService:
         session = None
         platform = None
         result = None
+        trajs = []
         uncertain = False
         try:
             session = self._bind(request.sessionID)
@@ -331,27 +376,11 @@ class AgentService:
             # all been validated; model output cannot manufacture it.
             session.active_task_owner = identifier
             session.active_task_browser = request.browserID
-            report = self.app.handle(request.command, session_id=request.sessionID)
-            record_path = self.output / request.sessionID / report.request_id / "request_record.json"
-            turn_record = json.loads(record_path.read_text(encoding="utf-8"))
-            # Original derivation remaps the frozen original IDs, not the previous
-            # branch's camera ID. Revalidate semantic binding on the confirmed scene.
-            if session.scene is not None:
-                session.camera_id, camera_reason = choose_camera(session.scene)
-                platform.camera_id = session.camera_id
-                self.camera_bindings[request.sessionID] = session.camera_id
-            result = self.result(report, identifier)
-            result["camera_id"] = session.camera_id
-            result["camera_selection_reason"] = camera_reason if session.scene is not None else "no_scene"
-            # Even non-mutating plans must still refer to the live editor state.
-            # A scene edit may have been committed during this task.  Compare the final
-            # result with the browser's current world, not the lease's initial snapshot;
-            # otherwise a successful generated-scene commit is reported as scene_changed.
-            if session.scene is not None and digest(platform.read_live(lease_snapshot=False)) != digest(session.scene):
-                session.sync_state = "unknown"
-                raise ValueError("gateway_scene_changed_during_task")
-            result["sceneDigest"] = digest(session.scene) if session.scene else None
-            result["commitReceipts"] = list(platform.receipts)
+            steps = self.decomposition(request, session)
+            if steps is None:
+                report, result, trajs = self._run_step(session, platform, request, identifier, request.command)
+            else:
+                result, trajs = self._run_steps(session, platform, request, identifier, steps)
             uncertain = session.sync_state == "unknown"
         except Exception as exc:
             uncertain = (session is not None and session.sync_state == "unknown") or (platform is not None and platform.lease_uncertain)
@@ -400,8 +429,348 @@ class AgentService:
                     result = {**(result or {}),"outcome":"failed","executed":False,
                               "reply":"会话保存失败，现场状态需要人工确认。",
                               "error":{"code":"checkpoint_write_failed","message":str(exc)}}
-        self.tasks.update(identifier, "任务失败" if result["outcome"] == "failed" else "任务完成",
-                          result, uncertain=uncertain, terminal=True)
+        # The state word is the panel's headline, so it has to name what landed.
+        # Reading everything that was not "failed" as 任务完成 called a refused
+        # capability and an unanswered clarification both successes on an empty stage.
+        delivered = {"scene_updated", "answered", "plan_ready", "robot_configured"}
+        outcome = result.get("outcome")
+        state = ("任务完成" if outcome in delivered
+                 else "等待澄清" if outcome == "clarification_required" else "任务失败")
+        self.tasks.update(identifier, state, result, uncertain=uncertain, terminal=True)
+        # Playback rides after the lease: releasing is what stops a browser that is
+        # already playing, so the clips have to go out once the lock is gone.
+        return trajs
+
+    STEP_MARKS = "①②③④⑤⑥⑦⑧⑨⑩"
+    # The one turn record has to carry one verdict for the whole sentence, so the
+    # loudest thing that happened wins: an unexecuted plan outranks a purely
+    # informational answer because it is the step the user still has to act on.
+    COMPOSITE_PRIORITY = ("failed", "clarification_required", "scene_updated",
+                          "plan_ready", "robot_configured", "answered")
+    # The control end reads the grasp point and the drop point off RGB-D pixels, so both
+    # move a centimetre or so between attempts while a grasp inside a basket only
+    # tolerates about two -- one measured refusal put the gripper base 0.05 mm from the
+    # basket wall and ruled out all eleven placement heights.  Every code here is the control
+    # saying it did not land the skill (空爪、途中掉物、未执行放置), so the step wrote no
+    # world back, the next attempt rebuilds its simulator from the unchanged browser
+    # document, and repeating it buys another sample rather than another side effect.
+    # Judgments about the plan itself -- a collision refusal raised before anything ran
+    # -- are not repeated, because resampling the same pixels cannot change geometry.
+    # ``PATH_CONSTRAINT_INFEASIBLE`` is in the retryable set even though it is a planning
+    # refusal, because the state it refuses to leave is this attempt's own physics: job 79
+    # ran approach/pick/lift_up and then found the carried apple 0.324 mm inside the tray
+    # wall, a resting-contact depth the Cartesian retreat cannot start from.  Two attempts
+    # before it had cleared the same command, so the sample -- not the geometry -- was the
+    # variable.
+    # ``97426b0`` put a wrist-camera re-estimate behind every visual ``approach``, and the
+    # handle path estimates its pose off one VLM reply: both are refusals about a single
+    # sample of pixels, which is what a retry resamples.
+    RETRYABLE_EXECUTION_CODES = ("GRASP_NOT_CONFIRMED", "GRASP_DEPTH_SEARCH_FAILED", "GRASP_FAILED",
+                                 "PLACEMENT_HEIGHT_SEARCH_FAILED", "PLACEMENT_PERCEPTION_FAILED",
+                                 "PLACEMENT_REGION_UNOBSERVED", "WRIST_GRASP_REFINEMENT_FAILED",
+                                 "HANDLE_POSE_ESTIMATION_FAILED", "PATH_CONSTRAINT_INFEASIBLE")
+    MAX_STEP_ATTEMPTS = 5
+
+    def decomposition(self, request, session):
+        """The ordered subtasks one sentence splits into, or None for a single turn.
+
+        A platform rebind is one atomic assembly change, so it never takes the
+        composite path, and an unavailable provider or an unconvincing split falls
+        back to today's behavior instead of failing the task.
+        """
+        if request.change_kind != "scene_edit":
+            return None
+        try:
+            value = session.pipeline.decompose(request.command, scene=session.scene)
+        except Exception:
+            return None
+        return None if value is None else list(value.steps)
+
+    def _run_step(self, session, platform, request, identifier, instruction):
+        """One turn plus every side effect that turn is allowed to have.
+
+        A scene edit commits inside ``app.handle``; an exported plan is dispatched
+        here, after the live reading proves the browser still shows the world the
+        plan was derived from.  Playback is deliberately not part of the step --
+        the clips leave only once the lease does, so the caller keeps them.
+        """
+        from .camera_policy import choose_camera
+        report = self.app.handle(instruction, session_id=request.sessionID)
+        camera_reason = None
+        # Original derivation remaps the frozen original IDs, not the previous
+        # branch's camera ID. Revalidate semantic binding on the confirmed scene.
+        if session.scene is not None:
+            session.camera_id, camera_reason = choose_camera(session.scene)
+            platform.camera_id = session.camera_id
+            self.camera_bindings[request.sessionID] = session.camera_id
+        result = self.result(report, identifier)
+        result["camera_id"] = session.camera_id
+        result["camera_selection_reason"] = camera_reason if session.scene is not None else "no_scene"
+        # Even non-mutating plans must still refer to the live editor state.
+        # A scene edit may have been committed during this task.  Compare the final
+        # result with the browser's current world, not the lease's initial snapshot;
+        # otherwise a successful generated-scene commit is reported as scene_changed.
+        if session.scene is not None and digest(platform.read_live(lease_snapshot=False)) != digest(session.scene):
+            session.sync_state = "unknown"
+            raise ValueError("gateway_scene_changed_during_task")
+        # Dispatch only against the world the plan was derived from, and only
+        # after that reading: the runner rebuilds its simulator from the bytes
+        # the browser is showing, so a stale document would execute a plan for
+        # objects that are no longer there.
+        trajs = []
+        if self.execution() is not None and "commands" in report.artifacts \
+                and result["outcome"] == "plan_ready":
+            trajs = self.dispatch(session, platform, report, identifier, result)
+        result["sceneDigest"] = digest(session.scene) if session.scene else None
+        result["commitReceipts"] = list(platform.receipts)
+        return report, result, trajs
+
+    def _run_steps(self, session, platform, request, identifier, steps):
+        """Walk the subtasks in order, keeping whatever already landed.
+
+        This is the 分一个做一个 policy: an ambiguous third step must not throw
+        away two finished ones, and must not pretend the robot sat still either.
+        So the loop stops at the first refusal and the reply names the step it
+        stopped on.  The price is a visible intermediate world -- there is no
+        rollback channel, and writing the old poses back would be a second set of
+        side effects, not an undo.
+        """
+        results, records, trajs = [], [], []
+        for index, step in enumerate(steps, start=1):
+            self.progress[identifier] = f"拆分执行 {index}/{len(steps)} · {step.instruction}"
+            receipts_before = len(platform.receipts)
+            report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction)
+            attempts = 1
+            while (attempts < self.MAX_STEP_ATTEMPTS and len(platform.receipts) == receipts_before
+                   and (result.get("error") or {}).get("code") in self.RETRYABLE_EXECUTION_CODES):
+                attempts += 1
+                self.progress[identifier] = f"拆分执行 {index}/{len(steps)} · 第 {attempts} 次尝试 · {step.instruction}"
+                report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction)
+            trajs += step_trajs
+            results.append(result)
+            record = {"step": index, "kind": step.kind.value, "instruction": step.instruction,
+                      "request_id": report.request_id, "outcome": result["outcome"],
+                      "attempts": attempts,
+                      "executed": bool(result.get("executed")), "verdict": self.verdict(result),
+                      # A rejected receipt is the gateway saying "nothing landed", so it must not
+                      # be counted as a commit: the step that drew it changed no world.
+                      "commits": sum(1 for item in platform.receipts[receipts_before:]
+                                     if item.get("status") == "committed"),
+                      "artifacts": sorted(result.get("_artifact_paths") or {})}
+            if attempts > 1:
+                record["verdict"] += f"、第 {attempts} 次尝试"
+            if record["outcome"] in {"clarification_required", "failed"}:
+                record["state"] = "stopped"
+                records.append(record)
+                break
+            if record["outcome"] == "plan_ready" and index < len(steps):
+                # An exported plan is a claim on the arm and on the scene version it
+                # was derived from; committing a later step would invalidate the export
+                # the user was shown without anything ever running it.  So the walk
+                # stops on an unexecuted plan and says which step is waiting.
+                record["state"] = "stopped"
+                record["stop_reason"] = "plan_not_executed"
+                records.append(record)
+                break
+            execution = result.get("execution") or {}
+            if index < len(steps) and record["outcome"] == "scene_updated" and result.get("executed") \
+                    and not execution.get("moved_object_ids"):
+                # The next arm run rebuilds its simulator from the browser document, so a
+                # run that reported no executed pose would leave that step acting on a
+                # world the previous run supposedly changed.  Stop rather than chain.
+                record["state"] = "stopped"
+                record["stop_reason"] = "execution_writeback_missing"
+                records.append(record)
+                break
+            if index < len(steps) and result.get("executed") and execution.get("holding_object"):
+                # A run that ends with the gripper occupied has no follow-up: the rebuild
+                # starts with empty fingers, so the held object would be in two places at
+                # once.  Single-step turns keep today's behavior; only the chain stops.
+                record["state"] = "stopped"
+                record["stop_reason"] = "arm_still_holding"
+                records.append(record)
+                break
+            record["state"] = "completed"
+            records.append(record)
+        for index in range(len(records) + 1, len(steps) + 1):
+            step = steps[index - 1]
+            records.append({"step": index, "kind": step.kind.value, "instruction": step.instruction,
+                            "state": "not_run", "verdict": "未执行", "attempts": 0,
+                            "commits": 0, "executed": False})
+        result = self.composite_result(records, results, steps)
+        return result, trajs
+
+    @staticmethod
+    def verdict(result):
+        outcome = result.get("outcome")
+        if outcome == "scene_updated" and result.get("executed"):
+            # A run that reported no executed pose wrote nothing back, so claiming the
+            # scene now shows the object where the arm left it would be a reading of the
+            # report's silence rather than of the world.
+            return ("已执行并写回场景" if (result.get("execution") or {}).get("moved_object_ids")
+                    else "已执行未报告位姿")
+        return {"scene_updated": "场景已更新", "plan_ready": "计划已生成未执行", "answered": "已回答",
+                "robot_configured": "平台已配置", "clarification_required": "需要澄清",
+                "failed": "未完成"}.get(outcome, outcome or "未完成")
+
+    def composite_result(self, records, results, steps):
+        """Collapse the per-step envelopes into the one record the panel renders."""
+        result = dict(results[-1])
+        outcome = next((state for state in self.COMPOSITE_PRIORITY
+                        if any(item["outcome"] == state for item in results)), "answered")
+        stopped = next((record for record in records if record["state"] == "stopped"), None)
+        if stopped and stopped.get("stop_reason") == "plan_not_executed":
+            outcome = "plan_ready"
+        done = [record for record in records if record["state"] == "completed"]
+        parts = [f"共 {len(steps)} 步，已完成 {len(done)} 步"]
+        if done:
+            parts.append("：" + "".join(
+                f"{self.STEP_MARKS[record['step'] - 1]}{record['instruction']}（{record['verdict']}）"
+                for record in done) + "。")
+        if stopped is not None:
+            index = stopped["step"]
+            if stopped.get("stop_reason") == "plan_not_executed":
+                parts.append(f"第 {index} 步「{stopped['instruction']}」只生成了计划、尚未执行，"
+                             f"后续步骤需要机器人空闲后再说。")
+            elif stopped.get("stop_reason") == "execution_writeback_missing":
+                parts.append(f"第 {index} 步「{stopped['instruction']}」执行完成，但控制端没有报告任何"
+                             f"物体的新位姿，场景无法据此更新，后续步骤需要机器人重新执行后再说。")
+            elif stopped.get("stop_reason") == "arm_still_holding":
+                parts.append(f"第 {index} 步「{stopped['instruction']}」执行后夹爪仍持有物体，"
+                             f"后续步骤需要机器人先放下手里物体后再说。")
+            elif stopped["outcome"] == "clarification_required":
+                question = (results[index - 1].get("clarification_question")
+                            or results[index - 1].get("reply") or stopped["verdict"])
+                parts.append(f"第 {index} 步「{stopped['instruction']}」有歧义：{question} "
+                             f"该步未执行。")
+            else:
+                error = (results[index - 1].get("error") or {})
+                retries = (f"，重试 {stopped['attempts'] - 1} 次后仍未成功"
+                           if stopped.get("attempts", 1) > 1 else "")
+                # The code alone is a log line, not an answer: the control's own Chinese
+                # evidence sentence is what tells the person which search failed, so the
+                # stopped step quotes it and keeps the code for the diagnostics.
+                detail = failure_detail(error.get("message"), error.get("code"),
+                                        stopped["verdict"])
+                parts.append(f"第 {index} 步「{stopped['instruction']}」未完成：{detail}"
+                             f"{retries}，未执行。")
+            remaining = len(steps) - index
+            if remaining > 0:
+                parts.append(f" 后续 {remaining} 步未执行。")
+        result.update(outcome=outcome, reply="".join(parts),
+                      executed=any(bool(item.get("executed")) for item in results))
+        paths, artifacts = {}, {}
+        for item in results:
+            paths.update(item.get("_artifact_paths") or {})
+            for entry in item.get("artifacts") or []:
+                artifacts[entry["name"]] = entry["url"]
+        result["_artifact_paths"] = paths
+        result["artifacts"] = [{"name": name, "url": artifacts[name]} for name in artifacts]
+        for item in results:
+            for key in ("plan", "planSummary", "clarification_question"):
+                if item.get(key) is not None:
+                    result.setdefault(key, item[key])
+        metrics = result.get("metrics")
+        metrics = dict(metrics) if isinstance(metrics, dict) else {}
+        metrics.update(subtasks=len(steps), steps=records)
+        result["metrics"] = metrics
+        return result
+
+    def dispatch(self, session, platform, report, identifier, result):
+        """Act out the exported plan, then make the browser's world the executed one.
+
+        Two rules carry the safety.  Success is claimed only when the runner
+        accounted for every command, since a partial row set cannot be reported as
+        a completed plan; and a run that failed writes no poses back, because the
+        simulator may have left an object mid-transit -- its scratch world is
+        rebuilt from the browser document on the next dispatch, so a half-finished
+        grasp is discarded rather than inherited.  A failed clip is still handed
+        back: showing the arm stop short is the only evidence the browser gets of
+        what went wrong, and playback happens after the lease, so it cannot be
+        mistaken for a committed world.  Returning the trajectory is the caller's
+        job: it has to leave after the lease does.
+        """
+        from ..contracts.commands import CommandFeedback, ExecutionFeedback, parse_commands
+        from ..ports.execution import ExecutionOutcome
+        if not self.config.execution_enabled:
+            # Checked here rather than only where the runner is built: this is the
+            # seam that moves the robot, and nothing is pending yet, so refusing
+            # costs the session nothing.
+            raise ValueError("execution_disabled")
+        commands = parse_commands(json.loads(Path(report.artifacts["commands"]).read_text(encoding="utf-8")))
+        total = len(commands.commands)
+
+        def progress(steps):
+            self.progress[identifier] = f"执行中 {len(steps)}/{total} · {steps[-1].skill_name}"
+
+        session.mark_dispatched(commands)
+        try:
+            outcome = self.execution().run(commands, session.scene.raw_document(), progress=progress)
+        except Exception as exc:
+            # A runner that never started still owes the session a feedback row, or
+            # the dispatch would stay pending for every later task.
+            outcome = ExecutionOutcome(ok=False, error_code="execution_dispatch_failed",
+                                       detail=f"{type(exc).__name__}: {exc}")
+        reported = {step.command_id for step in outcome.steps}
+        success = (outcome.ok and reported == {command.command_id for command in commands.commands}
+                   and all(step.status == "success" for step in outcome.steps))
+        candidate = self.executed_scene(session.scene, outcome, commands) if success else None
+        session.apply_execution_feedback(
+            ExecutionFeedback(request_id=commands.request_id, status="success" if success else "partial",
+                              commands=[CommandFeedback(command_id=step.command_id,
+                                                         status="success" if step.status == "success" else "failed")
+                                        for step in outcome.steps]),
+            confirmed_scene=candidate, feedback_source="external")
+        if candidate is None and digest(platform.read_live(lease_snapshot=False)) == digest(session.scene):
+            # Nothing was committed and the browser still shows the planned world, so
+            # "synchronized" here is a reading rather than an assumption.
+            session.sync_state = "synchronized"
+        result.update(executed=success, outcome="scene_updated" if success else "failed",
+                      execution={**outcome.summary,
+                                 "writeback_status": "committed" if candidate is not None else "none"},
+                      reply=(f"已执行 {total} 条命令并写回场景。" if success else
+                             f"执行未完成：{failure_detail(outcome.detail, outcome.error_code)}。"))
+        if not success:
+            result["error"] = {"code": outcome.error_code or "execution_failed",
+                               "message": outcome.detail or "控制端未报告成功",
+                               "details": {"diagnostic_id": report.request_id}}
+        return [outcome.traj_path] if outcome.traj_path else []
+
+    @staticmethod
+    def executed_scene(scene, outcome, commands):
+        """The planned world with each moved object re-stamped at its executed pose.
+
+        Only objects the document itself addressed are written back: a report that
+        claims the robot base or a gripper link changed position is not something
+        this round can explain, and committing it would rewrite the platform.
+        ``SceneManager`` keeps every untouched object byte-for-byte and bumps the
+        version by one, which is the shape a ``scene_edit`` commit requires.
+        """
+        from ..contracts.scene import PatchAction, SceneComponent, ScenePatch, ScenePatchOperation
+        from ..scene.scene_manager import SceneManager
+        touched = {command.parameters.target for command in commands.commands
+                   if isinstance(getattr(command.parameters, "target", None), int)}
+        objects = {item.object_id_in_scene: item for item in scene.objects}
+        operations = []
+        for object_id, pose in sorted(outcome.moved.items()):
+            if object_id not in touched:
+                continue
+            obj = objects.get(object_id)
+            if obj is None:
+                raise ValueError(f"execution_reported_unknown_object: {object_id}")
+            transform = next((component for component in obj.components
+                              if component.component_type == "Transform"), None)
+            if transform is None:
+                raise ValueError(f"execution_object_without_transform: {object_id}")
+            operations.append(ScenePatchOperation(
+                action=PatchAction.UPSERT_COMPONENT, object_id_in_scene=object_id,
+                component=SceneComponent(component_type="Transform", properties={
+                    **transform.properties, "position": list(pose["position"]),
+                    "quaternion_xyzw": list(pose["quaternion_xyzw"])})))
+        if not operations:
+            return None
+        return SceneManager(scene).apply_patch(ScenePatch(scene_id=scene.scene_id,
+            base_scene_version=scene.scene_version, operations=operations))
 
     def result(self, report, identifier):
         outcome = {"scene_updated":"scene_updated","answered":"answered","commands_exported":"plan_ready",
@@ -425,14 +794,15 @@ class AgentService:
             for call in metrics["model_call_details"]:
                 if call.get("error"):
                     call["error"] = f"详见本机诊断 {report.request_id}"
-        result.update(taskID=identifier, sessionID=report.session_id, outcome=outcome, executed=False)
+        result.update(taskID=identifier, sessionID=report.session_id, outcome=outcome,
+                      executed=bool(report.executed))
         if report.execution_capability == "unsupported" and report.delivery_status == "robot_configured":
             result.update(outcome="scene_updated", execution_capability="unsupported", failure_class="capability_unsupported")
         if isinstance(result.get("error"), dict) and result["error"].get("code") in {
                 "web_platform_profile_unsupported", "capability_unsupported", "robot_profile_not_registered",
                 "robot_setup_profile_not_registered", "dual_planner_capability_unsupported",
-                "dual_recipe_capability_unsupported"}:
-            result.update(outcome="unsupported", failure_class="capability_unsupported", terminal=True)
+                "dual_recipe_capability_unsupported", "control_dual_arm_not_ready"}:
+            result.update(outcome="failed", failure_class="capability_unsupported", terminal=True)
         result["artifacts"] = [{"name": name, "url": f"/tasks/{identifier}/artifacts/{quote(name)}"}
                                for name in report.artifacts
                                if name in {"scene_config", "scene_patch", "commands", "query_result"}]
@@ -457,8 +827,10 @@ class AgentService:
     def health(self):
         status = {"service":"ready","protocol":PROTOCOL_VERSION,"executed":False,
             "qwen":"unavailable","browser":"not_bound","assets":"unconfigured",
-            "capabilities":{"control":False,"segmentation":False,"active_browser_limit":1,
+            "capabilities":{"control":"unavailable","segmentation":False,"active_browser_limit":1,
                 "requires_open_browser":True,"gateway_protocol":PROTOCOL_VERSION,"commands":["2.0"]}}
+        status["control_source"] = "Auto_Robot_demo"
+        status["arm_modes"] = ["single_arm"]
         status["ols_catalog_revision"] = self.app.pipeline.asset_catalog.revision if self.app.pipeline.asset_catalog else None
         status["switchable_assets"] = self.app.robot_assembly.catalog()
         status["registered_profiles"] = sorted(self.app.registered_profile_ids)
@@ -470,17 +842,43 @@ class AgentService:
         active = next((s for s in self.tasks.sessions() if s["active"]), None)
         if active:
             status["browser_id"] = active["browser"]
-        legs = [self._probe_model, self._probe_assets]
+        legs = [self._probe_model, self._probe_assets, self._probe_control]
         if active:
             legs.append(lambda: self._probe_browser(active["browser"]))
         with ThreadPoolExecutor(max_workers=len(legs)) as pool:
             for future in [pool.submit(leg) for leg in legs]:
                 status.update(future.result())
+        # Keep the public capability shape stable: probe results are flattened
+        # internally, then control readiness is placed under capabilities rather
+        # than accidentally becoming a second top-level ``control`` field.
+        if "control_status" in status:
+            status["capabilities"]["control"] = status.pop("control_status")
         for record in self._active_records():
             if not record["terminal"]:
                 status["tasks"]["active_task_id"] = record["id"]
                 break
         return status
+
+    def _probe_control(self):
+        """Report configured single-arm Control availability without executing it.
+
+        The actual controller remains the final authority for IK, collision and
+        runtime feasibility.  This probe only prevents a configured executable
+        from being reported as a permanently unavailable capability.
+        """
+        if not self.config.execution_enabled:
+            return {"control_status": "unavailable", "control_reason": "execution_disabled"}
+        required = {
+            "python": self.config.execution_python,
+            "control_root": self.config.execution_control_root,
+            "library": self.config.execution_library,
+            "link_root": self.config.execution_link_root,
+        }
+        missing = [name for name, value in required.items()
+                   if not value or not Path(value).exists()]
+        if missing:
+            return {"control_status": "unavailable", "control_reason": "missing_runtime_paths:" + ",".join(missing)}
+        return {"control_status": "ready", "control_reason": "configured_single_arm"}
 
     def _probe_model(self):
         client = self.probe_client
@@ -563,15 +961,40 @@ class AgentService:
             rows = self.tasks.db.execute("SELECT id FROM tasks WHERE terminal=0").fetchall()
         return [self.tasks.get(row["id"]) for row in rows]
 
+    def play(self, identifier, trajs):
+        """Send the recorded clips to the browser, lease already released.
+
+        Playback is not task evidence.  A browser that is closed by then, or a
+        gateway that rejects the body, is written to the run directory and
+        otherwise ignored: the executed poses were committed before this call and
+        the task's terminal state is already stored.
+        """
+        if not trajs:
+            return
+        record = self.tasks.get(identifier)
+        detail = {"taskID": identifier, "trajs": [str(path) for path in trajs]}
+        try:
+            session = self._bind(record["session"])
+            reply = session.platform.push_trajs(
+                trajs, request_id=(record.get("result") or {}).get("request_id"))
+            detail["reply"] = reply
+        except (httpx.HTTPError, ValueError, OSError) as exc:
+            detail.update(accepted=False, error=f"{type(exc).__name__}: {exc}")
+        else:
+            detail["accepted"] = reply.get("ok", True) is not False
+        durable_json(self.output / record["session"] / "traj_playback" / f"{identifier}.json", detail)
+
     async def work(self):
         while True:
             identifier = await self.queue.get()
             try:
-                await asyncio.to_thread(self.execute, identifier)
+                trajs = await asyncio.to_thread(self.execute, identifier)
+                await asyncio.to_thread(self.play, identifier, trajs)
             except Exception as exc:
                 self.tasks.update(identifier, "任务失败", {"outcome":"failed","executed":False,
                     "error":{"code":"worker_failed","message":str(exc)}}, uncertain=True)
             finally:
+                self.progress.pop(identifier, None)
                 self.queue.task_done()
 
 
@@ -593,17 +1016,19 @@ def create_http_app(service):
             status = 404 if code in {"task_not_found","session_not_found","artifact_not_found"} else 422 if code in {
                 "web_platform_profile_unsupported", "capability_unsupported", "robot_profile_not_registered",
                 "robot_setup_profile_not_registered", "dual_planner_capability_unsupported",
-                "dual_recipe_capability_unsupported", "robot_joint_inventory_missing"} else 409 if code in {
+                "dual_recipe_capability_unsupported", "control_dual_arm_not_ready", "robot_joint_inventory_missing"} else 409 if code in {
                 "task_busy","idempotency_conflict","session_browser_not_active","session_reconciliation_required"} else 400
             payload = {"error": {"code": code, "message": text}}
             if code in {"web_platform_profile_unsupported", "capability_unsupported", "robot_profile_not_registered",
                         "robot_setup_profile_not_registered", "dual_planner_capability_unsupported",
-                        "dual_recipe_capability_unsupported"}:
+                        "dual_recipe_capability_unsupported", "control_dual_arm_not_ready"}:
                 # A scene may be perfectly valid for display while the
                 # current Brain profile cannot plan or execute robot tasks.
                 # Keep the precise legacy error code, but expose the stable
                 # capability classification to WebEditor and batch clients.
-                payload.update({"outcome": "unsupported", "failure_class": "capability_unsupported",
+                # The WebEditor contract names five outcomes, so the refusal is
+                # a failed task carrying failure_class, never a sixth one.
+                payload.update({"outcome": "failed", "failure_class": "capability_unsupported",
                                 "executed": False, "terminal": True})
             return web.json_response(payload, status=status)
 
@@ -653,7 +1078,7 @@ def create_http_app(service):
     async def state(request):
         record = service.tasks.get(task_id(request))
         return web.json_response({"taskID":record["id"],"state":record["state"],"terminal":record["terminal"],
-                                  "state_detail":None})
+                                  "state_detail":service.progress.get(record["id"])})
 
     async def failure(request):
         record = service.tasks.get(task_id(request))

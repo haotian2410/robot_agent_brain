@@ -6,7 +6,8 @@ import pytest
 from robot_agent_brain.application import BrainApplication
 from robot_agent_brain.config import BrainConfig
 from robot_agent_brain.contracts.scene import SceneConfig
-from robot_agent_brain.contracts.commands import CommandsFile
+from robot_agent_brain.contracts.commands import parse_commands
+from robot_agent_brain.contracts.commands_atomic import AtomicCommandsFile, AtomicSkillName
 from robot_agent_brain.contracts.task_intent import TaskIntent, TaskEntity, Operation, PlacementTarget
 from robot_agent_brain.contracts.turn import BrainTurn, SceneEditPlan, SceneEditIntent, SceneQueryIntent
 
@@ -32,17 +33,22 @@ class DemoUnderstanding:
 
 
 def test_demo_bootstrap_edit_query_restart_and_wire_artifacts(tmp_path):
-    config = BrainConfig(provider="replay", output_dir=str(tmp_path), debug=True)
+    config = BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path), debug=True)
     app = BrainApplication(config, provider=DemoUnderstanding())
     first = app.handle("放苹果", session_id="demo")
     assert first.run_status == "success", first.reply
     assert first.executed is False
     assert first.delivery_status == "commands_exported"
     scene = SceneConfig.model_validate_json(Path(first.artifacts["scene_config"]).read_text(encoding="utf-8"))
-    commands = CommandsFile.model_validate_json(Path(first.artifacts["commands"]).read_text(encoding="utf-8"))
+    commands = parse_commands(json.loads(Path(first.artifacts["commands"]).read_text(encoding="utf-8")))
+    assert isinstance(commands, AtomicCommandsFile)
     assert isinstance(scene.scene_id, int)
     assert commands.scene_id == scene.scene_id
-    assert all(type(command.parameters.target) is int for command in commands.commands)
+    interaction = {AtomicSkillName.APPROACH, AtomicSkillName.PICK, AtomicSkillName.PUT, AtomicSkillName.RETREAT}
+    assert all(type(command.parameters.target) is int for command in commands.commands
+               if command.skill_name in interaction)
+    # skill.md's assembly graph dropped its home transit in control commit 414195b.
+    assert AtomicSkillName.MOVE_TO not in {command.skill_name for command in commands.commands}
     refs = [c.properties["path"] for obj in scene.objects for c in obj.components if c.component_type == "MetadataRef"]
     assert all(ref.startswith("$DEMO_LIBRARY/") for ref in refs)
     assert any("demo_assets" in assumption for assumption in first.assumptions)

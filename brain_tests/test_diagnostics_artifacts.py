@@ -8,7 +8,7 @@ from test_application_artifacts import Provider, robot
 
 
 def test_debug_and_checkpoint_include_reproducible_nonsecret_config(tmp_path):
-    config = BrainConfig(provider="replay", output_dir=str(tmp_path), debug=True, api_key="sensitive-key")
+    config = BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path), debug=True, api_key="sensitive-key")
     app = BrainApplication(config, provider=Provider(robot()))
     report = app.handle("two apples", session_id="debug")
     assert report.run_status == "success"
@@ -17,7 +17,8 @@ def test_debug_and_checkpoint_include_reproducible_nonsecret_config(tmp_path):
     state = json.loads((folder.parent / "session_state.json").read_text(encoding="utf-8"))
     assert record["config_fingerprint"] == state["config_fingerprint"] == app.config_fingerprint
     assert record["config"]["demo_assets"] is True
-    for name in ("brain_turn", "task_intent", "grounded_task", "skill_plan", "model_calls"):
+    for name in ("brain_turn", "task_intent", "grounded_task", "normalized_skill_plan",
+                 "skill_plan_validation", "model_calls"):
         assert (folder / "debug" / (name + ".json")).is_file()
     for path in tmp_path.rglob("*.json"):
         assert "sensitive-key" not in path.read_text(encoding="utf-8")
@@ -44,6 +45,36 @@ def test_raw_failed_response_only_saved_in_debug_and_redacted(tmp_path):
                 assert "sensitive-key" not in path.read_text(encoding="utf-8")
 
 
+def test_raw_model_response_is_scoped_to_the_turn_that_produced_it(tmp_path):
+    # A clarification-only turn used to carry the previous turn's
+    # ``skill_planning`` blob into its own debug folder, because one provider
+    # serves every turn and only ever replaced the stage it actually ran.
+    from robot_agent_brain.models.qwen_http import QwenHTTPProvider
+
+    task = {"status": "accepted", "turn_kind": "robot_task", "relations": [],
+            "entities": [{"id": "a", "name": "apple", "category": "fruit"},
+                         {"id": "t", "name": "table", "category": "surface"}],
+            "operations": [{"type": "pick_and_place", "source": "a", "destination": "t",
+                            "placement_target": {"kind": "support_surface", "reference": "t"}}]}
+    clarification = {"status": "clarification_required", "turn_kind": "robot_task",
+                     "clarification_question": "你想把它放到哪里？", "entities": [],
+                     "operations": [], "relations": []}
+    answers = iter([task] + [clarification] * 8)
+    provider = QwenHTTPProvider("http://example/v1", "qwen-test", transport=httpx.MockTransport(
+        lambda _: httpx.Response(200, json={"choices": [
+            {"message": {"content": json.dumps(next(answers))}, "finish_reason": "stop"}]})))
+    app = BrainApplication(BrainConfig(model="qwen-test", output_dir=str(tmp_path), debug=True),
+                           provider=provider)
+    first = app.handle("把苹果放到桌上", session_id="bleed")
+    second = app.handle("把苹果放到桌上", session_id="bleed")
+    dumped = {path.parent.parent.name: json.loads(path.read_text(encoding="utf-8"))
+              for path in tmp_path.rglob("raw_model_response.txt")}
+    assert "skill_planning" in dumped[first.request_id]
+    assert list(dumped[second.request_id]) == ["turn_id", "task_understanding"]
+    assert dumped[first.request_id]["turn_id"] == first.request_id
+    assert dumped[second.request_id]["turn_id"] == second.request_id
+
+
 def test_prompt_json_examples_validate_with_the_actual_parser():
     from robot_agent_brain.models.prompts import TASK_UNDERSTANDING_PROMPT
     from robot_agent_brain.models.task_understanding import TaskParseOutput
@@ -55,9 +86,9 @@ def test_prompt_json_examples_validate_with_the_actual_parser():
 
 
 def test_changed_config_is_reported_without_rebuilding_scene(tmp_path):
-    first = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path)), provider=Provider(robot()))
+    first = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path)), provider=Provider(robot()))
     original = first.handle("two apples", session_id="changed")
-    second = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path), seed=99), provider=Provider(robot()))
+    second = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path), seed=99), provider=Provider(robot()))
     report = second.handle("two apples", session_id="changed")
     assert report.scene_id == original.scene_id and report.scene_source == "session"
     assert any("configuration_changed_since_restore" in value for value in report.assumptions)

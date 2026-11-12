@@ -17,6 +17,8 @@ from pathlib import Path
 from string import Formatter
 from typing import Any, Iterable
 
+from .adapters.ols_index import index_by_id
+
 
 GENERATED_COLUMNS = (
     "enabled", "flow_id", "parent_flow_id", "difficulty", "stage", "round_index",
@@ -364,9 +366,8 @@ def _scene_lookup(asset_root: Path | None) -> dict[str, str]:
     index = asset_root / "scenes" / "scene_index.json"
     if not index.is_file():
         return {}
-    items = json.loads(index.read_text(encoding="utf-8"))
-    return {item["name"]: str(asset_root / "scenes" / str(item["id"]) / (item["name"] + ".json"))
-            for item in items if isinstance(item, dict) and item.get("name") and item.get("id") is not None}
+    return {name: str(asset_root / "scenes" / str(identifier) / (name + ".json"))
+            for identifier, name in index_by_id(json.loads(index.read_text(encoding="utf-8"))).items()}
 
 
 def _validate_template_placeholders(rows: Iterable[dict[str, Any]], kind: str) -> None:

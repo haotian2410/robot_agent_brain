@@ -7,6 +7,7 @@ import struct
 import tempfile
 import uuid
 import zlib
+from contextlib import ExitStack
 from pathlib import Path
 
 import httpx
@@ -48,6 +49,7 @@ class GatewayScenePlatformAdapter:
         self.client = client or httpx.Client(timeout=20, trust_env=False, follow_redirects=False)
         self.scene = None
         self.receipts = []
+        self.commits = 0
         self.lease = None
         self.lease_uncertain = False
         self.lease_state = "not_requested"
@@ -103,6 +105,27 @@ class GatewayScenePlatformAdapter:
             self.lease = None
             self.lease_state = "released" if not uncertain else "unknown"
 
+    def push_trajs(self, paths, *, request_id=None):
+        """Give the browser the recorded trajectories to play back.
+
+        A trajectory is not a world change: no expected version, no bumped
+        ``scene_version``.  Each clip must be its own part named ``trajs`` -- the
+        gateway slices the concatenated body by ``byte_lengths``, so a part named
+        in the singular is refused outright.  The caller runs this after releasing
+        the lease, because releasing stops a playback that is already running.
+        """
+        paths = [Path(path) for path in paths]
+        if not paths:
+            raise ValueError("gateway_traj_batch_empty")
+        with ExitStack() as clips:
+            value = self._call("POST", "/updateTraj", params={"count": len(paths)}, files=[
+                ("trajs", (path.name, clips.enter_context(path.open("rb")), "application/octet-stream"))
+                for path in paths]).json()
+        self._journal(f"updateTraj_{request_id}" if request_id else "updateTraj",
+                      {"count": len(paths), "byte_lengths": [path.stat().st_size for path in paths],
+                       "reply": value})
+        return value
+
     def capabilities(self):
         try:
             payload = self._call("GET", "/brainCapabilities", params={"browser_id": self.browser_id}).json()
@@ -127,7 +150,15 @@ class GatewayScenePlatformAdapter:
             raise ValueError("gateway_live_world_required")
         if response.headers.get("X-Browser-ID") != self.browser_id:
             raise ValueError("gateway_browser_mismatch")
-        if response.headers.get("X-Playback-State") != "stopped":
+        # A paused clip is a frozen picture, not a moving world: the document the browser
+        # serves beside it is still the committed scene (verified live -- after a run that
+        # moved the apple into the basket, a read at playback_state="paused" reported the
+        # apple at the basket, not at the frame on screen).  Refusing it would mean that
+        # simply watching the previous trajectory blocks the next turn, and every step of
+        # a multi-step sentence, before anything is even understood.  Pixels are the part
+        # a paused frame cannot vouch for, and they stay gated by _frame_identity, which
+        # still demands "stopped"; a clip that is actually running or seeking is refused.
+        if response.headers.get("X-Playback-State") not in {"stopped", "paused"}:
             raise ValueError("gateway_playback_must_stop")
         scene = self.validate(response.json())
         header_sub = response.headers.get("X-Scene-Sub-Version")
@@ -197,7 +228,15 @@ class GatewayScenePlatformAdapter:
     def load_scene(self, scene, *, change_kind="scene_edit"):
         candidate = self.validate(scene)
         self.capabilities()
-        previous = self.read_live()
+        # The lease snapshot is frozen when the lease is acquired and an online commit does not
+        # refresh it, so a second write in the same task would compare itself against the world the
+        # *first* commit of this task replaced, and both this guard and the gateway's own CAS would
+        # refuse it. Only the first write may use the frozen copy: it is what the lease was granted
+        # on, and reading it without a browser round-trip is what lets a task land one commit while
+        # the editor is reconnecting. After that the base has to be what the gateway actually
+        # holds, and the guard below still refuses any write whose base is not the last world this
+        # Brain committed -- a panel edit landing mid-task is caught sooner and more strictly.
+        previous = self.read_live(lease_snapshot=not self.commits)
         if self.scene is not None and digest(previous) != digest(self.scene):
             raise ValueError("gateway_scene_conflict")
         if candidate.scene_id == previous.scene_id:
@@ -277,6 +316,7 @@ class GatewayScenePlatformAdapter:
             raise
         self._journal(transaction, {**record, "status": "committed", "receipt": receipt})
         self.receipts.append(receipt)
+        self.commits += 1
         self.scene = candidate.model_copy(deep=True)
         return SceneSnapshot(scene_id=candidate.scene_id, scene_version=candidate.scene_version,
                              scene_sub_version=candidate.scene_sub_version)

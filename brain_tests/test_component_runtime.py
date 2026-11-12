@@ -83,14 +83,25 @@ def test_global_alias_category_and_absent_semantic():
     assert selector.select("a", [entity], [], changed)[0].object_id_in_scene == 11
 
 
-def test_color_cannot_be_inferred_from_display_or_renderer():
+def test_a_display_name_is_no_colour_evidence_and_the_colour_is_dropped():
+    scene = scene_()
+    scene.objects[2].object_name_in_scene = "red apple"
+    entity = entity_(color="red")
+    # 「red apple」 written on the instance is a name, not a declared colour.  Nothing
+    # in the pool declares one, so the colour term is dropped and both apples stay
+    # candidates -- the renamed one is never promoted by its display name.
+    assert [o.object_id_in_scene for o in SemanticEntitySelector().select(
+        "apple", [entity], [], scene)] == [11, 12]
+
+
+def test_a_painted_instance_is_not_vetoed_by_an_untouched_sibling():
     scene = scene_()
     scene.objects[2].object_name_in_scene = "red apple"
     scene.objects[2].components.append(SceneComponent(component_type="MeshRenderer",
                                                       properties={"forceOverrideColor": "#FF0000"}))
     entity = entity_(color="red")
-    with pytest.raises(ValueError, match="grounding_evidence_missing: color"):
-        SemanticEntitySelector().select("apple", [entity], [], scene)
+    assert [o.object_id_in_scene for o in SemanticEntitySelector().select(
+        "apple", [entity], [], scene)] == [11]
 
 
 def test_on_uses_support_zero_inside_requires_evidence():
@@ -103,6 +114,34 @@ def test_on_uses_support_zero_inside_requires_evidence():
         resolver.resolve(candidates, [ResolvedSelectionRelation(relation="inside", reference_object_id=0)], scene)
     with pytest.raises(TypeError, match="requires_resolved"):
         resolver.resolve(candidates, [SpatialRelation(subject="apple", relation="on", reference="table")], scene)
+
+
+def test_inside_uses_the_containers_own_box_when_geometry_exists():
+    from robot_agent_brain.contracts.asset_library import BrainAssetView
+
+    class Boxes:
+        """Fixture geometry only: every named box is axis-aligned about its origin."""
+        sizes = {"basket": ((-.3, -.3, 0), (.3, .3, .2)),
+                 "apple": ((-.05, -.05, 0), (.05, .05, .1)),
+                 "board": ((-.8, -.8, 0), (.8, .8, .02))}
+
+        def resolve(self, ref, kind=None):
+            low, high = self.sizes[ref]
+            return BrainAssetView(library_asset_id=1, metadata_ref=ref, semantic_name="fixture",
+                                  dimensions_m=tuple(high[axis] - low[axis] for axis in range(3)),
+                                  local_aabb_min_m=low, local_aabb_max_m=high)
+
+    scene = SceneConfig(scene_schema_version=1, scene_id=0, scene_version=1, scene_name="Not a robot model",
+        objects=[object_(0, "table", "surface"),
+                 object_(1, "basket", "container", metadata_ref="basket"),
+                 object_(2, "apple", position=(.02, .02, 0), metadata_ref="apple"),
+                 object_(3, "apple", position=(.9, .9, 0), metadata_ref="apple"),
+                 object_(4, "apple", position=(0, 0, 0), metadata_ref="board")])
+    inside = ResolvedSelectionRelation(relation="inside", reference_object_id=1)
+    # 2 is in the opening, 3 is beside it, and 4 is wider than the basket, so the
+    # relation is answered from the boxes instead of from the name of the sentence.
+    assert [o.object_id_in_scene for o in SceneRelationResolver(Boxes()).resolve(
+        scene.objects[2:], [inside], scene)] == [2]
 
 
 def test_world_halves_and_numeric_exclusion():

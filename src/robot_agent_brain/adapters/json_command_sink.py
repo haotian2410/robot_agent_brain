@@ -2,14 +2,14 @@ from pathlib import Path
 import json
 import os
 import tempfile
-from ..contracts.commands import CommandsFile, canonical_commands
+from ..contracts.commands import parse_commands, canonical_commands
 
 
 class JsonCommandSink:
     def __init__(self, path: str | Path):
         self.path = Path(path)
 
-    def write(self, commands: CommandsFile) -> None:
+    def write(self, commands) -> None:
         payload = canonical_commands(commands)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         staged = None
@@ -19,7 +19,7 @@ class JsonCommandSink:
                 staged = Path(stream.name)
                 json.dump(payload, stream, ensure_ascii=False, indent=2, allow_nan=False)
             readback = json.loads(staged.read_text(encoding="utf-8"))
-            if canonical_commands(CommandsFile.model_validate(readback)) != payload:
+            if canonical_commands(parse_commands(readback)) != payload:
                 raise ValueError("commands_readback_mismatch")
             os.replace(staged, self.path)
         finally:

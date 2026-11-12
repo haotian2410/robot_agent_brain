@@ -1,9 +1,25 @@
 """Shared selection using Scene Semantic, never display or resource names."""
 from ..contracts.scene import SceneConfig
 from ..contracts.spatial import ResolvedSelectionRelation
-from ..contracts.task_intent import QuantityMode
+from ..contracts.task_intent import QuantityMode, TaskEntity
 from ..scene.component_access import SceneIndex
 from .scene_relation_resolver import SceneRelationResolver
+
+# A single extremum/nearest phrase describes the result cardinality, not the
+# size of the candidate pool.
+SELECTION_RELATIONS = {"leftmost", "rightmost", "frontmost", "backmost",
+                       "highest", "lowest", "nearest", "farthest", "near"}
+
+
+def has_selection_relation(relations, identifier):
+    return any(relation.scope == "selection" and relation.subject == identifier
+               and relation.relation.value in SELECTION_RELATIONS for relation in relations)
+
+
+def without_colour(entity: TaskEntity) -> TaskEntity:
+    # Colour words inside ``tags`` are already split out before scoring, so
+    # clearing the field is the whole relaxation.
+    return entity.model_copy(update={"color": None})
 
 
 def discover_candidates(entity, scene: SceneConfig, category_aliases=None, *, aliases=None, assets=None):
@@ -20,30 +36,78 @@ def discover_candidates(entity, scene: SceneConfig, category_aliases=None, *, al
                      if obj.object_id_in_scene not in entity.exclude_scene_object_ids]
     available = [obj for obj in all_available
                  if category(index.semantic(obj.object_id_in_scene).category) == category(entity.category)]
-    def features(candidates):
+    if not any((entity.semantic_name, entity.tags, entity.aliases, entity.color)) and not entity.category_only:
+        # A live edit can point at instances ("把7放到13里") without describing
+        # them. Nothing below can match an empty description, so honour the ids
+        # and let bind() reject the ones absent from (or excluded from) the scene.
+        requested = set(entity.scene_object_ids)
+        if requested:
+            # The id alone is trusted, but the slug the parser used for it is a
+            # name too: refuse ids that point somewhere else by that evidence.
+            ident = canonicalize_name(entity.entity_id)
+            same_name = {obj.object_id_in_scene for obj in all_available
+                         if ident and canonicalize_name(
+                             index.semantic(obj.object_id_in_scene).semantic_name) == ident}
+            if same_name and not requested <= same_name:
+                return []
+            return [obj for obj in all_available if obj.object_id_in_scene in requested]
+    def resolve_asset(obj):
+        if assets is None or index.metadata_ref(obj.object_id_in_scene) is None:
+            return None
+        kind = index.metadata_type(obj.object_id_in_scene)
+        ref = index.metadata_ref(obj.object_id_in_scene)
+        try:
+            return assets.resolve(ref, kind) if kind else assets.resolve(ref)
+        except (ValueError, AttributeError):
+            return None
+
+    def paintable(value):
+        from ..scene.colors import ColorResolver
+        try:
+            ColorResolver.resolve(value)
+        except ValueError:
+            return False
+        return True
+
+    def features(candidates, ignore_colour=False):
         from ..scene.colors import ColorEvidenceResolver, PALETTE, color_name
         from ..scene.asset_features import tag_overlap_score
-        colors = ([entity.color] if entity.color else []) + [tag for tag in entity.tags if color_name(tag) in PALETTE]
+        requested = ([entity.color] if entity.color else []) + [tag for tag in entity.tags if color_name(tag) in PALETTE]
+        # A word the paint system cannot express is not a colour constraint at all.
+        # Only a name that can be painted enters the evidence check, so 彩色 never
+        # turns into a mismatch against the apples that did declare a colour.
+        colors = [] if ignore_colour else [value for value in requested if paintable(value)]
         other_tags = [tag for tag in entity.tags if color_name(tag) not in PALETTE]
         evidence = ColorEvidenceResolver(assets)
         kept = []
+        saw_color_evidence = saw_tag_evidence = False
         for obj in candidates:
-            # Evaluate all relevant candidates so unknown evidence isn't counted as false.
+            # Unknown evidence never counts as a match, but it must not veto the
+            # siblings that did declare one: a recolored object sitting next to
+            # two untouched ones used to abort the entire selection.
             color_matches = [evidence.matches(value, obj, index) for value in colors]
+            saw_color_evidence = saw_color_evidence or any(value is not None for value in color_matches)
             if not all(color_matches):
                 continue
             score = 0
             if other_tags:
-                if assets is None or index.metadata_ref(obj.object_id_in_scene) is None:
-                    raise ValueError("grounding_evidence_missing: tags")
-                kind = index.metadata_type(obj.object_id_in_scene)
-                ref = index.metadata_ref(obj.object_id_in_scene)
-                asset = assets.resolve(ref, kind) if kind else assets.resolve(ref)
+                asset = resolve_asset(obj)
+                if asset is None:
+                    continue
+                saw_tag_evidence = True
                 score = tag_overlap_score(asset, other_tags)
                 if score == 0:
                     continue
             kept.append((obj, score))
         if not kept:
+            # Nobody in the pool declared a colour, so the colour word carries no
+            # information here: the paint of a texture is not something this system
+            # can measure.  Match the subject instead of refusing the turn -- an
+            # untouched 红苹果 request is answered by 「哪个苹果?」, never by an error.
+            if candidates and colors and not saw_color_evidence:
+                return features(candidates, ignore_colour=True)
+            if candidates and other_tags and not saw_tag_evidence:
+                raise ValueError("grounding_evidence_missing: tags")
             return []
         # A synonym tag such as "杯子" is shared by every mug, so overlap alone
         # cannot separate them. Only the distinguishing tags raise one asset
@@ -52,27 +116,29 @@ def discover_candidates(entity, scene: SceneConfig, category_aliases=None, *, al
         return [obj for obj, score in kept if score == best]
     if entity.category_only:
         return features(available)
+    def by_tags(pool):
+        """Tag-overlap matching, the prompt's primary signal, best score wins."""
+        from ..scene.asset_features import tag_overlap_score
+        if not entity.tags or assets is None:
+            return []
+        scored = []
+        for obj in pool:
+            asset = resolve_asset(obj)
+            if asset is None:
+                continue
+            score = tag_overlap_score(asset, entity.tags)
+            if score > 0:
+                scored.append((obj, score))
+        if not scored:
+            return []
+        max_score = max(s for _, s in scored)
+        return [obj for obj, s in scored if s == max_score]
+
     name = canonicalize_name(entity.semantic_name)
 
     # Tag-based matching path: when semantic_name is empty but tags are present
-    if not name and entity.tags and assets is not None:
-        from ..scene.asset_features import tag_overlap_score
-        scored = []
-        for obj in available:
-            ref = index.metadata_ref(obj.object_id_in_scene)
-            if ref is None:
-                continue
-            kind = index.metadata_type(obj.object_id_in_scene)
-            try:
-                asset = assets.resolve(ref, kind) if kind else assets.resolve(ref)
-                score = tag_overlap_score(asset, entity.tags)
-                if score > 0:
-                    scored.append((obj, score))
-            except (ValueError, AttributeError):
-                continue
-        if scored:
-            max_score = max(s for _, s in scored)
-            return [obj for obj, s in scored if s == max_score]
+    if not name and entity.tags:
+        return features(by_tags(available))
 
     # Scene v1 assets may use a broad protocol category such as ``object``
     # while the task parser uses a useful lexical category such as ``fruit``.
@@ -97,25 +163,51 @@ def discover_candidates(entity, scene: SceneConfig, category_aliases=None, *, al
              and canonicalize_name(index.semantic(obj.object_id_in_scene).semantic_name) in requested_names]
     matched = [obj for obj in available if canonicalize_name(index.semantic(obj.object_id_in_scene).semantic_name) in requested_names]
     matched_ids = {obj.object_id_in_scene for obj in matched}
-    return features(matched + [obj for obj in named if obj.object_id_in_scene not in matched_ids])
+    by_name = features(matched + [obj for obj in named if obj.object_id_in_scene not in matched_ids])
+    if by_name:
+        return by_name
+    # The slug the parser used can still miss the scene: 「绿色苹果」 arrives as
+    # ``green_apple`` while every instance carries ``apple``.  Tags widen what
+    # the name gate could not reach, then still obey the colour/tag filters.
+    widened_ids = {obj.object_id_in_scene for obj in available}
+    widened_ids |= {obj.object_id_in_scene for obj in named}
+    pool = [obj for obj in all_available if obj.object_id_in_scene in widened_ids]
+    return features(by_tags(pool))
 
 
 class SemanticEntitySelector:
     def __init__(self, relation_resolver=None, *, aliases=None, category_aliases=None, assets=None,
                  scene_reference_catalog=None, table_metadata_ref=None):
         self.assets = assets
-        self.relations = relation_resolver or SceneRelationResolver()
+        self.relations = relation_resolver or SceneRelationResolver(assets)
         self.aliases = aliases or {}
         self.category_aliases = category_aliases or {}
         from .scene_reference_resolver import SceneReferenceResolver
         self.reference_resolver = SceneReferenceResolver(scene_reference_catalog,
                                                          table_metadata_ref=table_metadata_ref)
 
-    def select(self, entity_id, entities, relations, scene, *, bindings_override=None, resolved_relations=None):
+    def select(self, entity_id, entities, relations, scene, *, bindings_override=None, resolved_relations=None,
+               allow_description_fallback=False):
         overrides = bindings_override or {}
         by_entity = {entity.entity_id: entity for entity in entities}
         by_object = {obj.object_id_in_scene: obj for obj in scene.objects}
         resolved, visiting = {}, set()
+        def relax_colour(entity):
+            """Re-select without the colour term, but only where it cannot pick arbitrarily.
+
+            「红色的苹果」 in a scene where no apple is red must not become an arbitrary
+            apple: either the sentence already pins one down with an extremum/near
+            relation, or the colourless pool holds a single object.  Bulk quantities
+            never relax, because operating on every apple because none was red would
+            act on objects the user excluded.
+            """
+            if entity.quantity_mode is not QuantityMode.SINGLE:
+                return []
+            candidates = discover_candidates(without_colour(entity), scene, self.category_aliases,
+                                             aliases=self.aliases, assets=self.assets)
+            if len(candidates) == 1 or has_selection_relation(relations, entity.entity_id):
+                return candidates
+            return []
         def bind(identifier):
             if identifier in resolved:
                 return resolved[identifier]
@@ -134,6 +226,8 @@ class SemanticEntitySelector:
             visiting.add(identifier)
             entity = by_entity[identifier]
             eligible = discover_candidates(entity, scene, self.category_aliases, aliases=self.aliases, assets=self.assets)
+            if not eligible and entity.color and allow_description_fallback:
+                eligible = relax_colour(entity)
             if entity.scene_object_ids:
                 requested_ids = entity.scene_object_ids
                 if (len(requested_ids) != len(set(requested_ids))
@@ -144,7 +238,18 @@ class SemanticEntitySelector:
                 ids = overrides[identifier]
                 if not ids or any(type(value) is not int or value not in by_object for value in ids):
                     raise ValueError("grounding_missing: stale binding")
-                if len(ids) != len(set(ids)) or not set(ids) <= {obj.object_id_in_scene for obj in eligible}:
+                # A pronoun carries no description of its own -- Qwen answers 「把它放到篮子里」
+                # with dialogue_ref=true and an empty semantic_name, because only the previous
+                # turn knows the witness.  Requiring such an entity's Python binding to fall
+                # inside its own candidate pool compares ids against the empty set that an
+                # undescribed entity discovers, so it rejected the correct banana.  An entity
+                # that does describe itself keeps the subset check, which is what catches a
+                # stale binding that has drifted onto a different kind of object.
+                undescribed = (not any((entity.semantic_name, entity.tags, entity.aliases, entity.color))
+                               and not entity.category_only)
+                if (len(ids) != len(set(ids)) or set(ids) & set(entity.exclude_scene_object_ids)
+                        or (not undescribed
+                            and not set(ids) <= {obj.object_id_in_scene for obj in eligible})):
                     raise ValueError("grounding_binding_invalid: " + identifier)
                 candidates = [by_object[value] for value in ids]
             else:
@@ -168,9 +273,7 @@ class SemanticEntitySelector:
             # payloads occasionally encoded it as candidate_pool/count=1;
             # rejecting before applying the selector made ordinary phrases
             # such as “最左边的苹果” fail with an internal pool mismatch.
-            selector_relations = {"leftmost", "rightmost", "frontmost", "backmost",
-                                  "highest", "lowest", "nearest", "farthest", "near"}
-            result_selector = any(item.relation.value in selector_relations
+            result_selector = any(item.relation.value in SELECTION_RELATIONS
                                   for item in selected_relations)
             # ``all_available`` plus an extremum relation means “choose one
             # result from the current complete candidate set”.  A provider

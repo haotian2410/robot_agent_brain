@@ -105,7 +105,7 @@ def test_application_recovery_checkpoints_unknown_on_platform_error(tmp_path):
     from robot_agent_brain.config import BrainConfig
     from test_application_artifacts import Provider
     session, registry, _ = failed_session()
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path), robot_profiles=registry),
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path), robot_profiles=registry),
                            provider=Provider(task()))
     app.sessions["s"] = session
     class Timeout:

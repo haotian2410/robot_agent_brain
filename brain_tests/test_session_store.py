@@ -1,15 +1,17 @@
 import json
+from pathlib import Path
+
 import pytest
 from robot_agent_brain.application import BrainApplication
 from robot_agent_brain.config import BrainConfig
-from robot_agent_brain.contracts.commands import CommandsFile
+from robot_agent_brain.contracts.commands import parse_commands
 from robot_agent_brain.contracts.turn import BrainTurn
 from robot_agent_brain.session.store import SessionStore
 from test_application_artifacts import Provider, robot
 
 
 def application(path, turn=None):
-    return BrainApplication(BrainConfig(provider="replay", output_dir=str(path)), provider=Provider(turn or robot()))
+    return BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(path)), provider=Provider(turn or robot()))
 
 
 def test_restore_scene_focus_export_and_pause(tmp_path):
@@ -34,7 +36,7 @@ def test_restore_scene_focus_export_and_pause(tmp_path):
 def test_pending_survives_restart_and_blocks_replacement(tmp_path):
     app = application(tmp_path)
     report = app.handle("two apples", session_id="pending")
-    commands = CommandsFile.model_validate_json(open(report.artifacts["commands"]).read())
+    commands = parse_commands(json.loads(Path(report.artifacts["commands"]).read_text(encoding="utf-8")))
     app.mark_dispatched("pending", commands)
     other = application(tmp_path)
     assert other.get_session("pending").pending_execution_request == report.request_id
@@ -47,7 +49,7 @@ def test_failed_feedback_without_snapshot_restores_unknown(tmp_path):
     from robot_agent_brain.contracts.commands import ExecutionFeedback
     app = application(tmp_path)
     report = app.handle("two apples", session_id="feedback")
-    commands = CommandsFile.model_validate_json(open(report.artifacts["commands"]).read())
+    commands = parse_commands(json.loads(Path(report.artifacts["commands"]).read_text(encoding="utf-8")))
     app.mark_dispatched("feedback", commands)
     feedback = ExecutionFeedback(request_id=report.request_id, status="failed", commands=[])
     app.apply_execution_feedback("feedback", feedback, feedback_source="simulated")
@@ -121,3 +123,25 @@ def test_application_busy_is_structured_and_does_not_call_model(tmp_path):
         report = app.handle("two apples", session_id="busy")
     assert report.error.code == "session_busy" and report.run_status == "blocked"
     assert report.artifacts == {} and app.provider.count == 0
+
+
+def test_a_rebuilt_set_is_not_reported_as_a_lost_checkpoint(tmp_path):
+    """A multi-step round refused its own save because two dumps differed only in set order.
+
+    ``dispatched_requests`` grows by ``add``, while a reload rebuilds the same content from the
+    written list; the two hash tables iterate in different sequences.  The gate compared those
+    documents, so it invented a mismatch, kept the checkpoint unwritten, and the round reported
+    会话保存失败 on top of the step-by-step verdict it had already earned.
+    """
+    app = application(tmp_path)
+    app.handle("two apples", session_id="set-order")
+    session = app.get_session("set-order")
+    for index in range(40):
+        session.dispatched_requests.add(f"req-{index:02d}")
+    for index in range(36):
+        session.dispatched_requests.discard(f"req-{index:02d}")
+    session.dispatched_requests.update({"keep-a", "keep-b", "keep-c"})
+    app._save_session("set-order")
+    saved = json.loads((tmp_path / "set-order" / "session_state.json").read_text(encoding="utf-8"))
+    assert set(saved["dispatched_requests"]) == {"req-36", "req-37", "req-38", "req-39",
+                                                 "keep-a", "keep-b", "keep-c"}

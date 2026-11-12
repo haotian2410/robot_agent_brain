@@ -16,7 +16,7 @@ class SceneGrounder:
     def __init__(self, relation_resolver=None, *, aliases=None, category_aliases=None, assets=None,
                  scene_reference_catalog=None, table_metadata_ref=None):
         self.assets = assets
-        self.relations = relation_resolver or SceneRelationResolver()
+        self.relations = relation_resolver or SceneRelationResolver(assets)
         self.aliases = aliases or {}
         self.category_aliases = category_aliases or {}
         self.scene_reference_catalog = scene_reference_catalog
@@ -30,8 +30,13 @@ class SceneGrounder:
                                          table_metadata_ref=self.table_metadata_ref)
         def bind(entity_id):
             entity = next(e for e in intent.entities if e.entity_id == entity_id)
+            # An action has to land on something, so a colour nobody declared may
+            # relax to the pinned-down instance.  ``SceneQueryEngine`` deliberately
+            # leaves this off: counting 「有几个红苹果」 as every apple would answer
+            # with a wrong number instead of a miss.
             candidates = selector.select(entity_id, intent.entities, intent.spatial_relations, scene,
-                                         bindings_override=bindings_override, resolved_relations=resolved_relations)
+                                         bindings_override=bindings_override, resolved_relations=resolved_relations,
+                                         allow_description_fallback=True)
             if not candidates:
                 raise ValueError("grounding_missing: " + entity_id)
             if entity.quantity_mode == QuantityMode.ALL:

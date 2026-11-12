@@ -27,8 +27,9 @@ def test_config_only_switch_and_inherited_single_task():
     task = TaskParseOutput.model_validate({"entities": [{"id": "a", "name": "apple", "category": "fruit"}],
                                          "operations": [{"type": "grasp", "target": "a"}]}).to_brain_turn("抓苹果")
     result = current.process_turn("task", task)
-    assert result.commands.schema_version == "2.0" and result.commands.robot == "fixture_single_control"
-    assert current.pipeline.exporter.robot == "ur5e"
+    assert result.commands.schema_version == "2.0"
+    assert "robot" not in result.commands.model_dump(mode="json", exclude_none=True)
+    assert current.robot_setup.profile_id == "fixture_single"
     back = BrainTurn(status="accepted", turn_kind="robot_config", instruction="换双臂", robot_setup_request={"mode": "dual"})
     current.process_turn("back", back)
     assert current.robot_setup.mode == "dual" and current.robot_setup_revision == 3

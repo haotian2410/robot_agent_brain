@@ -157,8 +157,8 @@ Query、Robot Grounding、Scene Edit 复用 SemanticEntitySelector 的名称、�
 
 其中 semantic_aliases.json 是全局名称映射（例如 苹果→apple），请求名称和场景名称均先
 canonicalize。Scene 不再有实例 aliases/color 属性；Semantic 是现有实例的语义事实，
-不被 Asset metadata 覆盖。未声明的名称不会仅因同类别而匹配。颜色没有可靠证据时
-明确返回 grounding_evidence_missing，不从显示名或渲染颜色猜语义。
+不被 Asset metadata 覆盖。未声明的名称不会仅因同类别而匹配。颜色只作软偏好：有证据
+按证据筛，整批无证据则丢掉颜色按主体匹配，不从显示名猜语义也不因颜色报错（policy v3）。
 
 REMOVED：dialogue_scene_object_id marker 和 Provider 单对象 referent 注入。
 `[dialogue_ref=apple]` 只提供语义名；`[dialogue_ref_set=apple]` 必须对应
@@ -196,8 +196,11 @@ SpatialFactResolver 只使用 AssetLibraryPort.resolve(MetadataRef.path) 的完�
 upsert_component 实际改变 Transform 时先将 Semantic.support 清为 null；Editor 在
 prospective scene 验证后通过 upsert_component 写回可证明支撑，整个 patch 只增加一个版本。
 无可证明支撑保留 null；on 只读取 Semantic.support。当前协议没有 container_membership、
-interaction_state、support_evaluated；不添加兼容字段。inside 缺外部证据明确返回
-scene_relation_evidence_missing；state 查询只返回 support。
+interaction_state、support_evaluated；不添加兼容字段。inside 在两侧世界 AABB 都能算出来时用包围盒
+本身判包含（水平中心在容器内、每个水平轴上都比容器窄、底面不高于容器口且落在容器竖向范围内），
+据此回答「篮子里的东西」是谁；算不出几何（缺资产或缺 MetadataRef）就退回只确认：候选唯一才放行，
+多个候选一律 scene_relation_evidence_missing: inside——猜一个正是这道门禁要防的误操作。
+几何判定不读资产的 container_membership，仍然只是包围盒证据。state 查询只返回 support。
 
 ## CommandsFile 2.0 wire
 

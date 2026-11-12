@@ -29,6 +29,11 @@ class QwenProviderError(RuntimeError):
         self.code = code
 
 
+# Model-output failures the atomic planning round may quote back for one retry.
+# Transport and timeout errors are deliberately absent.
+ATOMIC_OUTPUT_CODES = frozenset({"skill_plan_output_invalid", "planner_unknown_skill", "model_output_not_json"})
+
+
 def _color_mentions(text):
     from ..scene.colors import ALIASES, PALETTE, color_name
     labels = sorted(set((*ALIASES, *PALETTE)), key=len, reverse=True)
@@ -450,8 +455,10 @@ class QwenHTTPProvider:
         client: httpx.Client | None = None,
         transport: httpx.BaseTransport | None = None,
         planner_max_completion_tokens: int = 1024,
+        skill_planning_response_format: str = "json_schema",
         asset_catalog=None,
         live_catalog: bool | None = None,
+        atomic_skill_prompt_path: str | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -459,6 +466,7 @@ class QwenHTTPProvider:
         self.timeout = timeout
         self.structured_output = structured_output
         self.planner_max_completion_tokens = planner_max_completion_tokens
+        self.skill_planning_response_format = skill_planning_response_format
         if client is not None and transport is not None:
             raise ValueError("supply either client or transport")
         self.client, self.transport = client, transport
@@ -470,11 +478,17 @@ class QwenHTTPProvider:
         # with a custom client can opt in explicitly with ``live_catalog``.
         self.live_catalog = (client is None and transport is None) if live_catalog is None else bool(live_catalog)
         self.calls: list[dict[str, Any]] = []
+        self.turn_id: str | None = None
         self.last_raw_values: dict[str, Any] = {}
         self.last_raw_text: dict[str, str] = {}
         self.asset_catalog_prompt = ""
         self.asset_catalog_sha256 = None
         self.asset_catalog_snapshot = None
+        self.atomic_skill_prompt_path = atomic_skill_prompt_path
+        from .prompts import build_atomic_skill_prompt
+        self.atomic_skill_prompt, self.atomic_skill_source_sha256 = build_atomic_skill_prompt(
+            atomic_skill_prompt_path
+        )
         if asset_catalog is not None:
             self.set_asset_catalog(asset_catalog)
 
@@ -486,10 +500,24 @@ class QwenHTTPProvider:
             self.asset_catalog_snapshot, aliases=aliases, snapshot=self.asset_catalog_snapshot,
             registered_profiles=registered_profiles)
 
+    def begin_turn(self, request_id: str) -> None:
+        """Scope the raw model evidence to one turn.
+
+        ``_call`` only replaces the stage it actually runs, so a provider
+        shared by every session would otherwise carry an earlier turn's answer
+        into this turn's ``debug/raw_model_response.txt``.  ``turn_id`` makes a
+        stale dump falsifiable instead of merely unlikely.
+        """
+        self.turn_id = request_id
+        self.last_raw_values.clear()
+        self.last_raw_text.clear()
+
     def _redact(self, text):
         return text.replace(self.api_key, "[REDACTED]") if self.api_key else text
 
-    def _call(self, stage: str, prompt: str, content, schema: dict[str, Any], parse=None, *, max_completion_tokens=None):
+    def _call(self, stage: str, prompt: str, content, schema: dict[str, Any], parse=None, *,
+              max_completion_tokens=None, response_format: str | None = None):
+        format_kind = response_format or ("json_schema" if self.structured_output else "text")
         payload: dict[str, Any] = {
             "model": self.model,
             "temperature": 0,
@@ -500,11 +528,13 @@ class QwenHTTPProvider:
         }
         if max_completion_tokens is not None:
             payload["max_completion_tokens"] = max_completion_tokens
-        if self.structured_output:
+        if format_kind == "json_schema":
             payload["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {"name": stage, "strict": True, "schema": schema},
             }
+        elif format_kind == "json_object":
+            payload["response_format"] = {"type": "json_object"}
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         request_id = uuid.uuid4().hex
         headers["X-Request-ID"] = request_id
@@ -520,10 +550,18 @@ class QwenHTTPProvider:
         record["schema_sha256"] = hashlib.sha256(
             json.dumps(schema, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest()
+        # ``schema_sha256`` identifies the contract the answer was parsed against;
+        # ``response_format`` records whether that contract was also sent to the
+        # endpoint.  The atomic planning round validates locally without pinning
+        # a server-side grammar.
+        record["response_format"] = format_kind
         if stage == "task_understanding" and self.asset_catalog_sha256:
             record["asset_catalog_sha256"] = self.asset_catalog_sha256
             if self.asset_catalog_snapshot is not None:
                 record["catalog_revision"] = self.asset_catalog_snapshot.revision
+        if stage == "skill_planning" and self.atomic_skill_source_sha256:
+            record["skill_md_sha256"] = self.atomic_skill_source_sha256
+            record["skill_md_path"] = self.atomic_skill_prompt_path
         started = time.monotonic()
         self.last_raw_text.pop(stage, None)
         self.last_raw_values.pop(stage, None)
@@ -596,7 +634,9 @@ class QwenHTTPProvider:
             if code == "semantic_protocol_error":
                 record["status"] = "rejected"
             if stage == "skill_planning" and isinstance(exc, ValidationError):
-                code = "planner_unknown_skill" if any(e["loc"][-1:] == ("skill",) and e["type"] == "enum" for e in exc.errors()) else "skill_plan_output_invalid"
+                invalid_skill = any(e["loc"][-1:] in (("skill",), ("skill_name",)) and e["type"] == "enum"
+                                    for e in exc.errors())
+                code = "planner_unknown_skill" if invalid_skill else "skill_plan_output_invalid"
             record["error_code"] = code
             raise QwenProviderError(f"{stage}: {record['error']}", code=code) from exc
         finally:
@@ -768,8 +808,37 @@ class QwenHTTPProvider:
             raise QwenProviderError("asset choice has no add/replace operation: " + ",".join(extra),
                                     code="provider_output_schema_invalid")
 
+    def decompose(self, request):
+        """Split one utterance into the ordered steps the caller will run in turn.
+
+        A decomposition is an optimisation, never a requirement: an answer this
+        stage cannot express falls back to the single-turn path, so a model that
+        invents a fourth task or pastes the whole sentence into every step costs
+        nothing but the extra call.  One repair turn quotes the violation back --
+        the same rule the atomic round follows, because silently completing an
+        illegal split would make the contract a suggestion.
+        """
+        from .prompts import TASK_DECOMPOSITION_PROMPT
+        from ..contracts.decomposition import MAX_SUBTASKS
+        from .task_decomposition import parse_decomposition, task_decomposition_wire_schema
+
+        content = prompt_payload(request.model_dump(mode="json", exclude_none=True))
+        schema = task_decomposition_wire_schema()
+        prompt = TASK_DECOMPOSITION_PROMPT
+        for attempt in range(2):
+            try:
+                return self._call("task_decomposition", prompt, content, schema, parse_decomposition)
+            except QwenProviderError as exc:
+                if attempt:
+                    raise
+                prompt = TASK_DECOMPOSITION_PROMPT + (
+                    "\n\n上一轮输出不被接受：" + str(exc) +
+                    "\n请只输出 {\"steps\":[{\"kind\":\"scene_edit|robot_task|scene_query\","
+                    f"\"instruction\":\"...\"}}]：1 到 {MAX_SUBTASKS} 条、按用户先后排列、kind 只能取那三个值，"
+                    "不要输出解释文字或场景语义字段。")
+
     def plan(self, request: SkillPlanningRequest) -> SkillPlanLLMOutput:
-        content = {**request.context.model_dump(mode="json"), "skills": request.skill_catalog}
+        content = {**request.context.model_dump(mode="json", exclude_none=True), "skills": request.skill_catalog}
         budget = min(self.planner_max_completion_tokens, 384 + 128 * max(len(request.context.operations), 1))
         try:
             return self._call("skill_planning", SKILL_PLANNING_PROMPT, prompt_payload(content),
@@ -786,6 +855,55 @@ class QwenHTTPProvider:
             return self._call("skill_planning", SKILL_PLANNING_PROMPT, prompt_payload(content),
                               SkillPlanLLMOutput.model_json_schema(), SkillPlanLLMOutput.model_validate,
                               max_completion_tokens=retry_budget)
+
+    def plan_atomic(self, context, validate=None):
+        """Ask for the control atomic-skill command list.
+
+        The control specification is prose, so this round sends no server-side
+        grammar.  ``validate`` is the Python-side guard that replaces it; a
+        violation costs exactly one repair turn that quotes the violation back,
+        because silently completing an illegal graph would make the control
+        specification a suggestion.
+        """
+        from ..contracts.commands_atomic import AtomicCommandDraft
+        content = prompt_payload(context.model_dump(mode="json", exclude_none=True))
+        schema = AtomicCommandDraft.model_json_schema()
+        # A pick-and-place expands to seven commands, so an operation-count
+        # budget derived from the old one-step-per-skill plan would truncate.
+        budget = min(self.planner_max_completion_tokens,
+                     256 + 512 * max(len(context.operations), 1))
+        answer_format = (self.skill_planning_response_format if self.structured_output else "text")
+
+        def parse(value):
+            draft = AtomicCommandDraft.model_validate(value)
+            if validate is not None:
+                validate(draft)
+            return draft
+
+        prompt, tokens = self.atomic_skill_prompt, budget
+        for attempt in range(2):
+            try:
+                return self._call("skill_planning", prompt, content, schema, parse,
+                                  max_completion_tokens=tokens, response_format=answer_format)
+            except QwenProviderError as exc:
+                truncated = "model_output_truncated" in str(exc)
+                if attempt or not (truncated or exc.code in ATOMIC_OUTPUT_CODES
+                                   or exc.code.startswith("atomic_plan_")):
+                    raise
+                if truncated:
+                    retry = min(self.planner_max_completion_tokens, max(tokens * 2, 1024))
+                    if retry <= tokens:
+                        raise
+                    tokens = retry
+                else:
+                    prompt = self.atomic_skill_prompt + (
+                        "\n\n上一轮输出不被接受：" + str(exc) +
+                        "\n请严格按规范重新输出一份完整文档，只返回 {\"commands\":[...]} JSON，"
+                        "不要解释文字：命令必须来自 approach/pick/lift_up/retreat/move_to/put/pull/push，"
+                        "参数只用规范表格里列出的名字，target 只用给定场景 ID 或 home/end_effector"
+                        "（lift_up/pull/push 不写 target），put 的 relation 只在任务要求侧向落点时写，"
+                        "不要写 distance_m（由 Brain 回填），"
+                        "pick 与 put 前后必须分别是同一 target 的 approach 与 retreat。")
 
     def plan_dual(self, request):
         from .dual_skill_planning import DualSkillPlanOutput
@@ -1007,13 +1125,16 @@ def _extract_json(content: str) -> dict[str, Any]:
     text = content.strip()
     if text.startswith("```"):
         if not text.endswith("```"):
-            raise QwenProviderError("unterminated JSON fence")
+            raise QwenProviderError("unterminated JSON fence", code="model_output_not_json")
         text = text[3:].strip()
         if text.startswith("json"):
             text = text[4:].lstrip()
         text = text[:-3].rstrip()
     decoder = json.JSONDecoder()
-    value, end = decoder.raw_decode(text)
+    try:
+        value, end = decoder.raw_decode(text)
+    except json.JSONDecodeError as exc:
+        raise QwenProviderError(f"model output is not JSON: {exc.msg}", code="model_output_not_json") from exc
     if not isinstance(value, dict) or text[end:].strip():
-        raise QwenProviderError("model output must be exactly one JSON object")
+        raise QwenProviderError("model output must be exactly one JSON object", code="model_output_not_json")
     return value

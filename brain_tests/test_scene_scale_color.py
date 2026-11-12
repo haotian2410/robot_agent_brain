@@ -151,8 +151,9 @@ def test_unknown_evidence_not_zero_and_unrelated_objects_ignored():
     query=SceneQueryIntent(query_type="count",target="b",entities=[TaskEntity(entity_id="b",semantic_name="basket",category="container",color="red")])
     assert SceneQueryEngine(assets=library).query(query,scene).count==1
     library.models["basket"]=library.models["basket"].model_copy(update={"color_tags":()})
-    with pytest.raises(ValueError,match="evidence_missing"):
-        SceneQueryEngine(assets=library).query(query,scene)
+    # Nobody declares a colour any more, so 「red」 is dropped rather than refused: the
+    # basket is still counted once and the unrelated container never joins it.
+    assert SceneQueryEngine(assets=library).query(query,scene).count==1
 
 
 def test_multi_object_mixed_atomic_edit():

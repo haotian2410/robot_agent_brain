@@ -173,11 +173,14 @@ class ExecutionFeedback(BaseModel):
     holding_object: SceneId | None = None
 
 
-def canonical_commands(commands: CommandsFile) -> dict:
+def canonical_commands(commands) -> dict:
     """The sole wire representation. Validate models and the public schema."""
+    from .commands_atomic import AtomicCommandsFile, canonical_atomic_commands
     from .commands_v3 import CommandsFileV3, canonical_commands_v3
     if isinstance(commands, CommandsFileV3):
         return canonical_commands_v3(commands)
+    if isinstance(commands, AtomicCommandsFile):
+        return canonical_atomic_commands(commands)
     payload = commands.model_dump(mode="json", exclude_none=True)
     CommandsFile.model_validate(payload)
     json.dumps(payload, allow_nan=False)
@@ -187,9 +190,14 @@ def canonical_commands(commands: CommandsFile) -> dict:
 
 def parse_commands(payload):
     """Version dispatch is explicit; never interpret v3 as a v2 flat list."""
+    from .commands_atomic import AtomicCommandsFile
     from .commands_v3 import CommandsFileV3
     version = payload.get("schema_version")
     if version == "2.0":
+        # The control atomic dialect declares the same 2.0 version; it is the
+        # flat command list without the Brain-private robot/operations view.
+        if "robot" not in payload and "operations" not in payload:
+            return AtomicCommandsFile.model_validate(payload)
         return CommandsFile.model_validate(payload)
     if version == "3.0":
         return CommandsFileV3.model_validate(payload)

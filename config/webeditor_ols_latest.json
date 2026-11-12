@@ -134,7 +134,6 @@
     "version": "v0.2",
     "dynamic_platform_rebind": false,
     "runtime_robot_setup_change": false,
-    "nl_initial_platform_selection": false,
-    "control_dispatch": false
+    "nl_initial_platform_selection": false
   }
 }

@@ -78,14 +78,10 @@ def test_q_c03_q_a01_a03_queries_share_alias_category_color_rules(name, category
     query = SceneQueryIntent(query_type="count", entities=[TaskEntity(entity_id="a", semantic_name=name, category=category, color=color)], target="a")
     kwargs = dict(category_aliases={"水果":"fruit"}, aliases={"苹果":"apple"})
     task = TaskIntent(instruction="selection", entities=[query.entities[0].model_copy(update={"quantity_mode":"all", "all_available":True})], operations=[])
-    if color is not None:
-        for action in (lambda: SceneQueryEngine(**kwargs).query(query, scene),
-                       lambda: SceneGrounder(**kwargs).ground(task, scene)):
-            with pytest.raises(ValueError, match="grounding_evidence_missing: color"):
-                action()
-    else:
-        assert SceneQueryEngine(**kwargs).query(query, scene).count == 2
-        assert len(SceneGrounder(**kwargs).ground(task, scene).entities[0].scene_object_ids) == 2
+    # Nothing in this scene declares a colour, so 「red」/「blue」 are dropped rather
+    # than refused: every spelling answers about the same two apples.
+    assert SceneQueryEngine(**kwargs).query(query, scene).count == 2
+    assert len(SceneGrounder(**kwargs).ground(task, scene).entities[0].scene_object_ids) == 2
 
 
 def test_query_candidate_pool_validates_before_relation_filter():

@@ -109,7 +109,8 @@ original SHA 始终为 `34cd7de0f12914d05a90de90975ddb2e8c5401b84877cad2ad28453b
 2. v3 单文件 consumer、阶段 barrier、协调启动、typed hold_constraints／preconditions／invariants 的持续监测。
 3. grasp/move/release 的真实轨迹、IK、碰撞、稳定接触与终态反馈；Brain 符号通过不证明可执行。
 4. 唯一 command ID、逐臂反馈、版本化完整 scene＋known 状态、可信来源认证和平台 ACK／超时约定。
-5. 倒水、共同抓取／交接、自由行为树均未实现；等待新版 skill.md，不添加假参数。
+5. 倒水、共同抓取／交接、自由行为树均未实现。新版 skill.md 已经到了（单臂原子方言，
+   新增 `pull`/`push` 直线推拉），但它没有定义倒水、双臂协同或交接技能，所以仍不添加假参数。
 
 用户 `.idea/`、`robot_agent.md`、资产和私有配置未修改、未随 `bfe03b9` 提交。
 完整工作区清单与统计见同目录 `dual_arm_audit_worktree.txt`。
@@ -119,7 +120,8 @@ original SHA 始终为 `34cd7de0f12914d05a90de90975ddb2e8c5401b84877cad2ad28453b
 ## 历史实现记录（旧基线；以下数字不是本轮验收）
 
 基线 a4ed6b8，依据用户提供的双臂与原始场景扩展方案。倒水按最新要求只占位：
-等待 Control 新版 skill.md，不新增 pour、倒水区域、液体条件或倒水 recipe。
+等待 Control 新版 skill.md，不新增 pour、倒水区域、液体条件或倒水 recipe。（该新版已于
+本轮到位，其中同样没有 pour，因此这条占位决定不变。）
 
 ## 已实现的 Brain 链路
 

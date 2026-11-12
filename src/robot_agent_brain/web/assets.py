@@ -1,6 +1,7 @@
 """Read-only OLS identity/metadata parity check, no dynamic upload support."""
 import json
 from pathlib import Path
+from ..adapters.ols_index import hidden_ids, index_by_id
 from .protocol import digest, loopback_url
 
 
@@ -11,11 +12,9 @@ def check_ols(client, base_url, root):
     for kind, plural, filename in (("model","models","model_index.json"), ("robot","robots","robot_index.json"),
                                    ("scene","scenes","scene_index.json")):
         index = json.loads((root / plural / filename).read_text(encoding="utf-8"))
-        expected = ({int(i):name for i,name in index["by_id"].items()} if kind != "scene"
-                    else {item["id"]:item["name"] for item in index})
+        expected = index_by_id(index)
         # /list hides no_display assets; direct ID lookup still exposes them.
-        hidden = ({int(i) for i, value in index.get("no_display", {}).items() if value}
-                  if kind != "scene" else {item["id"] for item in index if item.get("no_display", False)})
+        hidden = hidden_ids(index)
         listed = {identifier: name for identifier, name in expected.items() if identifier not in hidden}
         response = client.get(base_url + "/list", params={"type":kind,"uid":0})
         response.raise_for_status()

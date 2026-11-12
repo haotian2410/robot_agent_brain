@@ -51,8 +51,11 @@ class LayoutDefaults(BaseModel):
 class BrainConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     provider: Literal["qwen", "replay"] = "qwen"
-    planner: Literal["recipe", "qwen", "auto"] = "recipe"
+    planner: Literal["recipe", "qwen", "auto"] = "qwen"
     planner_max_completion_tokens: int = Field(default=1024, ge=128, le=4096)
+    # The control atomic-skill dialect is specified in prose, so the planning round
+    # is not given a strict json_schema; the Brain validates the document instead.
+    skill_planning_response_format: Literal["json_schema", "json_object", "text"] = "json_object"
     base_url: str = "http://127.0.0.1:8080/v1"
     model: str | None = None
     timeout: float = Field(default=120, gt=0)
@@ -94,6 +97,42 @@ class BrainConfig(BaseModel):
     query_near_distance_m: float = Field(default=.2, gt=0, le=2)
     scene_layout_grid_size: int = Field(default=5, ge=3, le=9)
     scene_layout_near_clearance_m: float = Field(default=.02, ge=0, le=1)
+    # Execution runs the control repository as a child process, so it needs an
+    # interpreter of its own (the control pins numpy/mujoco versions the Brain's
+    # service environment cannot), the repository, the collision library it
+    # dlopen()s and the link package that builds the scratch workspace.
+    execution_enabled: bool = False
+    execution_python: str | None = None
+    execution_control_root: str | None = None
+    execution_library: str | None = None
+    execution_link_root: str | None = None
+    execution_workspace_root: str | None = None
+    # The control repository's skill.md is the source of truth for the atomic
+    # planning round.  When omitted, derive it from execution_control_root.
+    control_skill_prompt: str | None = None
+    execution_timeout_seconds: int = Field(default=180, ge=1, le=3600)
+
+    @model_validator(mode="after")
+    def valid_execution(self):
+        if self.execution_enabled and not all(
+                (self.execution_python, self.execution_control_root, self.execution_library)):
+            raise ValueError("execution_configuration_incomplete")
+        for name in ("execution_python", "execution_control_root", "execution_library",
+                     "execution_link_root", "execution_workspace_root"):
+            value = getattr(self, name)
+            if value is not None and not Path(value).is_absolute():
+                raise ValueError(f"{name}_must_be_absolute")
+        return self
+
+    def control_skill_prompt_path(self) -> str | None:
+        """Return the configured Auto_Robot_demo skill specification, if present."""
+        candidate = self.control_skill_prompt
+        if candidate is None and self.execution_control_root:
+            candidate = str(Path(self.execution_control_root) / "atomic_skill" / "skill.md")
+        if candidate is None:
+            return None
+        path = Path(candidate).expanduser().resolve()
+        return str(path) if path.is_file() else None
 
     def scale_policy(self):
         from .scene.scale_policy import SceneScalePolicy

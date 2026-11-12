@@ -1,6 +1,7 @@
 """Allowlisted deployment summaries and recursive diagnostic redaction."""
 import hashlib
 import json
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 
@@ -10,7 +11,8 @@ def fingerprint(value):
 
 def configuration_summary(config, assets, defaults):
     from .scene.colors import COLOR_POLICY_VERSION
-    from .models.prompts import TASK_UNDERSTANDING_PROMPT, SKILL_PLANNING_PROMPT, DUAL_SKILL_PLANNING_PROMPT, build_asset_catalog_prompt
+    from .models.prompts import (TASK_UNDERSTANDING_PROMPT, SKILL_PLANNING_PROMPT, ATOMIC_SKILL_PLANNING_PROMPT,
+                                 DUAL_SKILL_PLANNING_PROMPT, build_asset_catalog_prompt)
     from .skills.registry import REGISTRY
     url = urlsplit(config.base_url)
     endpoint = urlunsplit((url.scheme, url.netloc.rsplit("@", 1)[-1], url.path, "", ""))
@@ -45,6 +47,9 @@ def configuration_summary(config, assets, defaults):
         "motion_policy_version": "motion-v1",
         "semantics_version": "tabletop.v1",
     }
+    control_skill_path = config.control_skill_prompt_path()
+    control_skill_sha = (hashlib.sha256(Path(control_skill_path).read_bytes()).hexdigest()
+                         if control_skill_path else None)
     return {"provider":config.provider, "model":config.model, "base_url":endpoint,
             "scene_scale_policy": config.scale_policy().model_dump(mode="json"),
             "query_near_distance_m": config.query_near_distance_m,
@@ -54,6 +59,10 @@ def configuration_summary(config, assets, defaults):
             "editor_scene_manifests": config.editor_scene_manifests,
             "planner":config.planner, "planner_max_completion_tokens":config.planner_max_completion_tokens,
             "skill_planning_prompt_sha256":fingerprint(SKILL_PLANNING_PROMPT),
+            "atomic_skill_planning_prompt_sha256": fingerprint(ATOMIC_SKILL_PLANNING_PROMPT),
+            "control_skill_prompt_path": control_skill_path,
+            "control_skill_prompt_sha256": control_skill_sha,
+            "skill_planning_response_format": config.skill_planning_response_format,
             "dual_skill_planning_prompt_sha256": fingerprint(DUAL_SKILL_PLANNING_PROMPT),
             "skill_catalog_sha256":fingerprint(REGISTRY.prompt_catalog()),
             "timeout":config.timeout, "structured_output":config.structured_output,

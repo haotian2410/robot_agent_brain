@@ -60,7 +60,7 @@ def test_import_freezes_before_first_edit_or_understanding(tmp_path, separate, f
         def fail(*args, **kwargs):
             raise ValueError("understanding unavailable")
         provider.understand_turn = fail
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path / "out"),
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path / "out"),
         scene_platform_object_ids={0}), provider=provider)
     if separate:
         app.load_scene("s", path)

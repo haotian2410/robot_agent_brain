@@ -41,13 +41,47 @@ Scene v1 公共协议保持不变。缩放仅写 `Transform.scale`；改色仅�
 颜色由 Python 映射，HEX 接受 `#RRGGBB`、`#RRGGBBAA`，转大写并保留 alpha。
 未知颜色需要澄清；禁止通用属性写入。本轮没有 reset_color。
 
-颜色证据优先级：实例 override → 资产明确颜色标签 → 缺证据报错。
+颜色证据优先级：实例 override → 资产明确颜色标签 → 整批都没有证据时丢掉颜色词，
+只按主体匹配；颜色永远不能因为“查不到”而让整轮报错（policy v3）。
 override 是实例渲染属性，不是永久改写资产颜色。`#FFFFFF` 就是白色，不是“未覆盖”。
 多色标签可匹配已声明颜色，但不能用于推断任意精确 HEX。RGBA 的颜色名查询使用
-声明 RGB，不推断透明混色。查询、场景编辑和机器人 Grounding 采用同一规则。
+声明 RGB，不推断透明混色。
+
+### 证据三态与颜色退化（policy v3）
+
+单个实例的颜色证据有三种读数，不再只有“匹配/不匹配”：
+
+- 成立：实例 override 或资产颜色标签命中请求颜色。
+- 不成立：实例声明了别的颜色。
+- 无证据：实例既没有 override，资产也没有颜色标签。非 `#RRGGBB` 资产标签遇到
+  字面 HEX 请求同样读作无证据，不做最近色推断。
+
+无证据既不算命中，也不能否决同批里确有证据的兄弟：一个被染绿的苹果不会被旁边两个
+从没染过色的苹果拖成整批失败。整批都无证据时，颜色词直接丢弃，按名称/类别/tag
+选出主体，再由歧义规则决定是选唯一一个还是追问——贴图颜色系统分辨不出来的东西，
+不作为拒绝回答的理由。读不出来的颜色词（如「彩色」）与读不出来的 override 一样，
+按无证据处理，不报 `scene_edit_color_unknown`。全链路只剩一处
+`grounding_evidence_missing: tags`（整批连 tag 证据都没有），颜色不再抛错。
+
+`COLOR_POLICY_VERSION` 记录该读数，随诊断载荷一起输出。
+
+“有证据但与请求矛盾”仍需退化放行，且只在不会乱选的两种出口：句中带方位/极值/
+nearest 选择关系（用退化后的整池再解算关系），或退化后只剩一个对象。其余情况保持
+不匹配，由 Grounding 报「找不到」。以下两种情况绝不退化：`quantity_mode=all` 或
+显式 count（不能把批量操作施加到用户排除的集合上）、查询路由。查询与 Grounding
+共用同一个选择入口，但 `allow_description_fallback` 只在 `SceneGrounder` 打开：
+桌上一只苹果被染成绿色时，「有几个红苹果」答 0，不会退化成桌上苹果的数量。整批
+无证据的计数则按上一条走主体，因为颜色词在那里本来就无从校验。场景编辑沿用同一
+入口的非退化规则。
 
 例如：“把苹果改蓝”后，“蓝色苹果有几个”和“把蓝色苹果放进篮子”会使用该实例，
 不能再用资产原 red 标签判定其为红色。款式标签仍保留。
+
+`tags` 是主匹配信号：名字与别名都落空时再按 tag 重叠打分拓宽一次候选池，取最高
+分集合；拓宽只能扩大“找不到”，不会改变已有命中结果。颜色词在打分前从 tags 中摘
+出，仍留在硬过滤位，因此 33 号青苹果不会因「绿色」被选中，只有用户说「青苹果」
+才按整词 tag 命中它。理解阶段的场景上下文只给 `color_override` 原值：模型不再被
+要求核对场景，颜色由用户话语进入 `color`，证据比对全部留在 Python。
 
 颜色覆盖只验证 Brain 数据语义，未验证外部平台纯色显示。随包参考渲染脚本仍绑定
 纹理且未完整处理 alpha，必须由平台独立确认，不以 JSON 成功冒充渲染成功。
@@ -55,6 +89,9 @@ override 是实例渲染属性，不是永久改写资产颜色。`#FFFFFF` 就�
 ## 验证
 
 `python -m pytest brain_tests/test_scene_scale_color.py brain_tests/test_final_models_integration.py`
+
+染过色实例的选择与退化：`python -m pytest brain_tests/test_recolored_selection.py
+brain_tests/test_component_runtime.py`。
 
 真实 Qwen 多轮：`python demo/final_models/scale_color_demo.py`。
 资产包缺失时集成测试明确跳过，普通 fixture 测试仍运行。metadata 颜色/缩放更新

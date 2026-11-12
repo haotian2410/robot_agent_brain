@@ -175,6 +175,47 @@ def test_explicit_scene_object_id_filters_semantic_candidates():
         )
 
 
+def test_a_pronoun_with_no_description_trusts_the_previous_turn_binding():
+    """「把它放到篮子里」 arrives with dialogue_ref set and an empty semantic_name.
+
+    Qwen cannot name the witness -- only the dialogue state knows it -- so comparing
+    that binding against the entity's own (empty) candidate pool rejected the banana
+    the previous step had just added (job 84, step 2).  A self-described entity keeps
+    the subset check, which is what catches a binding that drifted onto another object.
+    """
+    scene = scene_with_apples()
+    selector = SceneObjectSelector(assets=BrainConfig().load_assets())
+    pronoun = TaskEntity(entity_id="target", category="fruit", dialogue_ref=True)
+    assert [item.object_id_in_scene for item in
+            selector.resolve("target", [pronoun], [], scene, bindings_override={"target": [4]})] == [4]
+
+    with pytest.raises(ValueError, match="grounding_binding_invalid"):
+        selector.resolve("target", [apples()], [], scene, bindings_override={"target": [2]})
+    with pytest.raises(ValueError, match="grounding_binding_invalid"):
+        selector.resolve("target", [pronoun.model_copy(update={"exclude_scene_object_ids": [4]})],
+                         [], scene, bindings_override={"target": [4]})
+
+
+def test_pointed_instance_ids_bind_without_description_evidence():
+    scene = scene_with_apples()
+    selector = SceneObjectSelector(assets=BrainConfig().load_assets())
+
+    def pointed(*ids):
+        return TaskEntity(entity_id="apple", category="fruit", scene_object_ids=list(ids))
+
+    assert [item.object_id_in_scene for item in selector.resolve("apple", [pointed(4)], [], scene)] == [4]
+    assert [item.object_id_in_scene for item in selector.resolve("apple", [
+        pointed(1, 4).model_copy(update={"count": 2, "quantity_mode": QuantityMode.ALL})], [], scene)] == [1, 4]
+    for identifier in (99, 2):
+        with pytest.raises(ValueError, match="grounding_binding_invalid"):
+            selector.resolve("apple", [pointed(identifier)], [], scene)
+
+    removed = TaskEntity(entity_id="apple", category="fruit", scene_object_ids=[4],
+                         exclude_scene_object_ids=[4])
+    with pytest.raises(ValueError, match="grounding_binding_invalid"):
+        selector.resolve("apple", [removed], [], scene)
+
+
 def test_explicit_instance_delete_can_recover_a_clarification():
     clarification = {"status": "clarification_required", "turn_kind": "unsupported_task",
                      "clarification_question": "Which object does id 4 refer to?"}

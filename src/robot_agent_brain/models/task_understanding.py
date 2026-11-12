@@ -490,7 +490,18 @@ class TaskParseWireOutput(BaseModel):
             except ValidationError as exc:
                 message = str(exc.errors()[0].get("msg", "operation is invalid"))
                 raise ValueError(f"task_semantic_invalid: operations.{operation_index}: {message}") from exc
-        entities = [TaskEntity.model_validate(item.model_dump(mode="json")) for item in self.entities]
+        entities = []
+        for item in self.entities:
+            payload = item.model_dump(mode="json")
+            # Qwen sometimes answers a robot task with only `entity_id` and `category`,
+            # leaving `semantic_name` out of the JSON entirely (job 86/87: 「放到托盘左边」
+            # came back as {entity_id: "tray", category: "container"}).  Candidate discovery
+            # matches on name/tags/color, so an undescribed entity found no objects at all
+            # and the reference died as `grounding_missing: tray`.  `entity_id` is required
+            # and name-shaped, so borrow it rather than lose the object; a role slug such as
+            # "target" still matches nothing and follows the same path as before.
+            payload["semantic_name"] = payload.get("semantic_name") or payload["entity_id"]
+            entities.append(TaskEntity.model_validate(payload))
         relations = [SpatialRelation(scope=item.scope, subject=item.subject,
                                      relation=item.relation, reference=item.reference)
                      for item in self.relations]

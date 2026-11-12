@@ -160,11 +160,16 @@
   "debug": true,
   "allow_scene_reset": true,
   "output_dir": "var/webeditor/tasks",
+  "execution_enabled": true,
+  "execution_python": "/home/cscvlab/miniconda3/envs/robot_exec/bin/python",
+  "execution_control_root": "/home/cscvlab/lht/robot_agent_control",
+  "execution_library": "/home/cscvlab/lht/_thirdparty/SimPlatform-main/build/libsim_platform_c.so",
+  "execution_link_root": "/home/cscvlab/lht/robot_agent_link",
+  "execution_workspace_root": "/home/cscvlab/lht/robot_agent_workspace",
   "release_policy": {
     "version": "v0.2",
     "dynamic_platform_rebind": false,
     "runtime_robot_setup_change": false,
-    "nl_initial_platform_selection": false,
-    "control_dispatch": false
+    "nl_initial_platform_selection": false
   }
 }

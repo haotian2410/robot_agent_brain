@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from robot_agent_brain.adapters.final_models_library import FinalModelsLibraryAdapter
+from robot_agent_brain.adapters.ols_index import index_by_id
 from robot_agent_brain.contracts.scene import SceneComponent, SceneConfig, SceneObject
 from robot_agent_brain.models.qwen_http import QwenHTTPProvider
 from robot_agent_brain.models.task_understanding import TaskUnderstandingRequest
@@ -100,7 +101,7 @@ def test_live_qwen_payload_contains_full_current_ols_catalog_and_scenes():
     scene_index = json.loads((root / "scenes" / "scene_index.json").read_text())
     assert len(body["asset_catalog"]["models"]) == len(model_index["by_id"])
     assert len(body["asset_catalog"]["robots"]) == len(robot_index["by_id"])
-    assert len(body["asset_catalog"]["scenes"]) == len(scene_index)
+    assert len(body["asset_catalog"]["scenes"]) == len(index_by_id(scene_index))
     assert {item["name"] for item in body["asset_catalog"]["scenes"]} >= {"ur5e_table_empty", "piper_table_twist"}
     assert "scene_name=ur5e_table_empty" in requests[0]["messages"][0]["content"]
 
@@ -220,7 +221,7 @@ def test_live_pipeline_http_sends_full_catalog_on_every_turn():
         payload = json.loads(catalog)
         assert len(payload["asset_catalog"]["models"]) == len(model_index["by_id"])
         assert len(payload["asset_catalog"]["robots"]) == len(robot_index["by_id"])
-        assert len(payload["asset_catalog"]["scenes"]) == len(scene_index)
+        assert len(payload["asset_catalog"]["scenes"]) == len(index_by_id(scene_index))
         assert payload["asset_catalog"]["revision"].startswith("sha256:")
         assert "model:1" in body["messages"][0]["content"]
 
@@ -370,7 +371,7 @@ def test_ols_adapter_refresh_publishes_new_catalog_atomically():
             (target / section).mkdir()
             shutil.copy2(source / section / index_name, target / section / index_name)
             index = json.loads((source / section / index_name).read_text())
-            entries = index["by_id"] if section != "scenes" else {str(item["id"]): item["name"] for item in index}
+            entries = index_by_id(index)
             for identifier, name in entries.items():
                 source_meta = source / section / str(identifier) / f"{name}.json"
                 if source_meta.is_file():

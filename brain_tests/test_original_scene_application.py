@@ -15,10 +15,10 @@ def test_original_replace_finds_deleted_object_and_publishes_provenance(tmp_path
     path = tmp_path / "input.json"
     path.write_text(scene.model_dump_json(), encoding="utf-8")
     locate = TaskParseOutput.model_validate({"entities": [{"id": "apple", "name": "apple", "category": "fruit"}],
-        "operations": [{"type": "locate", "target": "apple"}]}).to_brain_turn("定位苹果")
+        "operations": [{"type": "grasp", "target": "apple"}]}).to_brain_turn("抓起苹果")
     provider = Provider(locate)
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path / "out"), scene_platform_object_ids={0}), provider=provider)
-    first = app.handle("定位苹果", scene_path=path)
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path / "out"), scene_platform_object_ids={0}), provider=provider)
+    first = app.handle("抓起苹果", scene_path=path)
     assert first.run_status == "success", first
     root = tmp_path / "out" / first.session_id
     original_bytes = (root / "original_scene.json").read_bytes()
@@ -55,7 +55,7 @@ def test_empty_import_is_frozen_before_first_edit_and_reused_for_original_adds(t
                                      entities=[{"entity_id": "banana", "semantic_name": "banana", "category": "fruit"}]),
     ))
     app = BrainApplication(
-        BrainConfig(provider="replay", output_dir=str(tmp_path / "out"), scene_platform_object_ids={0}),
+        BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path / "out"), scene_platform_object_ids={0}),
         provider=provider,
     )
     first = app.handle("有几个香蕉", scene_path=path)

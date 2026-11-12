@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("rfc8785", reason="optional web integration dependencies not installed")
+from robot_agent_brain.adapters.ols_index import index_by_id
 from robot_agent_brain.contracts.scene import SceneComponent, RobotDriverProperties
 from robot_agent_brain.web.protocol import digest, validate_web_scene, StartTask
 from robot_agent_brain.web.task_store import TaskStore
@@ -105,10 +106,10 @@ def test_all_ols_scenes_roundtrip_and_joint_inventory():
     if not root.exists() or not inventory.exists():
         pytest.skip("external OLS 1.0.5 package/joint cache not installed")
     joints = json.loads(inventory.read_text(encoding="utf-8"))
-    for item in json.loads((root/'scenes/scene_index.json').read_text(encoding="utf-8")):
-        original = json.loads((root/'scenes'/str(item['id'])/(item['name']+'.json')).read_text(encoding="utf-8"))
+    for identifier, name in index_by_id(json.loads((root/'scenes/scene_index.json').read_text(encoding="utf-8"))).items():
+        original = json.loads((root/'scenes'/str(identifier)/(name+'.json')).read_text(encoding="utf-8"))
         scene = validate_web_scene(original, joints)
-        assert scene.model_dump(mode="json") == original
+        assert scene.raw_document() == original
     bad = scene.model_copy(deep=True)
     from robot_agent_brain.scene.component_access import SceneIndex
     SceneIndex(bad).component(2, "RobotDriver").properties["available_connect_joints"] = ["not_a_joint"]

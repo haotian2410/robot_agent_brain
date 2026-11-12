@@ -1,0 +1,47 @@
+索引名	内容（如数值）	生成来源（来源枚举 + 具体文件）
+scene_schema_version	1	protocolDefault（src/robot_agent_brain/contracts/scene.py）；sceneTemplate（model/final_models/scenes/1/ur5e_table_empty.json）
+scene_id	uint32；默认模板为 1	sceneTemplate（model/final_models/scenes/1/ur5e_table_empty.json）；gatewayAssigned（config/webeditor.json）
+scene_version	uint32；默认模板为 3；Agent 写回后递增	model/final_models/scenes/1/ur5e_table_empty.json；src/robot_agent_brain/web/service.py
+scene_sub_version	uint32，缺省 0；setup 增删物体时递增	src/robot_agent_brain/web/protocol.py；docs/docs/执行包/gateway与Agent新通信流程.md
+scene_name	默认 ur5e_table_empty	model/final_models/scenes/1/ur5e_table_empty.json；model/final_models/scenes/scene_index.json
+objects	SceneObject[]；默认模板 7 个对象	model/final_models/scenes/1/ur5e_table_empty.json
+objects[].object_id_in_scene	uint32；同场景唯一，删除后不得复用	model/final_models/scenes/1/ur5e_table_empty.json；src/robot_agent_brain/web/service.py；config/webeditor.json
+objects[].object_name_in_scene	例如 work_table、ur5e_arm、overhead_camera_d435i	model/final_models/scenes/1/ur5e_table_empty.json
+objects[].components	SceneComponent[]	src/robot_agent_brain/contracts/scene.py；model/final_models/scenes/1/ur5e_table_empty.json
+components[].component_type	已知或未知扩展类型字符串	src/robot_agent_brain/contracts/scene.py；model/final_models/scenes/1/ur5e_table_empty.json
+components[].properties	组件属性对象；未知字段保留	model/final_models/scenes/1/ur5e_table_empty.json；docs/docs/执行包/场景文件描述.md
+Transform.position	[x,y,z]；缺省 [0,0,0]；模板桌子 [0.525,0,0]	model/final_models/scenes/1/ur5e_table_empty.json；src/robot_agent_brain/contracts/scene.py
+Transform.quaternion_xyzw	[x,y,z,w]；缺省 [0,0,0,1]	model/final_models/scenes/1/ur5e_table_empty.json；src/robot_agent_brain/contracts/scene.py
+Transform.scale	[sx,sy,sz]；新建对象 [1,1,1]	src/robot_agent_brain/scene/editor.py；src/robot_agent_brain/scene/scale_policy.py；model/final_models/scenes/1/ur5e_table_empty.json
+Transform.parent	父对象 uint32 或 null；夹爪 2，腕部相机 3	model/final_models/scenes/1/ur5e_table_empty.json
+MetadataRef.path	默认机械臂 $LIBRARY_SERVER/1；桌子 $LIBRARY_SERVER/29	config/final_models.json；model/final_models/robots/robot_index.json；model/final_models/models/model_index.json
+MetadataRef.type	model 或 robot；同一数字 ID 靠 type 区分	src/robot_agent_brain/contracts/scene.py；model/final_models/scenes/1/ur5e_table_empty.json
+Semantic.semantic_name	work_table、ur5e_arm、robotiq_2f85、overhead_camera_d435i	model/final_models/scenes/1/ur5e_table_empty.json
+Semantic.category	surface、robot、end_effector、sensor	model/final_models/scenes/1/ur5e_table_empty.json
+Semantic.support	支撑对象 uint32 或 null	model/final_models/scenes/1/ur5e_table_empty.json；src/robot_agent_brain/scene/editor.py
+MeshRenderer.forceOverrideColor	#RRGGBB 或 #RRGGBBAA；模板实际 #FFFFFF	model/final_models/scenes/1/ur5e_table_empty.json；src/robot_agent_brain/scene/colors.py
+Light.type	Ambient	model/final_models/scenes/1/ur5e_table_empty.json
+Light.intensity	0.7	model/final_models/scenes/1/ur5e_table_empty.json
+Light.color	#FFFFFF	model/final_models/scenes/1/ur5e_table_empty.json
+Camera.type	rgbd	model/final_models/scenes/1/ur5e_table_empty.json
+Camera.fov	60	model/final_models/scenes/1/ur5e_table_empty.json
+Camera.near	0.01	model/final_models/scenes/1/ur5e_table_empty.json
+Camera.far	10	model/final_models/scenes/1/ur5e_table_empty.json
+Camera.resolution	[640,480]	model/final_models/scenes/1/ur5e_table_empty.json
+RobotDriver.joint_sequence	UR5e 六轴：shoulder_pan_joint、shoulder_lift_joint、elbow_joint、wrist_1_joint、wrist_2_joint、wrist_3_joint	config/final_models.json；model/final_models/scenes/1/ur5e_table_empty.json
+RobotDriver.joint_limits	UR5e 关节弧度上下限	config/final_models.json；model/final_models/robots/1/ur5e_arm.urdf
+RobotDriver.initial_joint_positions_rad	[0,-2.094395,1.570796,-1.5707963,-1.5707963,0]	config/final_models.json；model/final_models/scenes/1/ur5e_table_empty.json
+RobotDriver.now_joint_positions_rad	当前显示姿态；可缺省，无固定默认值	src/robot_agent_brain/contracts/scene.py；src/robot_agent_brain/web/service.py
+RobotDriver.available_connect_joints	[wrist_3_joint]	config/final_models.json；model/final_models/scenes/1/ur5e_table_empty.json
+RobotDriver.role	arm 或 passive；UR5e 模板未写时按读取层处理	docs/docs/执行包/场景文件描述.md；src/robot_agent_brain/contracts/scene.py
+RobotAttachment.parent_object_id	2（UR5e 对象）	model/final_models/scenes/1/ur5e_table_empty.json
+RobotAttachment.parent_joint	wrist_3_joint	model/final_models/scenes/1/ur5e_table_empty.json；model/final_models/robots/1/ur5e_arm.urdf
+RobotAttachment.parent_link	wrist_3_link	model/final_models/scenes/1/ur5e_table_empty.json；model/final_models/robots/1/ur5e_arm.urdf
+RobotAttachment.child_link	robotiq_base_link	model/final_models/scenes/1/ur5e_table_empty.json；model/final_models/robots/2/robotiq_2f85.urdf
+RobotAttachment.connection_type	fixed	model/final_models/scenes/1/ur5e_table_empty.json
+RobotAttachment.transform	position、quaternion_xyzw、reference_frame=parent_link	model/final_models/scenes/1/ur5e_table_empty.json
+robot	ur5e（UR5e 机械臂，$LIBRARY_SERVER/1）	globalDefaultSetting（config/final_models.json、config/webeditor.json）；assetLibrary（model/final_models/robots/1/ur5e_arm.json）
+table	work_table（桌子，$LIBRARY_SERVER/29）	globalDefaultSetting（config/final_models.json）；assetLibrary（model/final_models/models/29/table.json）；sceneTemplate（model/final_models/scenes/1/ur5e_table_empty.json）
+gripper	robotiq_2f85（$LIBRARY_SERVER/2）	sceneTemplate（model/final_models/scenes/1/ur5e_table_empty.json）；assetLibrary（model/final_models/robots/2/robotiq_2f85.json）
+camera	wrist_camera_d435i 对象 4 或 overhead_camera_d435i 对象 5；rgbd 640x480	sceneTemplate（model/final_models/scenes/1/ur5e_table_empty.json）；globalDefaultSetting（src/robot_agent_brain/web/service.py 默认 camera_id=5）
+scene	ur5e_table_empty（scene_id=1，scene_version=3）	globalDefaultSetting（config/final_models.json）；sceneTemplate（model/final_models/scenes/1/ur5e_table_empty.json）

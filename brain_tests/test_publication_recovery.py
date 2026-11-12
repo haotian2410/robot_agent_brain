@@ -6,7 +6,7 @@ from test_application_artifacts import Provider, robot
 
 
 def test_committed_scene_is_queryable_after_artifact_publication_failure(tmp_path, monkeypatch):
-    config = BrainConfig(provider="replay", output_dir=str(tmp_path))
+    config = BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path))
     app = BrainApplication(config, provider=Provider(robot()))
     def fail(*args, **kwargs):
         raise OSError("simulated output failure")
@@ -26,7 +26,7 @@ def test_committed_scene_is_queryable_after_artifact_publication_failure(tmp_pat
 
 
 def test_checkpoint_failure_records_commit_and_blocks_stale_restore(tmp_path, monkeypatch):
-    config = BrainConfig(provider="replay", output_dir=str(tmp_path))
+    config = BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path))
     app = BrainApplication(config, provider=Provider(robot()))
     def fail(*args, **kwargs):
         raise OSError("checkpoint failed")

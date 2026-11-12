@@ -20,7 +20,7 @@ def test_simple_sessions_input_and_direct_continuity(tmp_path):
     loaded = load_batch_input(cases)
     assert loaded["kind"] == "sessions"
     assert loaded["sessions"][0].name == "demo"
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path / "out")), provider=Provider())
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path / "out")), provider=Provider())
     summary, path = run_batch(app, cases)
     assert summary["totals"] == {"passed": 2, "failed": 0, "skipped": 0}
     assert path.is_file()

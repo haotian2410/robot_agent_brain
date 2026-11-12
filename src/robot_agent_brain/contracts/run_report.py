@@ -24,7 +24,8 @@ class BrainRunReport(BaseModel):
     scene_id: SceneId | None = None
     scene_version: int | None = None
     scene_commit_status: Literal["unchanged", "committed", "unknown"] = "unchanged"
-    executed: Literal[False] = False
+    executed: bool = False
+    execution: dict = Field(default_factory=dict)
     reply: str = ""
     clarification_question: str | None = None
     provider: str

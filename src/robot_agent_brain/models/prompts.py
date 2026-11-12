@@ -1,5 +1,6 @@
 import json
 import hashlib
+from pathlib import Path
 from importlib.resources import files
 from ..contracts.asset_catalog import AssetCatalogSnapshot
 
@@ -80,6 +81,45 @@ def build_spatial_reference_tables() -> str:
     return "\n".join(lines) + "\n"
 
 
+def _atomic_parameter_surface(model) -> str:
+    parts = []
+    for name, field in model.model_fields.items():
+        if field.is_required():
+            parts.append(name)
+        elif field.default is not None:
+            parts.append(f"{name}={field.default!r}")
+        else:
+            parts.append(f"{name}?")
+    return ", ".join(parts)
+
+
+def build_atomic_skill_reference_tables() -> str:
+    """Machine-checked parameter surface; the validator below rejects anything else.
+
+    The control specification above explains what each skill does.  This appendix is
+    generated from the same contract the Brain validates with, so a control-side
+    parameter change cannot leave the prompt silently agreeing with an old dialect.
+    """
+    from ..contracts.commands_atomic import AtomicSkillName, PARAMETER_TYPES
+    lines = ["", "## 附录：Brain 校验器实际接受的参数表（与上面的规范同源）",
+             ""]
+    for skill in AtomicSkillName:
+        lines.append(f"- `{skill.value}`：{_atomic_parameter_surface(PARAMETER_TYPES[skill])}。")
+    lines += ["",
+              "- `move_to.target` 可以是整数场景 ID，也可以是命名目标 `home` 或 `end_effector`；其余技能的 `target` 只能是整数场景 ID。",
+              "- `lift_up`、`pull`、`push` 没有 `target`。",
+              "- `approach.search` 默认 0.02～0.10 m、步长 0.005 m；`retreat.search` 默认 0.03～0.10 m、步长 0.005 m；省略即取默认。",
+              "- `pick.hold_force` 默认 10.0 N；`lift_up.distance` 默认 0.02 m，必须大于 0。",
+              "- `put.relation` 只能是 `at`、`front`、`behind`、`left`、`right`、`above`、`below`，省略等价于 `at`；"
+              "`front`/`behind`/`left`/`right` 是目的地水平外侧、需要可见支撑面，`above`/`below` 是沿世界 Z 轴的空间释放点、可悬空。"
+              "偏移的距离由 Brain 按任务统一回填，任务没有要求相对落点时不要写 `relation` 或 `distance_m`。",
+              "- `pull`/`push` 的 `distance` 必填且大于 0；`frame` 省略等价于 `tool`，只能是 `tool`、`grasp`、`world`；"
+              "`direction` 省略时按 `pull` 取 `[0,0,-1]`、`push` 取 `[0,0,1]`，写出时必须是三个非零分量。",
+              "- `move_to.distance_m` 必须与 `relation` 同时出现；`end_effector` 目标只能用 `linear`。",
+              ""]
+    return "\n".join(lines)
+
+
 # There is one runtime source of truth for first-stage understanding.  The
 # historical v2 file and route/lexicon fragments remain in the package as
 # migration/reference material, but are deliberately not concatenated here:
@@ -88,7 +128,29 @@ def build_spatial_reference_tables() -> str:
 TASK_UNDERSTANDING_PROMPT = _load_prompt("task_understanding_clean_v3.txt") + build_spatial_reference_tables()
 VISION_GROUNDING_PROMPT = _load_prompt("vision_grounding_v1.txt")
 SKILL_PLANNING_PROMPT = _load_prompt("skill_planning_v2.txt")
+def build_atomic_skill_prompt(source_path: str | Path | None = None) -> tuple[str, str | None]:
+    """Load the control skill specification used by the atomic planner.
+
+    Production runs may point at the checked-out Auto_Robot_demo control
+    repository.  The bundled copy remains a test/replay fallback, but it is
+    never silently preferred when an explicit control checkout is available.
+    The generated Brain output appendix is deliberately kept separate from the
+    control prose so the control document remains the semantic source of truth.
+    """
+    path = Path(source_path).expanduser().resolve() if source_path else None
+    if path is not None and path.is_file():
+        source = path.read_text(encoding="utf-8")
+        if not source.strip():
+            raise RuntimeError(f"control_skill_prompt_empty: {path}")
+        sha = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        return source + "\n" + build_atomic_skill_reference_tables(), sha
+    fallback = _load_prompt("skill_planning_atomic_v1.txt")
+    return fallback + build_atomic_skill_reference_tables(), None
+
+
+ATOMIC_SKILL_PLANNING_PROMPT, ATOMIC_SKILL_SOURCE_SHA256 = build_atomic_skill_prompt()
 DUAL_SKILL_PLANNING_PROMPT = _load_prompt("dual_skill_planning_v3.txt")
+TASK_DECOMPOSITION_PROMPT = _load_prompt("task_decomposition_v1.txt")
 
 
 def prompt_payload(value) -> str:

@@ -17,7 +17,6 @@ from .adapters.local_scene_platform import LocalScenePlatform
 from .adapters.scene_file_codec import SceneFileCodec
 from .adapters.artifact_writer import ArtifactWriter, safe_identifier
 from .adapters.ols_robot_assembly import OlsRobotAssemblyAdapter
-from .adapters.ols_robot_assembly import is_ur5_platform_name
 from .contracts.run_report import BrainRunReport
 from .contracts.turn import TurnStatus
 from .errors import BrainIssue, BrainError
@@ -49,7 +48,9 @@ class BrainApplication:
             provider = QwenHTTPProvider(self.config.base_url, self.config.model,
                 api_key=self.config.api_key.get_secret_value() if self.config.api_key else "",
                 timeout=self.config.timeout, structured_output=self.config.structured_output,
-                planner_max_completion_tokens=self.config.planner_max_completion_tokens)
+                planner_max_completion_tokens=self.config.planner_max_completion_tokens,
+                skill_planning_response_format=self.config.skill_planning_response_format,
+                atomic_skill_prompt_path=self.config.control_skill_prompt_path())
         self.provider = provider
         if hasattr(provider, "set_asset_catalog") and getattr(provider, "live_catalog", True):
             # The adapter owns aliases for this exact OLS revision. Passing
@@ -194,14 +195,12 @@ class BrainApplication:
             self.sessions[session_id].restored_config_fingerprint = state.config_fingerprint if state else None
             self.revisions[session_id] = state.revision if state else 0
             if self.sessions[session_id].scene is not None and getattr(self.sessions[session_id], "robot_asset", None) is None:
-                binding = self.robot_assembly.scene_binding(self.sessions[session_id].scene)
-                self.sessions[session_id].robot_asset = binding.get("robot_asset")
-                self.sessions[session_id].gripper_asset = binding.get("gripper_asset")
-                self.sessions[session_id].camera_asset = binding.get("camera_asset")
-                self.sessions[session_id].execution_capability = (
-                    "supported" if is_ur5_platform_name(binding.get("robot_asset"))
-                    and (self.config.robot_profiles.profiles or getattr(self.pipeline, "robot", "ur5e") == "ur5e")
-                    else "unsupported")
+                restored = self.sessions[session_id]
+                binding = self.robot_assembly.scene_binding(restored.scene)
+                restored.robot_asset = binding.get("robot_asset")
+                restored.gripper_asset = binding.get("gripper_asset")
+                restored.camera_asset = binding.get("camera_asset")
+                restored.execution_capability = restored._platform_execution_capability()
         return self.sessions[session_id]
 
     def load_scene(self, session_id, path):
@@ -244,9 +243,11 @@ class BrainApplication:
         session.initialize_scene(scene)
         binding = self.robot_assembly.scene_binding(scene)
         session.robot_asset, session.gripper_asset, session.camera_asset = binding.get("robot_asset"), binding.get("gripper_asset"), binding.get("camera_asset")
-        session.execution_capability = ("supported" if is_ur5_platform_name(session.robot_asset)
-                                        and (self.config.robot_profiles.profiles or getattr(self.pipeline, "robot", "ur5e") == "ur5e")
-                                        else "unsupported")
+        # A profile that just validated its manifest is the deployment's own
+        # opt-in, so it outranks the scene gate; that gate only judges platforms
+        # with no declared manifest (and refuses multi-arm scenes outright).
+        session.execution_capability = ("supported" if profile is not None
+                                        else session._platform_execution_capability())
         if profile is not None:
             session.bind_imported_profile(profile)
         elif self.config.scene_platform_object_ids is not None:
@@ -285,11 +286,13 @@ class BrainApplication:
             initial_import = session.scene is None
             changed = session.accept_browser_scene(candidate, platform_object_ids=manifest,
                                                    change_kind=change_kind)
-            if initial_import and self.robot_assembly.classify_scene(candidate)["arm"]:
-                binding = self.robot_assembly.scene_binding(candidate)
-                session.robot_asset = binding.get("robot_asset")
-                session.gripper_asset = binding.get("gripper_asset")
-                session.camera_asset = binding.get("camera_asset")
+            if initial_import:
+                classified = self.robot_assembly.classify_scene(candidate)
+                if classified["arm"]:
+                    binding = self.robot_assembly.scene_binding(candidate)
+                    session.robot_asset = binding.get("robot_asset")
+                    session.gripper_asset = binding.get("gripper_asset")
+                    session.camera_asset = binding.get("camera_asset")
                 session.execution_capability = session._platform_execution_capability(candidate)
             self._save_session(session_id)
             self._capture_original(session_id, request_id="browser-import-" + uuid.uuid4().hex, source="uploaded", allow_empty=True)
@@ -476,6 +479,11 @@ class BrainApplication:
             session.scene_manager = None
             before = None
         calls_start = len(getattr(self.provider, "calls", []))
+        # Replay and test providers keep the evidence they were given; only the
+        # live provider holds a process-wide raw response that must not outlive
+        # the turn that produced it.
+        if hasattr(self.provider, "begin_turn"):
+            self.provider.begin_turn(request_id)
         understanding_calls = 0
         self.pipeline.skill_planner.last_trace = None
         pending_import = None
@@ -519,6 +527,17 @@ class BrainApplication:
                 report.reply = (turn.clarification_question or "需要澄清任务。") \
                     if turn.status == "clarification_required" else (turn.clarification_question or "不支持该任务。")
             else:
+                # The current Web/Control integration is deliberately single-arm.
+                # Refuse a dual-arm request before session checks, bootstrap,
+                # planning, or any control dispatch.  Keeping this gate at the
+                # application boundary leaves the lower-level dual-arm fixtures
+                # available for their own tests while making the public service
+                # honest about the capability that is actually deployed.
+                if (turn.turn_kind == "robot_task" and turn.task_intent is not None
+                        and (turn.task_intent.arm_usage == "both_required"
+                             or any(op.arm in {"left", "right"} or op.parallel_group is not None
+                                    for op in turn.task_intent.operations))):
+                    raise ValueError("control_dual_arm_not_ready")
                 session.check_turn(turn)
                 if pending_import is not None:
                     self._load_scene_object(session_id, pending_import)
@@ -793,7 +812,9 @@ class BrainApplication:
                         debug["raw_skill_plan"] = {"available": False, "reason": "No model response received"}
             debug["model_calls"] = report.metrics["model_calls"]
             if len(getattr(self.provider, "calls", [])) > calls_start:
-                debug["raw_model_response"] = json.dumps(getattr(self.provider, "last_raw_text", {}), ensure_ascii=False)
+                debug["raw_model_response"] = json.dumps(
+                    {"turn_id": getattr(self.provider, "turn_id", None),
+                     **getattr(self.provider, "last_raw_text", {})}, ensure_ascii=False)
             if turn is not None:
                 debug["brain_turn"] = turn.model_dump(mode="json")
                 debug["semantic_protocol"] = {

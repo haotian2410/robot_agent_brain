@@ -1,4 +1,5 @@
 import re
+from typing import ClassVar
 from pydantic import BaseModel, ConfigDict, Field
 from ..contracts.scene import SceneId
 from ..scene.component_access import SceneIndex
@@ -8,10 +9,17 @@ class DialogueState(BaseModel):
     last_entity_id: SceneId | None = None
     last_entity_ids: list[SceneId] = Field(default_factory=list)
 
+    # What 「它」 refers to is settled by the previous turn, not by the scene, so the
+    # pronouns are matched here rather than left to the model.  他/她 count as 它 because
+    # that typo is what people actually type (and what the five-clause sentence used), and
+    # the lookbehind keeps 其他/其它 -- "the others" -- out of the match.
+    PRONOUN_PLURAL: ClassVar[re.Pattern] = re.compile(r"它们|他们|她们|这些|那些")
+    PRONOUN_SINGULAR: ClassVar[re.Pattern] = re.compile(r"(?<!其)(?:它|他|她)(?!们)|刚才那个")
+
     def contextualize(self, instruction, scene):
         by_id = {o.object_id_in_scene: o for o in scene.objects}
         ids = self.last_entity_ids or ([self.last_entity_id] if self.last_entity_id is not None else [])
-        plural = bool(re.search(r"它们|这些|那些", instruction))
+        plural = bool(self.PRONOUN_PLURAL.search(instruction))
         if "另一个" in instruction:
             if self.last_entity_id is None or self.last_entity_id not in by_id:
                 raise ValueError("dialogue_reference_missing")
@@ -19,7 +27,7 @@ class DialogueState(BaseModel):
             if semantic is None:
                 raise ValueError("dialogue_reference_missing")
             return instruction + f" [dialogue_exclude={semantic.semantic_name}]"
-        if not re.search(r"它们|这些|那些|它|刚才那个", instruction):
+        if not (plural or self.PRONOUN_SINGULAR.search(instruction)):
             return instruction
         if not ids or any(i not in by_id for i in ids):
             # Demonstratives on the first turn may describe the visible

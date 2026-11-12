@@ -220,6 +220,46 @@ def test_editor_freezes_even_empty_platform_before_first_edit(tmp_path):
     service.tasks.close()
 
 
+def test_terminal_state_names_what_actually_landed(tmp_path):
+    """A refused capability or an open question is not a completed task."""
+    class Refusing:
+        def understand_turn(self, request):
+            raise ValueError("capability_unsupported")
+
+    async def one(root, provider, command):
+        browser = Browser()
+        service = AgentService(BrainConfig(provider="replay", planner="recipe", scene_id_bits=32,
+            scene_platform_object_ids={0}, output_dir=str(root), debug=True), provider=provider,
+            platform_factory=lambda binding: adapter(browser, root / binding["id"] / "gateway_transactions"))
+        async with TestClient(TestServer(create_http_app(service))) as client:
+            session = (await (await client.post("/sessions", json={"browserID": "b"})).json())["sessionID"]
+            started = await client.post("/startTask", json={"sessionID": session, "clientRequestID": "r1",
+                "browserID": "b", "scene": browser.scene.model_dump(mode="json"),
+                "sceneDigest": digest(browser.scene), "command": command})
+            identifier = (await started.json())["taskID"]
+            for _ in range(100):
+                state = await (await client.get("/queryTaskState", params={"taskID": identifier})).json()
+                if state["terminal"]:
+                    break
+                await asyncio.sleep(.01)
+            result = await (await client.get("/queryTaskResult", params={"taskID": identifier})).json()
+        service.tasks.close()
+        return state["state"], result
+
+    async def scenario():
+        state, result = await one(tmp_path / "refused", Refusing(), "把魔方放到托盘里")
+        assert state == "任务失败", state
+        assert (result["outcome"], result.get("failure_class")) == ("failed", "capability_unsupported")
+
+        asking = BrainTurn(status="clarification_required", turn_kind="robot_task",
+            instruction="把苹果放进篮子", clarification_question="哪一个苹果？")
+        state, result = await one(tmp_path / "asking", Provider(asking), "把苹果放进篮子")
+        assert state == "等待澄清", state
+        assert result["outcome"] == "clarification_required"
+        assert result["reply"] == "哪一个苹果？"
+    asyncio.run(scenario())
+
+
 def test_empty_scene_bootstrap_is_only_allowed_before_session_initialization(tmp_path):
     service, browser = configured(tmp_path)
     sid = service.activate(SessionRequest(browserID="b"))["sessionID"]

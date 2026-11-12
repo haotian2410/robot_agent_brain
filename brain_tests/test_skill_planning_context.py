@@ -23,10 +23,23 @@ def test_context_roles_goals_and_physical_projection():
     assert context.goals[0].reference == "b"
     assert "source=a" in context.semantic_summary
     payload = context.model_dump_json()
-    for forbidden in ("scene_object_id", "asset_id", "position", "quaternion", "scale", "bbox", "joint",
-                      "trajectory", "ik", "collision", "path", "mesh", "101", "102", "distance_m"):
+    for forbidden in ("asset_id", "position", "quaternion", "scale", "bbox", "joint",
+                      "trajectory", "ik", "collision", "path", "mesh", "distance_m"):
         assert forbidden not in payload
     assert {e.id for e in context.entities} == {"a", "b"}
+
+
+def test_context_binds_scene_ids_for_the_control_dialect():
+    value = placement_task()
+    context = build_planner_context(value, 101)
+    assert [entity.scene_object_id for entity in context.entities] == [101, 102]
+    assert context.operations[0].role_object_ids.source == 101
+    assert context.operations[0].role_object_ids.destination == 102
+    assert context.initial_state.held_scene_object_id == 101
+    semantic_only = json.dumps(build_planner_context(value, 101, include_scene_ids=False).model_dump(
+        mode="json", exclude_none=True))
+    for forbidden in ("scene_object_id", "101", "102"):
+        assert forbidden not in semantic_only
 
 
 def test_context_external_holding_and_order():

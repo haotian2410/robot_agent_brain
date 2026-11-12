@@ -12,6 +12,7 @@ import math
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
+from robot_agent_brain.adapters.ols_index import index_by_id
 from robot_agent_brain.contracts.asset_library import geometry_from_ols_aabb
 
 
@@ -66,11 +67,12 @@ def build(root: Path, manifest: dict, library_commit: str | None):
         raise ValueError("ols_model_coverage_invalid")
     if set(robots) != expected["robot_ids"]:
         raise ValueError("ols_robot_coverage_invalid")
-    scenes = json.loads((root / "scenes/scene_index.json").read_text(encoding="utf-8"))
-    if {int(item["id"]) for item in scenes} != expected["scene_ids"]:
+    scenes = index_by_id(json.loads((root / "scenes/scene_index.json").read_text(encoding="utf-8")))
+    if set(scenes) != expected["scene_ids"]:
         raise ValueError("ols_scene_coverage_invalid")
     expected_names = manifest.get("scene_names", {})
-    if any(expected_names.get(str(item["id"])) not in (None, item["name"]) for item in scenes):
+    if any(expected_names.get(str(identifier)) not in (None, name)
+           for identifier, name in scenes.items()):
         raise ValueError("ols_scene_name_mismatch")
 
     cache = {}
@@ -89,8 +91,8 @@ def build(root: Path, manifest: dict, library_commit: str | None):
                                     if node.attrib.get("name")),
                 }
 
-    for item in scenes:
-        scene_path = contained(root, root / "scenes", f"{item['id']}/{item['name']}.json")
+    for identifier, name in scenes.items():
+        scene_path = contained(root, root / "scenes", f"{identifier}/{name}.json")
         scene = json.loads(scene_path.read_text(encoding="utf-8"))
         for obj in scene.get("objects", []):
             for component in obj.get("components", []):

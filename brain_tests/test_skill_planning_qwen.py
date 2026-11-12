@@ -34,8 +34,8 @@ def test_http_planning_payload_budget_schema_and_metrics(cap, expected):
         return httpx.Response(200, json=response(raw=json.dumps(raw_plan())))
     provider = QwenHTTPProvider("http://example/v1", "test-model", api_key="test-key",
                                transport=httpx.MockTransport(handler), planner_max_completion_tokens=cap)
-    output = provider.plan(SkillPlanningRequest(context=build_planner_context(placement_task()),
-                                               skill_catalog=REGISTRY.prompt_catalog()))
+    output = provider.plan(SkillPlanningRequest(context=build_planner_context(
+        placement_task(), include_scene_ids=False), skill_catalog=REGISTRY.prompt_catalog()))
     request = requests[0]
     assert request["temperature"] == 0 and request["model"] == "test-model"
     assert request["max_completion_tokens"] == expected

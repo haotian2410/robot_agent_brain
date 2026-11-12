@@ -37,7 +37,7 @@ def test_missing_manifest_or_changed_hash_never_replaced(tmp_path):
 
 def test_application_freezes_success_and_verifies_on_restore(tmp_path):
     provider = Provider(robot())
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path)), provider=provider)
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path)), provider=provider)
     report = app.handle("把两个苹果放进篮子")
     assert report.run_status == "success", report
     parent = tmp_path / report.session_id
@@ -58,7 +58,7 @@ def test_failed_first_plan_does_not_freeze_candidate(tmp_path):
     from robot_agent_brain.models.task_understanding import TaskParseOutput
     turn = TaskParseOutput.model_validate({"entities": [{"id": "apple", "name": "apple", "category": "fruit", "count": 2, "quantity_mode": "all"}],
                                          "operations": [{"type": "grasp", "target": "apple"}]}).to_brain_turn("抓两个苹果")
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path)), provider=Provider(turn))
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path)), provider=Provider(turn))
     report = app.handle("抓两个苹果")
     assert report.run_status != "success"
     assert not (tmp_path / report.session_id / "original_scene.json").exists()

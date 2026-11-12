@@ -42,6 +42,17 @@ class SkillPlannerRouter:
         self.mode, self.recipe, self.provider, self.registry = mode, recipe_planner, model_provider, registry
         self.last_trace = None
 
+    def plan_atomic(self, request_id, task, scene, *, held_object=None):
+        """Route to the control atomic dialect; the semantic plan stays legacy-only."""
+        from .atomic_planner import AtomicPlanner
+        planner = AtomicPlanner(mode=self.mode, provider=self.provider)
+        try:
+            return planner.plan(request_id, task, scene, held_object=held_object)
+        finally:
+            # A round that produced no commands still owns the evidence the
+            # debug artifacts and call metrics are read from.
+            self.last_trace = planner.last_trace
+
     def plan(self, task, *, held_object=None, scene=None):
         trace = self.last_trace = PlanningTrace(self.mode)
         try:
@@ -58,7 +69,9 @@ class SkillPlannerRouter:
                 trace.used_planner = "qwen"
                 if self.provider is None:
                     raise BrainError("skill_planning_provider_missing", "skill_planning", "Provider has no planning interface")
-                trace.context = build_planner_context(task, held_object)
+                # This dialect addresses roles by name and binds scene IDs in
+                # CommandExporter, so its projection stays ID-free.
+                trace.context = build_planner_context(task, held_object, include_scene_ids=False)
                 trace.skill_catalog = self.registry.prompt_catalog()
                 trace.model_calls = 1
                 raw = self.provider.plan(SkillPlanningRequest(context=trace.context, skill_catalog=trace.skill_catalog))

@@ -55,7 +55,7 @@ def test_loaded_session_cannot_be_replaced_by_second_import(tmp_path):
     second = tmp_path / "second.json"
     first.write_text(scene.model_dump_json(), encoding="utf-8")
     second.write_text(scene.model_copy(update={"scene_id": 2}).model_dump_json(), encoding="utf-8")
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path / "out")), provider=Provider())
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path / "out")), provider=Provider())
     app.load_scene("s", first)
     with pytest.raises(ValueError, match="capability_unsupported"):
         app.load_scene("s", second)
@@ -77,7 +77,7 @@ def test_rejected_platform_request_does_not_commit_same_turn_import(tmp_path):
                         scene_sub_version=0, scene_name="fixture", objects=[])
     path = tmp_path / "input.json"
     path.write_text(scene.model_dump_json(), encoding="utf-8")
-    app = BrainApplication(BrainConfig(provider="replay", output_dir=str(tmp_path / "out")), provider=Provider())
+    app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path / "out")), provider=Provider())
     report = app.handle("换成双臂", session_id="s", scene_path=path)
     assert report.run_status == "blocked"
     assert report.error.code == "capability_unsupported"
