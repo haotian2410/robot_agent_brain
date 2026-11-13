@@ -1,6 +1,7 @@
 """Explicit deployment rules for object references; integers are never guessed."""
 from copy import deepcopy
 import json
+import warnings
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
@@ -39,6 +40,8 @@ class ComponentReferenceRegistry:
         # no scene-object references, so it must survive template bootstrap and
         # scene remapping like the other built-in non-reference components.
         self.rules["LocalAxes"] = ComponentReferenceRule(no_object_references=True)
+        # OLS physical metadata contains values, not scene-object references.
+        self.rules["PhysicalProperties"] = ComponentReferenceRule(no_object_references=True)
         for name, field in (("Transform", "parent"), ("Semantic", "support"), ("RobotAttachment", "parent_object_id")):
             self.rules[name] = ComponentReferenceRule(references=[ReferenceField(path=[field], nullable=True, optional=True)])
         for name, rule in (rules or {}).items():
@@ -49,7 +52,10 @@ class ComponentReferenceRegistry:
     def _slots(self, component):
         kind = component["component_type"]
         if kind not in self.rules:
-            raise ValueError("scene_component_remap_rule_missing: " + kind)
+            warnings.warn("scene_component_remap_rule_missing: " + kind,
+                          RuntimeWarning, stacklevel=2)
+            # Preserve unknown vendor components; only declared references are remapped.
+            return
         props = component["properties"]
         json.dumps(props, allow_nan=False)
         for field in self.rules[kind].references:
