@@ -14,3 +14,7 @@ model/final_models/
 model/final_models.7z
 
 .idea/
+
+# Runtime output from SimPlatform/BqLog; never commit service logs or mmap state.
+logs/
+bqlog_mmap/
