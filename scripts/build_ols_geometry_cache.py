@@ -64,7 +64,9 @@ def build(root: Path, manifest: dict, library_commit: str | None):
         "scene_ids": {int(value) for value in manifest["scene_ids"]},
     }
     if set(models) != expected["model_ids"]:
-        raise ValueError("ols_model_coverage_invalid")
+        raise ValueError(
+            f"ols_model_coverage_invalid: missing={sorted(expected['model_ids'] - set(models))}; "
+            f"unexpected={sorted(set(models) - expected['model_ids'])}; update the OLS manifest to match the installed data")
     if set(robots) != expected["robot_ids"]:
         raise ValueError("ols_robot_coverage_invalid")
     scenes = index_by_id(json.loads((root / "scenes/scene_index.json").read_text(encoding="utf-8")))
