@@ -35,11 +35,24 @@ def test_restore_remaps_all_ids_and_known_refs_without_changing_source():
     assert setup.arms["left"].robot_object_id == 2
 
 
-def test_unknown_component_is_not_guessed_or_silently_copied():
+def test_unknown_component_is_preserved_with_warning():
     _, scene, _ = fixture()
     scene.objects[-1].components.append(SceneComponent(component_type="VendorLink", properties={"target": 2}))
-    with pytest.raises(ValueError, match="remap_rule_missing"):
-        remap_scene(scene, new_scene_id=22, next_object_id=100)
+    with pytest.warns(RuntimeWarning, match="remap_rule_missing"):
+        result = remap_scene(scene, new_scene_id=22, next_object_id=100)
+    assert result.scene.objects[-1].components[-1].properties == {"target": 2}
+
+
+def test_physical_properties_are_preserved_without_remap_failure():
+    _, scene, _ = fixture()
+    scene.objects[-1].components.append(SceneComponent(
+        component_type="PhysicalProperties",
+        properties={"mass": 0.2, "friction": 0.5, "is_static": False},
+    ))
+    result = remap_scene(scene, new_scene_id=22, next_object_id=100)
+    assert result.scene.objects[-1].components[-1].properties == {
+        "mass": 0.2, "friction": 0.5, "is_static": False,
+    }
 
 
 @pytest.mark.parametrize("start", [True, -1, 2**53])
