@@ -29,6 +29,37 @@
 | M16 | `0fcf564` | 恢复复合任务跳过已完成前缀；只为未完成步骤创建新 child request，无法匹配时安全阻断 | 组合编排回归 |
 | M17 | `a41d44c` | 恢复轮禁止在用户未请求时漂移到 original 场景；补 scope 回归 | failure-context/Web 回归 |
 
+## 阶段证据明细
+
+下表补充每个阶段的代码入口、业务链变化和验证边界。所有阶段均为本地提交，未推送；测试中的模型均为 replay/mock，未产生真实 Qwen token。
+
+| 阶段 | 主要修改文件 | 业务链变化 | 测试命令/结果 | 模型调用统计 | 剩余问题 |
+|---|---|---|---|---|---|
+| M0 | `models/failure_context.py`、`models/prompt_templates/failure_context_v1.txt` | 建立严格、只读、无执行 payload 的 R Wire 与独立 Prompt | schema 导入通过 | 0（仅 schema） | 尚未接入真实 Provider |
+| M1 | `session/conversation_memory.py`、`session/store.py`、`session/brain_session.py` | 外层用户轮次、失败链、最近视图和完整审计分离并持久化 | session store/专项测试通过 | 0 | 真实重启恢复未跑 |
+| M2 | `grounding/ambiguity_policy.py`、`semantics/recovery_guard.py` | 默认询问；自动策略只允许受约束 source/actor，恢复决策不能改权限 | `test_failure_context_v2.py` 通过 | 0 | FR31–FR46 未逐例执行 |
+| M3 | `models/qwen_http.py`、`models/qwen_failure_context.py` | 失败链下一轮才调用独立 R；正常 U 不拼接失败历史 | `test_qwen_http.py` 通过 | Mock 1 个 R 请求 | 真实 Qwen 路由/耗时/token 未验证 |
+| M4 | `config.py`、`web/protocol.py`、`web/task_store.py` | 会话策略、自动选择和恢复配置可由服务端持久化 | `test_web_protocol.py`、`test_session_store.py` 通过 | 0 | 旧持久化库迁移需现场验证 |
+| M5 | `web/service.py` | 外层任务完成后再终结用户轮次；R 结果先过 guard 再进入 U/接地/执行 | `test_web_service.py` 通过 | Mock R 按需调用 | unknown/lease 断线实证未跑 |
+| M6 | `brain_tests/test_failure_context_v2.py` | 固定根轮、五轮上限、payload 禁止、晚到修订和完成事实保护 | 专项测试通过 | 0 | FR09–FR18 未全部映射执行 |
+| M7 | `application.py`、`pipeline.py`、`session/conversation_journal.py`、`grounding/scene_grounder.py` 等 | 保留原子规划/OLS；记录 child request、选择决策和最终事实 | 组合专项回归通过 | replay/mock | 全量旧 fixture 仍有基线失败 |
+| M8–M17 | `web/service.py`、`session/store.py`、`semantics/recovery_guard.py`、相关测试/文档 | 控制重试安全、pending ledger、R→U 字段核对、预算保护、选择复用、复合前缀防重放、scene basis 防漂移 | 组合专项回归通过 | replay/mock | 真实 Qwen、Control、FR01–FR69 未执行 |
+
+专项组合命令：
+
+```bash
+conda run --no-capture-output -n robot_agent_integ env PYTHONPATH=src \
+  pytest -q \
+  brain_tests/test_failure_context_v2.py \
+  brain_tests/test_web_service.py \
+  brain_tests/test_composite_orchestrator.py \
+  brain_tests/test_session_store.py \
+  brain_tests/test_web_protocol.py \
+  brain_tests/test_qwen_http.py
+```
+
+结果：全部通过（当前组合 78 项；不包含真实服务调用）。
+
 ## 已验证
 
 ```text
