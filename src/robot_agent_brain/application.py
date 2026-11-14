@@ -408,7 +408,7 @@ class BrainApplication:
                 "root_failure_turn_id": chain.root_failure_turn_id if chain else None,
                 "chain_state": chain.state.value if chain else None,
                 "failed_user_turns": chain.failed_user_turn_count if chain else 0,
-                "max_failed_user_turns": 5,
+                "max_failed_user_turns": self.config.conversation_recovery_max_failed_user_turns,
                 "continuation_available": bool(chain and chain.state.value == "waiting_user"),
                 "prefer_auto_resolve": bool(getattr(session, "prefer_auto_resolve", False))}
         report.conversation = info

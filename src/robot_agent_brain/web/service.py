@@ -657,7 +657,7 @@ class AgentService:
                 chain = memory.begin_failure(turn, question=result.get("clarification_question"),
                                      draft=draft,
                                              policy={"prefer_auto_resolve": bool(getattr(session, "prefer_auto_resolve", False)),
-                                             "max_failed_user_turns": 5})
+                                             "max_failed_user_turns": self.config.conversation_recovery_max_failed_user_turns})
                 if uncertain or (result.get("recovery_context") or {}).get("lease_state") in {"unknown", "quarantine"}:
                     chain.state = FailureChainState.BLOCKED_RECONCILIATION
                 step_records = (result.get("metrics") or {}).get("steps", []) if isinstance(result.get("metrics"), dict) else []
@@ -688,7 +688,7 @@ class AgentService:
                 "root_failure_turn_id": chain.root_failure_turn_id if chain else None,
                 "chain_state": chain.state.value if chain else None,
                 "failed_user_turns": chain.failed_user_turn_count if chain else 0,
-                "max_failed_user_turns": 5,
+                "max_failed_user_turns": self.config.conversation_recovery_max_failed_user_turns,
                 "continuation_available": bool(chain and chain.state.value == "waiting_user"),
                 "prefer_auto_resolve": bool(getattr(session, "prefer_auto_resolve", False)),
             }
