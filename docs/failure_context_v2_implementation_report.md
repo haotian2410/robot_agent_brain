@@ -52,3 +52,17 @@ pytest -q brain_tests/test_web_service.py
 - 复合任务在首个子步骤执行前写入 `pending_step_ledger`；最终外层轮次落档后才清理。重启发现未完成 ledger 时先进入恢复阻塞，不调用 R、不自动重放。
 - `SelectionDecision` 已进入 `BrainResult`、Web/CLI `ConversationTurn` 和 `FailureChain`；R 的 scope、authority 字段和用户证据经过独立 guard，恢复证据保存根指令/草稿/决策摘要。
 - `prefer_auto_resolve=true` 只允许稳定 ID、非破坏性且非 destination/query 选择；默认值仍为 false。
+
+## 环境与调用统计
+
+| 环境 | 状态 | 说明 |
+|---|---|---|
+| Mock/replay | 已验证 | 专项 pytest 覆盖 Wire、会话存储、恢复护栏、Web 编排与组合步骤；这些测试不计真实模型 token。 |
+| 真实 Qwen | 未执行 | 本轮没有启动或调用真实 Qwen；因此没有可报告的真实调用次数/token。 |
+| 隔离执行仿真 | 已验证 | 组合编排使用隔离 execution double，验证全失败可重采样、部分/未知效果不自动重放。 |
+| 物理 Control | 未执行 | 未授权，不调用真实机器人或 Control。 |
+| Python 3.11 | 已验证 | `conda run -n robot_agent_integ python -m compileall -q src/robot_agent_brain` 通过。 |
+| Python 3.12 | 未验证 | 当前环境未提供独立 3.12 解释器。 |
+| wheel | 阻塞 | `python -m build --wheel --no-isolation` 因环境缺少 `hatchling.build` 未执行成功。 |
+
+专项 Mock/隔离测试没有 Qwen token 统计；真实 Qwen、Control 和 FR01–FR69 仍必须在独立服务环境中逐项执行后再补报告。
