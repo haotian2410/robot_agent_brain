@@ -194,3 +194,44 @@ def test_recovery_amendments_are_kept_in_semantic_draft_before_u():
     assert draft.canonical_turn["effective_instruction"] == "把苹果改成蓝色并放进篮子"
     assert draft.field_provenance[0]["source_turn_id"] == "t2"
     assert draft.execution_authority == "none"
+
+
+def test_no_failure_chain_does_not_call_recovery_provider():
+    class RaisingProvider:
+        def recover_failure(self, _payload):
+            raise AssertionError("R must not run on a normal turn")
+
+    service = object.__new__(AgentService)
+    service.config = SimpleNamespace(conversation_recovery_enabled=True,
+                                     conversation_recovery_max_failed_user_turns=5,
+                                     conversation_recovery_max_input_chars=48000)
+    service.app = SimpleNamespace(provider=RaisingProvider())
+    session = SimpleNamespace(conversation_memory=ConversationMemory(), scene=None,
+                              last_recovery_evidence=None)
+    request = SimpleNamespace(sessionID="s", clientRequestID="normal-1", command="有几个苹果？")
+
+    assert service._maybe_recover(session, request) == request.command
+
+
+def test_exhausted_failure_chain_does_not_start_a_new_recovery_round():
+    class RaisingProvider:
+        def recover_failure(self, _payload):
+            raise AssertionError("exhausted chains must not call R")
+
+    memory = ConversationMemory()
+    for index in range(5):
+        memory.begin_failure(ConversationTurn(
+            turn_id=f"t{index}", session_id="s", sequence=index + 1,
+            raw_user_text="把苹果放进托盘", final_outcome="clarification_required"))
+    service = object.__new__(AgentService)
+    service.config = SimpleNamespace(conversation_recovery_enabled=True,
+                                     conversation_recovery_max_failed_user_turns=5,
+                                     conversation_recovery_max_input_chars=48000)
+    service.app = SimpleNamespace(provider=RaisingProvider())
+    session = SimpleNamespace(conversation_memory=memory, scene=None,
+                              last_recovery_evidence=None)
+    request = SimpleNamespace(sessionID="s", clientRequestID="t5", command="那个")
+
+    result = service._maybe_recover(session, request)
+    assert result["outcome"] == "failed"
+    assert result["error"]["code"] == "conversation_recovery_exhausted"

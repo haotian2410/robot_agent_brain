@@ -506,14 +506,22 @@ class AgentService:
                     "outcome": "failed", "executed": False,
                     "reply": "当前失败链仍待核验，不能自动重试；请先处理恢复状态。",
                     "error": {"code": "conversation_recovery_blocked", "message": chain.state.value}}
-        if chain is None or chain.state.value not in {"waiting_user", "resolving"}:
-            return request.command
-        if len(chain.failed_user_turn_ids) >= getattr(self.config, "conversation_recovery_max_failed_user_turns", 5):
+        max_failed_turns = getattr(self.config, "conversation_recovery_max_failed_user_turns", 5)
+        # Check exhaustion before the generic lifecycle-state gate.  An
+        # exhausted chain must not fall through as if this were a fresh task;
+        # otherwise a bare follow-up could silently reopen the old intent
+        # without an explicit new_task decision.
+        if chain is not None and (
+                chain.state.value == "exhausted"
+                or (chain.state.value in {"waiting_user", "resolving"}
+                    and len(chain.failed_user_turn_ids) >= max_failed_turns)):
             return {"taskID": "pending", "sessionID": request.sessionID,
                     "outcome": "failed", "executed": False,
                     "clarification_question": "同一问题已达到恢复次数上限，请重新开始一个任务。",
                     "reply": "同一失败链已达到恢复次数上限，请重新开始一个任务。",
                     "error": {"code": "conversation_recovery_exhausted", "message": "failure chain exhausted"}}
+        if chain is None or chain.state.value not in {"waiting_user", "resolving"}:
+            return request.command
         provider = getattr(self.app, "provider", None)
         if provider is None or not hasattr(provider, "recover_failure"):
             chain.state = type(chain.state).BLOCKED_ENVIRONMENT
