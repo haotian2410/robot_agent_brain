@@ -21,6 +21,12 @@ from .protocol import PROTOCOL_VERSION, StartTask, SessionRequest, digest, loopb
 from .task_store import TaskStore
 
 
+class _RecoveryReply(RuntimeError):
+    def __init__(self, result):
+        super().__init__("failure_context_reply")
+        self.result = result
+
+
 # Debug evidence is intentionally a bundle, not a caller-selected filesystem
 # path.  Keeping the allow-list here makes the HTTP endpoint safe even when a
 # provider writes arbitrary text into its raw response.
@@ -263,7 +269,8 @@ class AgentService:
         previous_camera = self.camera_bindings.get(request.sessionID, camera_sentinel)
         try:
             identifier = self.tasks.activate(request.browserID, request.sessionID,
-                                             allow_active_task=request.allowActiveTask)
+                                             allow_active_task=request.allowActiveTask,
+                                             prefer_auto_resolve=request.prefer_auto_resolve)
         except Exception:
             # The preflight bind is intentionally read-only from the database's
             # point of view, but it updates the process-local platform pointer.
@@ -342,8 +349,15 @@ class AgentService:
         result = None
         trajs = []
         uncertain = False
+        scene_before_digest = None
         try:
             session = self._bind(request.sessionID)
+            scene_before_digest = digest(session.scene) if session.scene is not None else None
+            recovered = self._maybe_recover(session, request)
+            if isinstance(recovered, dict):
+                raise _RecoveryReply(recovered)
+            if recovered is not None:
+                request.command = recovered
             if request.sessionID in self.camera_bindings:
                 session.camera_id = self.camera_bindings[request.sessionID]
             platform = session.platform
@@ -384,7 +398,11 @@ class AgentService:
             uncertain = session.sync_state == "unknown"
         except Exception as exc:
             uncertain = (session is not None and session.sync_state == "unknown") or (platform is not None and platform.lease_uncertain)
-            message, code = str(exc), str(exc).split(":", 1)[0]
+            if isinstance(exc, _RecoveryReply):
+                result = exc.result
+                code = (result.get("error") or {}).get("code")
+            else:
+                message, code = str(exc), str(exc).split(":", 1)[0]
             if isinstance(exc, httpx.HTTPError):
                 if platform is not None and platform.lease_state == "not_granted":
                     code, message = "gateway_lease_not_granted", "浏览器未连接或未就绪，场景租约明确未授予；场景未修改。重新打开浏览器后可以重试。"
@@ -392,9 +410,10 @@ class AgentService:
                     code, message = "gateway_transport_error", "与场景服务通信失败；请检查连接。若会话显示待恢复，请先核验恢复证据。"
                 durable_json(self.output / request.sessionID / "web_failures" / f"{identifier}.json",
                              {"error": str(exc), "taskID": identifier})
-            result = {"taskID":identifier,"sessionID":request.sessionID,"outcome":"failed", "executed":False,
-                "reply":f"{message}（{code}；诊断 task-{identifier}）",
-                "error":{"code":code,"message":message,"details":{"diagnostic_id":f"task-{identifier}"}}}
+            elif not isinstance(exc, _RecoveryReply):
+                result = {"taskID":identifier,"sessionID":request.sessionID,"outcome":"failed", "executed":False,
+                    "reply":f"{message}（{code}；诊断 task-{identifier}）",
+                    "error":{"code":code,"message":message,"details":{"diagnostic_id":f"task-{identifier}"}}}
         finally:
             if platform is not None:
                 result = {**(result or {}), "recovery_context": {
@@ -432,14 +451,143 @@ class AgentService:
         # The state word is the panel's headline, so it has to name what landed.
         # Reading everything that was not "failed" as 任务完成 called a refused
         # capability and an unanswered clarification both successes on an empty stage.
+        if result is None:
+            result = {"outcome": "failed", "executed": False,
+                      "error": {"code": "task_result_missing", "message": "Task produced no result"}}
+        result.setdefault("taskID", identifier)
+        result.setdefault("sessionID", request.sessionID)
         delivered = {"scene_updated", "answered", "plan_ready", "robot_configured"}
         outcome = result.get("outcome")
         state = ("任务完成" if outcome in delivered
                  else "等待澄清" if outcome == "clarification_required" else "任务失败")
         self.tasks.update(identifier, state, result, uncertain=uncertain, terminal=True)
+        self._record_conversation_turn(request, identifier, result, scene_before_digest, uncertain)
         # Playback rides after the lease: releasing is what stops a browser that is
         # already playing, so the clips have to go out once the lock is gone.
         return trajs
+
+    def _maybe_recover(self, session, request):
+        """Ask the independent R round only for a chained continuation."""
+        if not getattr(self.config, "conversation_recovery_enabled", True):
+            return request.command
+        memory = getattr(session, "conversation_memory", None)
+        chain = memory.active_failure_chain if memory is not None else None
+        if chain is None or chain.state.value not in {"waiting_user", "resolving"}:
+            return request.command
+        if len(chain.failed_user_turn_ids) >= getattr(self.config, "conversation_recovery_max_failed_user_turns", 5):
+            return {"taskID": "pending", "sessionID": request.sessionID,
+                    "outcome": "clarification_required", "executed": False,
+                    "clarification_question": "同一问题已达到恢复次数上限，请重新开始一个任务。",
+                    "reply": "同一失败链已达到恢复次数上限，请重新开始一个任务。",
+                    "error": {"code": "conversation_recovery_exhausted", "message": "failure chain exhausted"}}
+        provider = getattr(self.app, "provider", None)
+        if provider is None or not hasattr(provider, "recover_failure"):
+            return {"taskID": "pending", "sessionID": request.sessionID,
+                    "outcome": "failed", "executed": False,
+                    "reply": "当前恢复解释器不可用，原失败链未改变。",
+                    "error": {"code": "failure_context_provider_missing", "message": "recovery provider unavailable"}}
+        from ..models.failure_context import FailureContextHistoryItem, FailureContextRequest
+        history = [FailureContextHistoryItem(turn_id=t.turn_id, user=t.raw_user_text,
+                    assistant=t.assistant_final_text, outcome=t.final_outcome,
+                    error_code=t.final_error_code, effective_instruction=t.effective_instruction,
+                    effects=t.effect_evidence.model_dump(mode="json")) for t in memory.recent_turns]
+        payload = FailureContextRequest(current_user_text=request.command,
+            root_failure_turn_id=chain.root_failure_turn_id, history=history,
+            latest_task_draft=chain.semantic_draft.model_dump(mode="json") if chain.semantic_draft else {},
+            step_ledger=[item.model_dump(mode="json") for item in chain.step_ledger],
+            unresolved_slots=(chain.semantic_draft.unresolved_slots if chain.semantic_draft else []),
+            current_scene_context={"scene_digest": digest(session.scene) if session.scene else None},
+            policy_summary=chain.policy_snapshot,
+            allowed_recovery_actions=["continue_task", "revise_task", "new_task", "ask_user", "cancel_chain"])
+        try:
+            chain.state = type(chain.state).RESOLVING
+            decision = provider.recover_failure(payload)
+            from ..semantics.recovery_guard import validate_recovery_decision
+            validate_recovery_decision(decision, root_failure_turn_id=chain.root_failure_turn_id,
+                                       known_turn_ids={t.turn_id for t in memory.recent_turns},
+                                       completed_step_ids={x.step_id for x in chain.step_ledger if x.status in {"committed", "executed_confirmed"}},
+                                       allowed_actions=set(payload.allowed_recovery_actions))
+        except Exception as exc:
+            chain.state = type(chain.state).WAITING_USER
+            return {"taskID": "pending", "sessionID": request.sessionID,
+                    "outcome": "failed", "executed": False,
+                    "reply": "无法安全核验这次补充说明，原失败链保持不变。",
+                    "error": {"code": "failure_context_invalid", "message": str(exc)}}
+        if decision.decision == "ask_user":
+            chain.latest_question = decision.question
+            chain.state = type(chain.state).WAITING_USER
+            return {"taskID": "pending", "sessionID": request.sessionID,
+                    "outcome": "clarification_required", "executed": False,
+                    "clarification_question": decision.question,
+                    "reply": decision.question,
+                    "error": {"code": "failure_context_ask_user", "message": decision.question}}
+        if decision.decision == "cancel_chain":
+            chain.state = type(chain.state).CANCELLED
+            return {"taskID": "pending", "sessionID": request.sessionID,
+                    "outcome": "clarification_required", "executed": False,
+                    "reply": "已取消当前失败链。", "error": {"code": "failure_chain_cancelled", "message": "cancelled"}}
+        if decision.decision == "new_task":
+            chain.state = type(chain.state).SUPERSEDED
+            return request.command
+        chain.state = type(chain.state).WAITING_USER
+        return decision.resolved_instruction
+
+    def _record_conversation_turn(self, request, task_id, result, scene_before_digest, uncertain):
+        """Persist one outer user turn and update the bounded failure chain.
+
+        This is deliberately outside the normal Qwen prompt path: recording a
+        turn does not make its text part of the next ordinary task request.
+        """
+        try:
+            session = self.app.get_session(request.sessionID)
+            memory = session.conversation_memory
+            turn_id = f"web-{task_id}"
+            error = result.get("error") or {}
+            outcome = str(result.get("outcome") or "failed")
+            after = digest(session.scene) if session.scene is not None else None
+            effect = {
+                "scene_effect": "committed" if after != scene_before_digest and outcome == "scene_updated" else "none_confirmed",
+                "execution_effect": "completed" if result.get("executed") else "not_started",
+                "execution_environment": "unknown",
+                "holding_state": "unknown",
+                "publication_state": "published" if result.get("artifacts") else "none",
+                "lease_state": (result.get("recovery_context") or {}).get("lease_state"),
+                "transaction_id": (result.get("recovery_context") or {}).get("transactionID"),
+                "evidence_source": ["gateway_task_result", "session_checkpoint"],
+            }
+            from ..session.conversation_memory import ConversationTurn, EffectEvidence, FailureChainState
+            turn = ConversationTurn(
+                turn_id=turn_id, session_id=request.sessionID,
+                sequence=len(memory.recent_turns) + len(memory.archived_turn_ids) + 1,
+                client_request_id=request.clientRequestID, web_task_id=str(task_id),
+                raw_user_text=request.command,
+                effective_instruction=request.command,
+                assistant_final_text=str(result.get("reply") or ""),
+                final_outcome=outcome, final_error_code=error.get("code"),
+                final_stage="web.execute", child_request_ids=[str(x.get("request_id")) for x in (result.get("metrics") or {}).get("steps", []) if x.get("request_id")],
+                scene_before={"digest": scene_before_digest} if scene_before_digest else None,
+                scene_after={"digest": after} if after else None,
+                scene_commit_status="changed" if after != scene_before_digest else "unchanged",
+                execution_status="executed" if result.get("executed") else "not_executed",
+                executed=bool(result.get("executed")),
+                publication_status="published" if result.get("artifacts") else "none",
+                lease_status=(result.get("recovery_context") or {}).get("lease_state"),
+                effect_evidence=EffectEvidence.model_validate(effect),
+            )
+            failed = outcome in {"failed", "clarification_required"} or (outcome == "plan_ready" and not result.get("executed"))
+            if failed:
+                memory.begin_failure(turn, question=result.get("clarification_question"),
+                                     policy={"prefer_auto_resolve": bool(getattr(request, "prefer_auto_resolve", False)),
+                                             "max_failed_user_turns": 5})
+            else:
+                if memory.active_failure_chain is not None and memory.active_failure_chain.state not in {FailureChainState.EXHAUSTED, FailureChainState.BLOCKED_RECONCILIATION}:
+                    memory.active_failure_chain.state = FailureChainState.RESOLVED
+                memory.upsert_turn(turn)
+            self.app._save_session(request.sessionID)
+        except Exception as exc:
+            # Auditing must never turn a completed task into a second failure;
+            # preserve the task result and leave the diagnostic in the server log.
+            self.progress[task_id] = f"conversation_memory_write_failed:{exc}"
 
     STEP_MARKS = "①②③④⑤⑥⑦⑧⑨⑩"
     # The one turn record has to carry one verdict for the whole sentence, so the
