@@ -43,6 +43,7 @@ class StartTask(BaseModel):
     # Browser asset-panel platform replacements are a distinct, safe scene
     # transition.  Ordinary scene edits keep the historical default.
     change_kind: Literal["scene_edit", "platform_rebind"] = "scene_edit"
+    prefer_auto_resolve: bool = False
 
 
 class SessionRequest(BaseModel):
@@ -52,6 +53,7 @@ class SessionRequest(BaseModel):
     camera_id: int | None = Field(default=None, ge=0, le=2**32 - 1)
     allowActiveTask: bool = False
     scene: dict | None = None
+    prefer_auto_resolve: bool = False
 
 
 def validate_web_scene(scene, joint_inventory=None, reference_registry=None):

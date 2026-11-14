@@ -111,6 +111,11 @@ class BrainConfig(BaseModel):
     # planning round.  When omitted, derive it from execution_control_root.
     control_skill_prompt: str | None = None
     execution_timeout_seconds: int = Field(default=180, ge=1, le=3600)
+    # Failure-context v2 is an isolated, evidence-only recovery round.  It is
+    # opt-in at the ambiguity level and never changes execution authority.
+    conversation_recovery_enabled: bool = True
+    conversation_recovery_max_failed_user_turns: int = Field(default=5, ge=1, le=5)
+    prefer_auto_resolve: bool = False
 
     @model_validator(mode="after")
     def valid_execution(self):

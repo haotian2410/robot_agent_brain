@@ -37,6 +37,9 @@ class TaskStore:
         columns = {row[1] for row in self.db.execute("PRAGMA table_info(tasks)")}
         if "terminal" not in columns:
             self.db.execute("ALTER TABLE tasks ADD COLUMN terminal INTEGER NOT NULL DEFAULT 0")
+        session_columns = {row[1] for row in self.db.execute("PRAGMA table_info(sessions)")}
+        if "prefer_auto_resolve" not in session_columns:
+            self.db.execute("ALTER TABLE sessions ADD COLUMN prefer_auto_resolve INTEGER NOT NULL DEFAULT 0")
         with self.lock, self.db:
             self.db.execute("UPDATE sessions SET uncertain=1 WHERE id IN (SELECT session FROM tasks WHERE terminal=0)")
             self.db.execute("UPDATE tasks SET state='service_restarted', terminal=1, result=?, updated=? WHERE terminal=0",
@@ -45,7 +48,7 @@ class TaskStore:
     def busy(self):
         return self.db.execute("SELECT 1 FROM tasks WHERE terminal=0 LIMIT 1").fetchone() is not None
 
-    def activate(self, browser, session=None, *, allow_active_task=False):
+    def activate(self, browser, session=None, *, allow_active_task=False, prefer_auto_resolve=None):
         with self.lock, self.db:
             if session is not None:
                 row = self.db.execute("SELECT * FROM sessions WHERE id=?", (session,)).fetchone()
@@ -66,7 +69,11 @@ class TaskStore:
                 session = uuid.uuid4().hex
                 self.db.execute("INSERT INTO sessions(id,browser) VALUES (?,?)", (session,browser))
             self.db.execute("UPDATE sessions SET active=0")
-            self.db.execute("UPDATE sessions SET active=1,browser=? WHERE id=?", (browser, session))
+            if prefer_auto_resolve is None:
+                self.db.execute("UPDATE sessions SET active=1,browser=? WHERE id=?", (browser, session))
+            else:
+                self.db.execute("UPDATE sessions SET active=1,browser=?,prefer_auto_resolve=? WHERE id=?",
+                                (browser, int(bool(prefer_auto_resolve)), session))
         return session
 
     def rollback_activation(self, session, previous_active, *, remove_new=False):
