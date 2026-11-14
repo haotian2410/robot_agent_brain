@@ -24,6 +24,7 @@
 | M11 | `eac185a` | 在普通 U 副作用前核对 R 已接受字段，丢失条件时阻断；补回归测试 | 专项回归 |
 | M12 | `e66b2b2` | 恢复上下文超过预算时拒绝截断并要求用户简化；补配置上限 | Web/配置回归 |
 | M13 | `69738fd` | 完整 pytest 复核；R→U 条件校验覆盖 Scene Edit 属性颜色/布局字段 | 全量基线仍 11 项 |
+| M14 | 待提交（本地） | 失败链续接复用已持久化的 source/actor 选择；当前 Scene 仍由 Grounder 重新校验 | 专项回归 |
 
 ## 已验证
 
@@ -56,6 +57,7 @@ pytest -q brain_tests/test_web_service.py
 - `SelectionDecision` 已进入 `BrainResult`、Web/CLI `ConversationTurn` 和 `FailureChain`；R 的 scope、authority 字段和用户证据经过独立 guard，恢复证据保存根指令/草稿/决策摘要。
 - R→U 条件核对已覆盖颜色、数量、距离、目标/参照、操作和放置字段；缺失时返回 `failure_context_u_condition_lost:*`，不会进入 SceneEditor、Grounder 或 Commands。
 - 恢复输入按配置字符预算检查；超限返回 `context_budget_exceeded`，不调用 R、不截断否定/单位/目标条件。
+- `prefer_auto_resolve=true` 的已选 source/actor ID 会在同链续接中复用；目的地、参照、破坏性目标和查询集合仍不会自动选择，删除/分支变化会重新触发校验而非换 ID。
 - `prefer_auto_resolve=true` 只允许稳定 ID、非破坏性且非 destination/query 选择；默认值仍为 false。
 
 ## 环境与调用统计

@@ -513,6 +513,17 @@ class BrainSession:
 
     def process_turn(self, request_id, turn, *, bindings_override=None, edit_defaults=None):
         self.check_turn(turn)
+        # Reuse a persisted opt-in source/actor choice when a failure-chain
+        # continuation retries the same task.  The Grounder still validates
+        # that the ID exists and satisfies the current scene; if it was
+        # deleted or the scene branch changed, it fails instead of selecting a
+        # replacement object.
+        effective_bindings = dict(bindings_override or {})
+        chain = self.conversation_memory.active_failure_chain
+        if self.prefer_auto_resolve and chain is not None and chain.state.value in {"waiting_user", "resolving"}:
+            for decision in chain.selection_decisions:
+                if decision.policy == "auto" and decision.chosen_ids:
+                    effective_bindings.setdefault(decision.entity_role, list(decision.chosen_ids))
         if turn.robot_asset_switch is not None:
             if self.robot_assembly_adapter is None:
                 raise ValueError("robot_assembly_adapter_unavailable")
@@ -521,7 +532,7 @@ class BrainSession:
                                                   owner_task_id=getattr(self, "active_task_owner", None))
             return self._accept_result(request_id, BrainResult(turn_kind=turn.turn_kind, platform_rebind=binding))
         if turn.robot_setup_request is not None:
-            return self._process_setup_turn(request_id, turn, bindings_override=bindings_override)
+            return self._process_setup_turn(request_id, turn, bindings_override=effective_bindings)
         if turn.scene_edit is not None and turn.scene_edit.scene_basis == "original":
             from ..pipeline import BrainResult
             if self.original_store is None:
@@ -554,7 +565,7 @@ class BrainSession:
             profile = profile.model_copy(update={"setup": self.robot_setup.model_copy(deep=True)})
         result = self.pipeline.process_turn(request_id, turn, self.scene,
                                            dialogue=self.dialogue, capture=self.capture,
-                                           held_object=self.holding_object, bindings_override=bindings_override, edit_defaults=edit_defaults,
+                                           held_object=self.holding_object, bindings_override=effective_bindings, edit_defaults=edit_defaults,
                                            seen_scene_object_ids=self.seen_scene_object_ids,
                                            next_scene_object_id=self.next_scene_object_id,
                                            robot_profile=profile, robot_setup_revision=self.robot_setup_revision, arm_states=self.arm_states,
