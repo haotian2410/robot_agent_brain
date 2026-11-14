@@ -660,14 +660,25 @@ class AgentService:
             error = result.get("error") or {}
             outcome = str(result.get("outcome") or "failed")
             after = digest(session.scene) if session.scene is not None else None
+            recovery_context = result.get("recovery_context") or {}
+            lease_state = recovery_context.get("lease_state")
+            effect_unknown = bool(uncertain or lease_state in {"unknown", "quarantine"})
             effect = {
-                "scene_effect": "committed" if after != scene_before_digest and outcome == "scene_updated" else "none_confirmed",
-                "execution_effect": "completed" if result.get("executed") else "not_started",
+                # A digest that happens to match is not proof that an unknown
+                # transaction or control attempt had no effect.  Preserve the
+                # uncertainty until the existing reconciliation path supplies
+                # authoritative evidence.
+                "scene_effect": "unknown" if effect_unknown else (
+                    "committed" if after != scene_before_digest and outcome == "scene_updated"
+                    else "none_confirmed"),
+                "execution_effect": "unknown" if effect_unknown else (
+                    "completed" if result.get("executed") else "not_started"),
                 "execution_environment": "unknown",
                 "holding_state": "unknown",
-                "publication_state": "published" if result.get("artifacts") else "none",
-                "lease_state": (result.get("recovery_context") or {}).get("lease_state"),
-                "transaction_id": (result.get("recovery_context") or {}).get("transactionID"),
+                "publication_state": "unknown" if effect_unknown else (
+                    "published" if result.get("artifacts") else "none"),
+                "lease_state": lease_state,
+                "transaction_id": recovery_context.get("transactionID"),
                 "evidence_source": ["gateway_task_result", "session_checkpoint"],
             }
             from ..session.conversation_memory import (ConversationTurn, EffectEvidence,
