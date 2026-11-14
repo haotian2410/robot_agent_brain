@@ -30,11 +30,11 @@ class AmbiguityPolicy:
             for item in candidates:
                 if item == explicit or getattr(item, "object_id_in_scene", None) == explicit:
                     return SelectionDecision(entity_role=role, chosen_ids=[getattr(item, "object_id_in_scene", item)],
-                                             candidate_ids=[getattr(x, "object_id_in_scene", x) for x in candidates],
+                                             candidate_ids=sorted((getattr(x, "object_id_in_scene", x) for x in candidates), key=str),
                                              decision_key=self.decision_key(session_id, logical_task_id, step_id, role, revision, scene_digest),
                                              policy="auto")
             raise AmbiguityRequiresClarification("explicit_selection_not_found")
-        ids = [getattr(item, "object_id_in_scene", item) for item in candidates]
+        ids = sorted((getattr(item, "object_id_in_scene", item) for item in candidates), key=str)
         if len(ids) != 1:
             # Auto resolve is deliberately narrow: it never picks a destination,
             # destructive target, query member, or anything without a stable key.

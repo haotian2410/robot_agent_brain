@@ -32,4 +32,5 @@ class BrainRunReport(BaseModel):
     artifacts: dict[str, str] = Field(default_factory=dict)
     assumptions: list[str] = Field(default_factory=list)
     metrics: dict = Field(default_factory=dict)
+    conversation: dict = Field(default_factory=dict)
     error: BrainIssue | None = None

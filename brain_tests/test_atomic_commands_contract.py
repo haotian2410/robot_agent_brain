@@ -36,8 +36,8 @@ def test_catalog_is_exactly_the_control_skills():
     ("retreat", {"target": 32, "pose_axis": "-z"}, RetreatParameters),
     ("move_to", {"target": "home", "planning_method": "joint"}, MoveToParameters),
     ("put", {"target": 35, "relation": "front", "distance_m": 0.1}, PutParameters),
-    ("pull", {"distance": 0.16, "frame": "grasp"}, PullPushParameters),
-    ("push", {"distance": 0.16, "frame": "world", "direction": [-0.54, 0.84, 0.0]}, PullPushParameters),
+    ("pull", {"distance": 0.16}, PullPushParameters),
+    ("push", {"distance": 0.16, "direction": [-0.54, 0.84, 0.0]}, PullPushParameters),
 ])
 def test_parameters_are_typed_by_skill(name, parameters, expected):
     assert isinstance(skill(name, **parameters).parameters, expected)
@@ -45,9 +45,9 @@ def test_parameters_are_typed_by_skill(name, parameters, expected):
 
 def test_stroke_is_a_bounded_vector_without_a_target():
     """skill.md makes ``distance`` required and leaves the drawer to the grip before it."""
-    assert skill("pull", distance=0.16).parameters.frame is None
-    for bad in ({"frame": "grasp"}, {"distance": 0}, {"distance": -0.1},
-                {"distance": 0.16, "frame": "object"}, {"distance": 0.16, "direction": [1, 0]},
+    assert skill("pull", distance=0.16).parameters.direction is None
+    for bad in ({"distance": 0.16, "frame": "grasp"}, {"distance": 0}, {"distance": -0.1},
+                {"distance": 0.16, "direction": [1, 0]},
                 {"distance": 0.16, "direction": [0, 0, 0]}, {"distance": 0.16, "direction": [float("inf"), 0, 0]},
                 {"distance": 0.16, "target": 9}):
         with pytest.raises(ValidationError):

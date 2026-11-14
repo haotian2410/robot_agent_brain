@@ -113,8 +113,8 @@ def build_atomic_skill_reference_tables() -> str:
               "- `put.relation` 只能是 `at`、`front`、`behind`、`left`、`right`、`above`、`below`，省略等价于 `at`；"
               "`front`/`behind`/`left`/`right` 是目的地水平外侧、需要可见支撑面，`above`/`below` 是沿世界 Z 轴的空间释放点、可悬空。"
               "偏移的距离由 Brain 按任务统一回填，任务没有要求相对落点时不要写 `relation` 或 `distance_m`。",
-              "- `pull`/`push` 的 `distance` 必填且大于 0；`frame` 省略等价于 `tool`，只能是 `tool`、`grasp`、`world`；"
-              "`direction` 省略时按 `pull` 取 `[0,0,-1]`、`push` 取 `[0,0,1]`，写出时必须是三个非零分量。",
+              "- `pull`/`push` 的 `distance` 必填且大于 0；不要输出已废弃的 `frame` 或 `arc_center_offset` 字段；"
+              "`direction` 省略时由控制端依据开始运动时的标定推拉坐标系决定，写出时必须是三个非零分量。",
               "- `move_to.distance_m` 必须与 `relation` 同时出现；`end_effector` 目标只能用 `linear`。",
               ""]
     return "\n".join(lines)

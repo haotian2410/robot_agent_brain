@@ -467,7 +467,8 @@ class BrainPipeline:
                      capture: Callable[[], CameraFrame] | None = None,
                      held_object: SceneId | None = None,
                      robot_profile=None, robot_setup_revision=0, arm_states=None,
-                     seen_scene_object_ids=None, next_scene_object_id=None) -> BrainResult:
+                     seen_scene_object_ids=None, next_scene_object_id=None,
+                     prefer_auto_resolve: bool = False) -> BrainResult:
         """Consume an understood turn without another provider call or normalization."""
         self.skill_planner.last_trace = None
         if turn.status != TurnStatus.ACCEPTED:
@@ -538,7 +539,9 @@ class BrainPipeline:
         frame = None
         while True:
             try:
-                grounded = self.grounder.ground(intent, scene, overrides)
+                grounded = self.grounder.ground(intent, scene, overrides,
+                                                prefer_auto_resolve=prefer_auto_resolve,
+                                                logical_task_id=request_id)
                 break
             except GroundingAmbiguous as exc:
                 if self.vision_provider is None or capture is None or exc.entity.entity_id in overrides:

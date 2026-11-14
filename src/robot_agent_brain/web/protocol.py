@@ -44,6 +44,7 @@ class StartTask(BaseModel):
     # transition.  Ordinary scene edits keep the historical default.
     change_kind: Literal["scene_edit", "platform_rebind"] = "scene_edit"
     prefer_auto_resolve: bool = False
+    new_task: bool = False
 
 
 class SessionRequest(BaseModel):

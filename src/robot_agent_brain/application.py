@@ -341,11 +341,14 @@ class BrainApplication:
             pass
         return None
 
-    def handle(self, instruction, *, session_id=None, scene_path=None):
+    def handle(self, instruction, *, session_id=None, scene_path=None, origin="external"):
         session_id = session_id or uuid.uuid4().hex
         try:
             with self.store.lock(session_id):
-                return self._handle(instruction, session_id=session_id, scene_path=scene_path)
+                report = self._handle(instruction, session_id=session_id, scene_path=scene_path)
+                if origin == "external":
+                    self._record_cli_turn(session_id, instruction, report)
+                return report
         except Exception as exc:
             # Lock/restore failures happen before a safe request directory can
             # be published. Still return a complete report, never old artifacts.
@@ -357,6 +360,56 @@ class BrainApplication:
                 provider=self.config.provider, error=issue, reply=issue.message,
                 metrics={"understanding_calls":0, "vision_calls":0, "skill_planning_calls":0,
                          "planner_requested":self.config.planner, "planner_used":None, "model_calls":[]})
+
+    def _record_cli_turn(self, session_id, instruction, report):
+        """Record direct/CLI outer turns; WebService uses its richer finalizer."""
+        from .session.conversation_memory import ConversationTurn, EffectEvidence, SemanticDraft
+        from .session.conversation_journal import ConversationJournal
+        session = self.get_session(session_id)
+        outcome = "clarification_required" if report.turn_status == "clarification_required" else (
+            "failed" if report.run_status != "success" else
+            "scene_updated" if report.delivery_status == "scene_updated" else
+            "plan_ready" if report.delivery_status == "commands_exported" else
+            "answered" if report.delivery_status in {"answered", "session_controlled"} else "failed")
+        error_code = report.error.code if report.error else None
+        turn = ConversationTurn(
+            turn_id=report.request_id, session_id=session_id,
+            sequence=len(session.conversation_memory.recent_turns) + len(session.conversation_memory.archived_turn_ids) + 1,
+            raw_user_text=instruction, effective_instruction=instruction,
+            assistant_final_text=report.reply, final_outcome=outcome,
+            final_error_code=error_code, web_task_id=None,
+            scene_commit_status=report.scene_commit_status,
+            execution_status="executed" if report.executed else "not_executed",
+            executed=report.executed,
+            effect_evidence=EffectEvidence(
+                scene_effect="committed" if report.scene_commit_status == "committed" else "none_confirmed",
+                execution_effect="completed" if report.executed else "not_started",
+                evidence_source=["application_report"]),
+        )
+        failed = outcome in {"failed", "clarification_required", "plan_ready"}
+        if failed:
+            session.conversation_memory.begin_failure(
+                turn, question=report.clarification_question,
+                draft=SemanticDraft(source_request_id=report.request_id,
+                    validity="partial_semantics" if outcome == "clarification_required" else "unparsed",
+                    unresolved_slots=[report.clarification_question] if report.clarification_question else []))
+        else:
+            chain = session.conversation_memory.active_failure_chain
+            if chain is not None and chain.state.value not in {"exhausted", "blocked_reconciliation"}:
+                chain.state = type(chain.state).RESOLVED
+            session.conversation_memory.upsert_turn(turn)
+        self._save_session(session_id)
+        chain = session.conversation_memory.active_failure_chain
+        info = {"turn_id": turn.turn_id,
+                "root_failure_turn_id": chain.root_failure_turn_id if chain else None,
+                "chain_state": chain.state.value if chain else None,
+                "failed_user_turns": chain.failed_user_turn_count if chain else 0,
+                "max_failed_user_turns": 5,
+                "continuation_available": bool(chain and chain.state.value == "waiting_user"),
+                "prefer_auto_resolve": bool(getattr(session, "prefer_auto_resolve", False))}
+        report.conversation = info
+        ConversationJournal(self.store.directory(session_id)).write(
+            turn.turn_id, {"turn": turn.model_dump(mode="json"), "conversation": info})
 
     def get_publication_status(self, session_id, request_id):
         """Read commit facts even when checkpoint restoration is blocked."""

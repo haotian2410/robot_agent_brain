@@ -55,6 +55,19 @@ class SemanticDraft(BaseModel):
     execution_authority: Literal["none"] = "none"
 
 
+class RecoveryEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    raw_current_user_text: str
+    source_turn_ids: list[str] = Field(default_factory=list)
+    base_instruction: str | None = None
+    effective_instruction: str | None = None
+    accepted_amendments: list[dict[str, Any]] = Field(default_factory=list)
+    field_sources: dict[str, str] = Field(default_factory=dict)
+    superseded_fields: dict[str, Any] = Field(default_factory=dict)
+    scene_basis_authorization: str | None = None
+    scope: Literal["failed_step", "remaining_steps", "new_task"] = "failed_step"
+
+
 class StepLedgerEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
     step_id: str
@@ -73,6 +86,8 @@ class StepLedgerEntry(BaseModel):
     receipts: list[dict[str, Any]] = Field(default_factory=list)
     confirmed_effects: list[str] = Field(default_factory=list)
     holding_state: str | None = None
+    semantic_draft_ref: str | None = None
+    control_run_ids: list[str] = Field(default_factory=list)
 
 
 class SelectionDecision(BaseModel):
@@ -115,6 +130,7 @@ class ConversationTurn(BaseModel):
     finalization_revision: int = 1
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     finalized_at: str | None = None
+    recovery_evidence: RecoveryEvidence | None = None
 
 
 class FailureChain(BaseModel):
@@ -122,6 +138,7 @@ class FailureChain(BaseModel):
     chain_id: str
     root_failure_turn_id: str
     root_instruction: str
+    root_task_id: str | None = None
     state: FailureChainState = FailureChainState.WAITING_USER
     failed_user_turn_ids: list[str] = Field(default_factory=list, max_length=5)
     last_attempt_turn_id: str | None = None
@@ -138,6 +155,10 @@ class FailureChain(BaseModel):
     selection_decisions: list[SelectionDecision] = Field(default_factory=list)
     constraint_revision: int = 0
     lifecycle_revision: int = 0
+    scene_binding: dict[str, Any] | None = None
+    catalog_revision: str | None = None
+    platform_signature: str | None = None
+    config_fingerprint: str | None = None
 
     def register_failed_turn(self, turn_id: str) -> int:
         if turn_id not in self.failed_user_turn_ids:
@@ -172,7 +193,24 @@ class ConversationMemory(BaseModel):
         if len(self.recent_turns) > self.max_recent_turns:
             removed = self.recent_turns[:-self.max_recent_turns]
             self.archived_turn_ids.extend(item.turn_id for item in removed)
-            self.recent_turns = self.recent_turns[-self.max_recent_turns:]
+        self.recent_turns = self.recent_turns[-self.max_recent_turns:]
+
+    def revise_turn(self, turn_id: str, **changes: Any) -> ConversationTurn:
+        """Apply late authoritative facts without creating a user turn.
+
+        Gateway/Control callbacks may arrive after the outer task was marked
+        unknown.  They revise the existing audit row and never increment a
+        failure chain counter.
+        """
+        for index, old in enumerate(self.recent_turns):
+            if old.turn_id != turn_id:
+                continue
+            updated = old.model_copy(update={**changes,
+                                             "finalization_revision": old.finalization_revision + 1,
+                                             "finalized_at": datetime.now(timezone.utc).isoformat()})
+            self.recent_turns[index] = updated
+            return updated
+        raise ValueError("conversation_turn_not_found")
 
     def begin_failure(self, turn: ConversationTurn, *, question: str | None = None,
                       draft: SemanticDraft | None = None, policy: dict[str, Any] | None = None) -> FailureChain:

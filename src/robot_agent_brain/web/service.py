@@ -245,6 +245,12 @@ class AgentService:
                 if binding["uncertain"]:
                     raise ValueError("session_reconciliation_required")
                 existing = self._bind(request.sessionID)
+                if ("prefer_auto_resolve" in request.model_fields_set
+                        and getattr(existing, "prefer_auto_resolve", False) != request.prefer_auto_resolve
+                        and getattr(existing, "conversation_memory", None) is not None
+                        and existing.conversation_memory.active_failure_chain is not None
+                        and existing.conversation_memory.active_failure_chain.state.value == "waiting_user"):
+                    raise ValueError("failure_chain_policy_change_forbidden")
                 previous_session_camera = getattr(existing, "camera_id", None)
                 previous_platform_camera = getattr(existing.platform, "camera_id", None)
                 previous_platform_original_camera = getattr(existing.platform, "original_camera_id", None)
@@ -270,7 +276,9 @@ class AgentService:
         try:
             identifier = self.tasks.activate(request.browserID, request.sessionID,
                                              allow_active_task=request.allowActiveTask,
-                                             prefer_auto_resolve=request.prefer_auto_resolve)
+                                             prefer_auto_resolve=(request.prefer_auto_resolve
+                                                                  if "prefer_auto_resolve" in request.model_fields_set
+                                                                  else None))
         except Exception:
             # The preflight bind is intentionally read-only from the database's
             # point of view, but it updates the process-local platform pointer.
@@ -282,6 +290,7 @@ class AgentService:
             if request.camera_id is not None:
                 self.camera_bindings[identifier] = request.camera_id
             session = existing if existing is not None else self._bind(identifier)
+            session.prefer_auto_resolve = bool(self.tasks.binding(identifier).get("prefer_auto_resolve", 0))
             if existing is not None and getattr(session, "platform", None) is None:
                 session = self._bind(identifier)
         except Exception:
@@ -350,6 +359,7 @@ class AgentService:
         trajs = []
         uncertain = False
         scene_before_digest = None
+        raw_user_command = request.command
         try:
             session = self._bind(request.sessionID)
             scene_before_digest = digest(session.scene) if session.scene is not None else None
@@ -460,8 +470,12 @@ class AgentService:
         outcome = result.get("outcome")
         state = ("任务完成" if outcome in delivered
                  else "等待澄清" if outcome == "clarification_required" else "任务失败")
+        conversation = self._record_conversation_turn(
+            request, identifier, result, scene_before_digest, uncertain,
+            raw_user_command=raw_user_command)
+        if conversation is not None:
+            result["conversation"] = conversation
         self.tasks.update(identifier, state, result, uncertain=uncertain, terminal=True)
-        self._record_conversation_turn(request, identifier, result, scene_before_digest, uncertain)
         # Playback rides after the lease: releasing is what stops a browser that is
         # already playing, so the clips have to go out once the lock is gone.
         return trajs
@@ -472,16 +486,25 @@ class AgentService:
             return request.command
         memory = getattr(session, "conversation_memory", None)
         chain = memory.active_failure_chain if memory is not None else None
+        if chain is not None and getattr(request, "new_task", False):
+            chain.state = type(chain.state).SUPERSEDED
+            return request.command
+        if chain is not None and chain.state.value in {"blocked_environment", "blocked_system", "blocked_reconciliation"}:
+            return {"taskID": "pending", "sessionID": request.sessionID,
+                    "outcome": "failed", "executed": False,
+                    "reply": "当前失败链仍待核验，不能自动重试；请先处理恢复状态。",
+                    "error": {"code": "conversation_recovery_blocked", "message": chain.state.value}}
         if chain is None or chain.state.value not in {"waiting_user", "resolving"}:
             return request.command
         if len(chain.failed_user_turn_ids) >= getattr(self.config, "conversation_recovery_max_failed_user_turns", 5):
             return {"taskID": "pending", "sessionID": request.sessionID,
-                    "outcome": "clarification_required", "executed": False,
+                    "outcome": "failed", "executed": False,
                     "clarification_question": "同一问题已达到恢复次数上限，请重新开始一个任务。",
                     "reply": "同一失败链已达到恢复次数上限，请重新开始一个任务。",
                     "error": {"code": "conversation_recovery_exhausted", "message": "failure chain exhausted"}}
         provider = getattr(self.app, "provider", None)
         if provider is None or not hasattr(provider, "recover_failure"):
+            chain.state = type(chain.state).BLOCKED_ENVIRONMENT
             return {"taskID": "pending", "sessionID": request.sessionID,
                     "outcome": "failed", "executed": False,
                     "reply": "当前恢复解释器不可用，原失败链未改变。",
@@ -499,16 +522,19 @@ class AgentService:
             current_scene_context={"scene_digest": digest(session.scene) if session.scene else None},
             policy_summary=chain.policy_snapshot,
             allowed_recovery_actions=["continue_task", "revise_task", "new_task", "ask_user", "cancel_chain"])
+        chain_revision = chain.lifecycle_revision
         try:
             chain.state = type(chain.state).RESOLVING
             decision = provider.recover_failure(payload)
+            if chain.lifecycle_revision != chain_revision:
+                raise ValueError("failure_context_chain_revision_conflict")
             from ..semantics.recovery_guard import validate_recovery_decision
             validate_recovery_decision(decision, root_failure_turn_id=chain.root_failure_turn_id,
                                        known_turn_ids={t.turn_id for t in memory.recent_turns},
                                        completed_step_ids={x.step_id for x in chain.step_ledger if x.status in {"committed", "executed_confirmed"}},
                                        allowed_actions=set(payload.allowed_recovery_actions))
         except Exception as exc:
-            chain.state = type(chain.state).WAITING_USER
+            chain.state = type(chain.state).BLOCKED_SYSTEM
             return {"taskID": "pending", "sessionID": request.sessionID,
                     "outcome": "failed", "executed": False,
                     "reply": "无法安全核验这次补充说明，原失败链保持不变。",
@@ -530,9 +556,19 @@ class AgentService:
             chain.state = type(chain.state).SUPERSEDED
             return request.command
         chain.state = type(chain.state).WAITING_USER
+        session.last_recovery_evidence = {
+            "raw_current_user_text": request.command,
+            "source_turn_ids": [item.turn_id for item in memory.recent_turns],
+            "base_instruction": chain.root_instruction,
+            "effective_instruction": decision.resolved_instruction,
+            "accepted_amendments": [item.model_dump(mode="json") for item in decision.amendments],
+            "field_sources": {item.field: item.evidence.get("turn_id", "current") for item in decision.amendments},
+            "scope": decision.scope,
+        }
         return decision.resolved_instruction
 
-    def _record_conversation_turn(self, request, task_id, result, scene_before_digest, uncertain):
+    def _record_conversation_turn(self, request, task_id, result, scene_before_digest, uncertain,
+                                  *, raw_user_command=None):
         """Persist one outer user turn and update the bounded failure chain.
 
         This is deliberately outside the normal Qwen prompt path: recording a
@@ -555,12 +591,16 @@ class AgentService:
                 "transaction_id": (result.get("recovery_context") or {}).get("transactionID"),
                 "evidence_source": ["gateway_task_result", "session_checkpoint"],
             }
-            from ..session.conversation_memory import ConversationTurn, EffectEvidence, FailureChainState
+            from ..session.conversation_memory import (ConversationTurn, EffectEvidence,
+                                                        FailureChainState, SemanticDraft,
+                                                        RecoveryEvidence,
+                                                        StepLedgerEntry)
+            raw_user_command = raw_user_command or request.command
             turn = ConversationTurn(
                 turn_id=turn_id, session_id=request.sessionID,
                 sequence=len(memory.recent_turns) + len(memory.archived_turn_ids) + 1,
                 client_request_id=request.clientRequestID, web_task_id=str(task_id),
-                raw_user_text=request.command,
+                raw_user_text=raw_user_command,
                 effective_instruction=request.command,
                 assistant_final_text=str(result.get("reply") or ""),
                 final_outcome=outcome, final_error_code=error.get("code"),
@@ -573,21 +613,72 @@ class AgentService:
                 publication_status="published" if result.get("artifacts") else "none",
                 lease_status=(result.get("recovery_context") or {}).get("lease_state"),
                 effect_evidence=EffectEvidence.model_validate(effect),
+                recovery_evidence=(RecoveryEvidence.model_validate(session.last_recovery_evidence)
+                                   if getattr(session, "last_recovery_evidence", None) else None),
             )
             failed = outcome in {"failed", "clarification_required"} or (outcome == "plan_ready" and not result.get("executed"))
-            if failed:
-                memory.begin_failure(turn, question=result.get("clarification_question"),
-                                     policy={"prefer_auto_resolve": bool(getattr(request, "prefer_auto_resolve", False)),
+            if failed and memory.active_failure_chain is not None and memory.active_failure_chain.state in {
+                    FailureChainState.EXHAUSTED, FailureChainState.CANCELLED,
+                    FailureChainState.BLOCKED_RECONCILIATION,
+                    FailureChainState.BLOCKED_ENVIRONMENT, FailureChainState.BLOCKED_SYSTEM}:
+                # A bounded/exhausted or cancelled chain is not silently reopened
+                # by a bare follow-up.  A new complete task is handled by the
+                # explicit new_task decision and starts a fresh root.
+                memory.upsert_turn(turn)
+            elif failed:
+                draft = SemanticDraft(
+                    source_request_id=str(request.clientRequestID),
+                    validity="partial_semantics" if outcome == "clarification_required" else "unparsed",
+                    canonical_turn={k: result.get(k) for k in ("turn_kind", "scene_id", "scene_version", "execution_capability") if result.get(k) is not None},
+                    unresolved_slots=[str(result.get("clarification_question"))] if result.get("clarification_question") else [],
+                    execution_authority="none")
+                chain = memory.begin_failure(turn, question=result.get("clarification_question"),
+                                     draft=draft,
+                                             policy={"prefer_auto_resolve": bool(getattr(session, "prefer_auto_resolve", False)),
                                              "max_failed_user_turns": 5})
+                if uncertain or (result.get("recovery_context") or {}).get("lease_state") in {"unknown", "quarantine"}:
+                    chain.state = FailureChainState.BLOCKED_RECONCILIATION
+                step_records = (result.get("metrics") or {}).get("steps", []) if isinstance(result.get("metrics"), dict) else []
+                if not step_records:
+                    step_records = [{"step": 1, "instruction": request.command,
+                                     "outcome": outcome, "state": "stopped"}]
+                chain.step_ledger = [StepLedgerEntry(
+                    step_id=f"step-{item.get('step', index + 1)}",
+                    original_step_index=int(item.get("step", index + 1)),
+                    instruction=str(item.get("instruction") or request.command),
+                    status=("committed" if item.get("state") == "completed" and item.get("outcome") == "scene_updated"
+                            else "executed_confirmed" if item.get("executed")
+                            else "clarification" if item.get("outcome") == "clarification_required"
+                            else "rejected" if item.get("outcome") == "failed" else "not_run"),
+                    request_ids=[str(item["request_id"])] if item.get("request_id") else [],
+                    receipts=list(result.get("commitReceipts") or []))
+                    for index, item in enumerate(step_records)]
+            elif memory.active_failure_chain is not None and memory.active_failure_chain.state not in {FailureChainState.EXHAUSTED, FailureChainState.BLOCKED_RECONCILIATION}:
+                memory.active_failure_chain.state = FailureChainState.RESOLVED
+                memory.upsert_turn(turn)
             else:
-                if memory.active_failure_chain is not None and memory.active_failure_chain.state not in {FailureChainState.EXHAUSTED, FailureChainState.BLOCKED_RECONCILIATION}:
-                    memory.active_failure_chain.state = FailureChainState.RESOLVED
                 memory.upsert_turn(turn)
             self.app._save_session(request.sessionID)
+            chain = memory.active_failure_chain
+            conversation = {
+                "turn_id": turn.turn_id,
+                "root_failure_turn_id": chain.root_failure_turn_id if chain else None,
+                "chain_state": chain.state.value if chain else None,
+                "failed_user_turns": chain.failed_user_turn_count if chain else 0,
+                "max_failed_user_turns": 5,
+                "continuation_available": bool(chain and chain.state.value == "waiting_user"),
+                "prefer_auto_resolve": bool(getattr(session, "prefer_auto_resolve", False)),
+            }
+            from ..session.conversation_journal import ConversationJournal
+            ConversationJournal(self.app.store.directory(request.sessionID)).write(
+                turn.turn_id, {"turn": turn.model_dump(mode="json"), "conversation": conversation})
+            session.last_recovery_evidence = None
+            return conversation
         except Exception as exc:
             # Auditing must never turn a completed task into a second failure;
             # preserve the task result and leave the diagnostic in the server log.
             self.progress[task_id] = f"conversation_memory_write_failed:{exc}"
+            return None
 
     STEP_MARKS = "①②③④⑤⑥⑦⑧⑨⑩"
     # The one turn record has to carry one verdict for the whole sentence, so the
@@ -643,7 +734,7 @@ class AgentService:
         the clips leave only once the lease does, so the caller keeps them.
         """
         from .camera_policy import choose_camera
-        report = self.app.handle(instruction, session_id=request.sessionID)
+        report = self.app.handle(instruction, session_id=request.sessionID, origin="internal_step")
         camera_reason = None
         # Original derivation remaps the frozen original IDs, not the previous
         # branch's camera ID. Revalidate semantic binding on the confirmed scene.
@@ -1273,6 +1364,7 @@ def create_http_app(service):
                     item["gripper_asset"] = getattr(session, "gripper_asset", None)
                     item["camera_asset"] = getattr(session, "camera_asset", None)
                     item["execution_capability"] = getattr(session, "execution_capability", "unknown")
+                    item["prefer_auto_resolve"] = getattr(session, "prefer_auto_resolve", False)
                 else:
                     item["session_phase"] = "setup"
                     item["camera_id"] = service.camera_bindings.get(item["id"])
@@ -1305,6 +1397,7 @@ def create_http_app(service):
             "camera_asset": getattr(session, "camera_asset", None),
             "profile_id": session.robot_setup.profile_id if getattr(session, "robot_setup", None) else None,
             "execution_capability": getattr(session, "execution_capability", "unknown"),
+            "prefer_auto_resolve": getattr(session, "prefer_auto_resolve", False),
             "platform_rebind_revision": getattr(session, "platform_rebind_revision", 0),
         })
 

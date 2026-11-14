@@ -25,6 +25,8 @@ class BrainSession:
         self.reference_registry = reference_registry or ComponentReferenceRegistry()
         self.dialogue = DialogueState()
         self.conversation_memory = ConversationMemory()
+        self.prefer_auto_resolve = False
+        self.last_recovery_evidence = None
         self.session_action = None
         self.sync_state = "synchronized"
         self.session_phase = "setup"
@@ -550,7 +552,8 @@ class BrainSession:
                                            held_object=self.holding_object, bindings_override=bindings_override, edit_defaults=edit_defaults,
                                            seen_scene_object_ids=self.seen_scene_object_ids,
                                            next_scene_object_id=self.next_scene_object_id,
-                                           robot_profile=profile, robot_setup_revision=self.robot_setup_revision, arm_states=self.arm_states)
+                                           robot_profile=profile, robot_setup_revision=self.robot_setup_revision, arm_states=self.arm_states,
+                                           prefer_auto_resolve=self.prefer_auto_resolve)
         return self._accept_result(request_id, result)
 
     def _process_setup_turn(self, request_id, turn, *, bindings_override=None):

@@ -24,7 +24,8 @@ class SceneGrounder:
 
     discover_candidates = staticmethod(discover_candidates)
 
-    def ground(self, intent: TaskIntent, scene: SceneConfig, bindings_override=None, *, resolved_relations=None) -> GroundedTask:
+    def ground(self, intent: TaskIntent, scene: SceneConfig, bindings_override=None, *, resolved_relations=None,
+               prefer_auto_resolve: bool = False, logical_task_id: str = "", step_id: str = "ground") -> GroundedTask:
         selector = SemanticEntitySelector(self.relations, aliases=self.aliases, category_aliases=self.category_aliases,
                                          assets=self.assets, scene_reference_catalog=self.scene_reference_catalog,
                                          table_metadata_ref=self.table_metadata_ref)
@@ -46,7 +47,24 @@ class SceneGrounder:
                 if len(candidates) > count:
                     raise GroundingAmbiguous(entity, candidates)
             elif len(candidates) != 1:
-                raise GroundingAmbiguous(entity, candidates)
+                if prefer_auto_resolve:
+                    from .ambiguity_policy import AmbiguityPolicy, AmbiguityRequiresClarification
+                    from ..web.protocol import digest
+                    destructive = any(getattr(getattr(op, "task_type", None), "value", getattr(op, "task_type", None)) in {"remove", "replace"} and op.target == entity.entity_id
+                                      for op in intent.operations)
+                    destination = any(op.destination == entity.entity_id or op.reference == entity.entity_id
+                                      for op in intent.operations)
+                    try:
+                        decision = AmbiguityPolicy(prefer_auto_resolve=True).choose(
+                            candidates, session_id=logical_task_id or "session", logical_task_id=logical_task_id or intent.instruction,
+                            step_id=step_id, role=entity.entity_id, revision=scene.scene_version,
+                            scene_digest=digest(scene), destructive=destructive, destination=destination,
+                            query=False)
+                        candidates = [next(item for item in candidates if item.object_id_in_scene == decision.chosen_ids[0])]
+                    except AmbiguityRequiresClarification:
+                        raise GroundingAmbiguous(entity, candidates)
+                else:
+                    raise GroundingAmbiguous(entity, candidates)
             return candidates
         entities = []
         index = SceneIndex(scene)

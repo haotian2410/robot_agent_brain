@@ -124,16 +124,15 @@
 先用 `approach`、`pick` 抓住抽屉把手，再执行直线 `pull` 拉开或 `push` 推回。推拉从当前实测末端位姿出发，保持末端朝向；动作成功后自动松开夹爪，因此下一次推拉前需要重新抓持。`pull` / `push` 不负责选择把手抓取点。
 
 ```json
-{"command_id": "3", "skill_name": "pull", "parameters": {"frame": "grasp", "distance": 0.16}}
+{"command_id": "3", "skill_name": "pull", "parameters": {"distance": 0.12}}
 ```
 
 | 参数 | 必填 / 默认 | 含义 |
 | --- | --- | --- |
 | `distance` | 必填 | 直线运动距离，单位 m，必须大于 0 |
-| `frame` | `tool` | 运动方向的参考坐标系：`tool` 为当前工具坐标系，`grasp` 为标定的 `grasp_center` 坐标系，`world` 为世界坐标系 |
-| `direction` | `pull` 为 `[0, 0, -1]`；`push` 为 `[0, 0, 1]` | 相对于 `frame` 的非零方向向量；显式指定时即为实际运动方向 |
+| `direction` | 可选 | 相对于运动开始时推拉坐标系的非零方向向量；省略时由控制端依据资产标定决定 |
 
-示例采用 `frame: "grasp"`，要求机器人已标定 `grasp_center`，且其 Z 轴与抽屉进出方向匹配。`distance` 始终填正数；方向不匹配时按实际坐标系显式设置 `direction`。推拉的场景目标由前面的抓持确定，本条 command 无需填写 `target`。
+推拉坐标系由控制端依据资产标定，在运动开始时确定。`distance` 始终填正数；推拉的场景目标由前面的抓持确定，本条 command 无需填写 `target`。不要输出 `frame` 或 `arc_center_offset`。
 
 ## 3. Commands 如何装配
 
@@ -197,8 +196,8 @@ approach(object) → pick(object) → lift_up(distance) → retreat(object)
 `drawer` 为抽屉的场景对象 ID。每次推拉前抓住把手；推拉成功后夹爪已松开，再执行 `retreat`。
 
 ```text
-approach(drawer) → pick(drawer) → pull(frame=grasp, distance=0.16) → retreat(drawer)
-    → approach(drawer) → pick(drawer) → push(frame=grasp, distance=0.16) → retreat(drawer)
+approach(drawer) → pick(drawer) → pull(distance=0.12) → retreat(drawer)
+    → approach(drawer) → pick(drawer) → push(distance=0.12) → retreat(drawer)
 ```
 
 把图中的每个节点依次写成一条 command 即可。抓取放置的完整装配示例见上一节；抽屉直线推拉的完整命令见 [`commands.007.json`](../demo/task_commands/commands.007/commands.007.json)。
@@ -230,10 +229,9 @@ approach(drawer) → pick(drawer) → pull(frame=grasp, distance=0.16) → retre
    单侧偏移。紧接其前的 `approach` 自动继承该相对关系，不要再写一遍。
 7. `open` / `close` operation 按上面的开关抽屉图展开：`approach` → `pick` 抓住把手或门边，再 `pull`（开）
    或 `push`（关），最后 `retreat`。`pull` / `push` 必须紧跟在同一物体上已完成的 `approach` + `pick`；
-   推拉成功即表示夹爪已经松开，所以下一次推拉前要重新 `approach` + `pick`。`frame` 只能取 `tool`、`grasp`、
-   `world`，拿不准就用 `grasp`；`distance` 必填且大于 0。
+   推拉成功即表示夹爪已经松开，所以下一次推拉前要重新 `approach` + `pick`。不要输出已废弃的 `frame` 或 `arc_center_offset`；
+   `distance` 必填且大于 0，`direction`（如提供）必须是三个非零分量。
 8. 保持 `operations` 的数量与顺序，不得合并、调换或新增任务里没有的动作；`initial_state.gripper_occupied` 为 true 且
    `held_entity` 就是本次操作物体时，跳过抓取前缀，直接从放置阶段开始。
 9. 任何本规范无法表达的动作（例如按压按钮、需要两个方向同时确定的落点、双臂协同）都不要勉强映射成
    上面这些技能来凑数——Brain 会在规划前拒绝这类任务，你不需要为它编造命令。
-

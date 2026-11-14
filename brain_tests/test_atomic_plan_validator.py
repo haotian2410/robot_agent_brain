@@ -232,7 +232,7 @@ def drawer():
     return task([Operation(operation_id="op-1", task_type="open", target="a", reference="b")])
 
 
-STROKE = {"distance": 0.16, "frame": "grasp"}
+STROKE = {"distance": 0.12}
 
 
 def test_a_drawer_stroke_belongs_between_the_grip_and_the_retreat():

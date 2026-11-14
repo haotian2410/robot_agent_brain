@@ -23,10 +23,9 @@ from .skill_planner_router import PlanningTrace
 # strokes can be: skill.md's 开关抽屉 graph is approach + pick + pull/push + retreat.
 SUPPORTED_TASK_TYPES = frozenset({TaskType.GRASP, TaskType.RELEASE, TaskType.PICK_AND_PLACE,
                                   TaskType.OPEN, TaskType.CLOSE})
-# skill.md's own drawer stroke. ``frame: grasp`` is the only frame the Brain may
-# assume -- it has no access to the drawer's pose, so it cannot name a world
-# direction the way the control's hand-written example does.
-DRAWER_STROKE = {"distance": 0.16, "frame": "grasp"}
+# The current control skill derives the push/pull frame from the calibrated
+# grasp/tool pose. Brain must not emit the removed legacy `frame` field.
+DRAWER_STROKE = {"distance": 0.12}
 
 
 def expand_atomic_plan(task: GroundedTask, held_object=None) -> list[AtomicCommand]:

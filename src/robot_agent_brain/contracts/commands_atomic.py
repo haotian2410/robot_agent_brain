@@ -21,7 +21,6 @@ PlanningMethod = Literal["joint", "linear"]
 MoveRelation = Literal["above", "below", "front", "behind", "left", "right"]
 PutRelation = Literal["at", "front", "behind", "left", "right", "above", "below"]
 PoseAxis = Literal["+z", "-z", "+x", "-x", "+y", "-y"]
-MotionFrame = Literal["tool", "grasp", "world"]
 
 
 class AtomicSkillName(StrEnum):
@@ -148,9 +147,12 @@ class ReleaseParameters(StrictModel):
 class PullPushParameters(StrictModel):
     """A straight pull/push from the measured end-effector pose; the drawer is
     already held, so there is no ``target``, and the control opens the gripper
-    again when the stroke finishes."""
+    again when the stroke finishes.
+
+    The direction comes from the control's calibrated push/pull axes, so the
+    removed ``frame`` field must not appear: the control rejects it outright.
+    """
     distance: float = Field(gt=0)
-    frame: MotionFrame | None = None
     direction: list[float] | None = None
 
     @model_validator(mode="after")
