@@ -63,7 +63,8 @@ def validate_recovery_decision(decision: FailureContextDecision, *, root_failure
 
 
 def validate_recovery_scope(decision: FailureContextDecision, *, root_instruction: str,
-                            latest_task_draft: dict[str, Any] | None = None) -> FailureContextDecision:
+                            latest_task_draft: dict[str, Any] | None = None,
+                            current_user_text: str | None = None) -> FailureContextDecision:
     """Keep the read-only R round from changing the authority of U.
 
     ``resolved_instruction`` is only fed back through the ordinary U parser;
@@ -77,6 +78,12 @@ def validate_recovery_scope(decision: FailureContextDecision, *, root_instructio
         raise ValueError("failure_context_scope_new_task_mismatch")
     if decision.decision == "new_task" and decision.scope != "new_task":
         raise ValueError("failure_context_new_task_scope_required")
+    if current_user_text is not None and decision.resolved_instruction:
+        original_markers = ("原始场景", "原场景", "original scene", "original")
+        resolved_original = any(marker in decision.resolved_instruction.lower() for marker in original_markers)
+        user_original = any(marker in current_user_text.lower() for marker in original_markers)
+        if resolved_original and not user_original:
+            raise ValueError("failure_context_scene_basis_drift")
     for amendment in decision.amendments:
         field = amendment.field.strip().lower()
         if field in _FORBIDDEN_RECOVERY_FIELDS:

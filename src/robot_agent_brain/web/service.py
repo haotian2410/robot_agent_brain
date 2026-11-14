@@ -560,7 +560,8 @@ class AgentService:
                                        allowed_actions=set(payload.allowed_recovery_actions))
             validate_recovery_scope(decision, root_instruction=chain.root_instruction,
                                     latest_task_draft=chain.semantic_draft.model_dump(mode="json")
-                                    if chain.semantic_draft else None)
+                                    if chain.semantic_draft else None,
+                                    current_user_text=request.command)
         except Exception as exc:
             chain.state = type(chain.state).BLOCKED_SYSTEM
             return {"taskID": "pending", "sessionID": request.sessionID,

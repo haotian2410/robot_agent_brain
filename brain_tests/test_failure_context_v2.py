@@ -102,3 +102,11 @@ def test_u_payload_that_drops_recovery_color_is_rejected_before_side_effects():
         BrainApplication._validate_recovery_u_conditions(turn, {
             "accepted_amendments": [{"field": "color", "value": "blue"}]
         })
+
+
+def test_recovery_cannot_drift_to_original_scene_without_user_request():
+    decision = FailureContextDecision(decision="revise_task", source_turn_id="t1",
+                                      resolved_instruction="在原始场景中增加一个苹果")
+    with pytest.raises(ValueError, match="scene_basis_drift"):
+        validate_recovery_scope(decision, root_instruction="增加一个苹果",
+                                current_user_text="把它改成蓝色")
