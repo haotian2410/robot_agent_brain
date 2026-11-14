@@ -105,8 +105,8 @@ pytest -q brain_tests/test_web_service.py
 | 真实 Qwen | 未执行 | 本轮没有启动或调用真实 Qwen；因此没有可报告的真实调用次数/token。 |
 | 隔离执行仿真 | 已验证 | 组合编排使用隔离 execution double，验证全失败可重采样、部分/未知效果不自动重放。 |
 | 物理 Control | 未执行 | 未授权，不调用真实机器人或 Control。 |
-| Python 3.11 | 已验证 | `conda run -n robot_agent_integ python -m compileall -q src/robot_agent_brain` 通过。 |
-| Python 3.12 | 未验证 | 当前环境未提供独立 3.12 解释器。 |
-| wheel | 阻塞 | `python -m build --wheel --no-isolation` 因环境缺少 `hatchling.build` 未执行成功。 |
+| Python 3.11 | 已验证 | `python3.11 -m compileall -q src/robot_agent_brain` 通过（Python 3.11.14）。 |
+| Python 3.12 | 已验证 | `conda run -n robot_agent_integ python -m compileall -q src/robot_agent_brain` 通过（Python 3.12.14）。 |
+| wheel | 阻塞 | `conda run -n robot_agent_integ python -m build --wheel --no-isolation` 因环境缺少 `hatchling.build` 失败；未修改依赖环境。 |
 
 专项 Mock/隔离测试没有 Qwen token 统计；真实 Qwen、Control 和 FR01–FR69 仍必须在独立服务环境中逐项执行后再补报告。
