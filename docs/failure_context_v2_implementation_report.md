@@ -17,7 +17,8 @@
 | M4 | `a47ee9b` | 会话恢复/自动选择配置与协议字段 | Web protocol 回归 |
 | M5 | `93d5da7` | Web 外层最终化、R 只读恢复和链状态 | Web service 回归 |
 | M6 | `7aa9a3c` | 五轮上限、payload 禁止、完成步骤保护测试 | failure-context 单测 |
-| M7 | 当前本地 M7 提交 | 保留当前原子规划与 OLS 集成修复；补充用户日志、恢复证据、步骤账本和受控自动选择接缝 | 全量基线分类 |
+| M7 | `1f8b22f` | 保留当前原子规划与 OLS 集成修复；补充用户日志、恢复证据、步骤账本和受控自动选择接缝 | 全量基线分类 |
+| M8 | 待提交（本地） | 控制端部分/未知执行结果不自动重放；仅对明确全失败且无持物的可重采样拒绝保留有限重试 | 组合编排与专项回归 |
 
 ## 已验证
 
@@ -27,7 +28,7 @@ pytest -q brain_tests/test_qwen_http.py
 pytest -q brain_tests/test_session_store.py
 pytest -q brain_tests/test_web_protocol.py
 pytest -q brain_tests/test_web_service.py
-专项文件组合回归通过（failure-context、Qwen、session store、Web protocol/service）；当前组合共 66 项测试。
+专项文件组合回归通过（composite orchestrator、failure-context、Qwen、session store、Web protocol/service）；当前组合共 78 项测试。
 ```
 
 普通任务理解不会拼接 failure history；只有存在活动失败链的下一次外层用户轮次才会构造独立
@@ -45,4 +46,5 @@ pytest -q brain_tests/test_web_service.py
 
 - 真实 Qwen 对 R 的多轮联调、FR01–FR69 仍需在服务和浏览器稳定后逐例运行。
 - unknown/partial execution/lease/recovery 的真实断线证据尚未在本轮自动注入测试中完成。
+- 控制端执行重试已收紧：报告包含成功步骤、持物状态或未知/部分效果时不会自动重放；只有控制端明确返回可重采样的全失败结果才保留现有最多 5 次尝试。
 - `prefer_auto_resolve=true` 只允许稳定 ID、非破坏性且非 destination/query 选择；默认值仍为 false。

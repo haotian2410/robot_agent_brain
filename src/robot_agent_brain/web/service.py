@@ -781,7 +781,8 @@ class AgentService:
             report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction)
             attempts = 1
             while (attempts < self.MAX_STEP_ATTEMPTS and len(platform.receipts) == receipts_before
-                   and (result.get("error") or {}).get("code") in self.RETRYABLE_EXECUTION_CODES):
+                   and (result.get("error") or {}).get("code") in self.RETRYABLE_EXECUTION_CODES
+                   and self._retry_allowed(result)):
                 attempts += 1
                 self.progress[identifier] = f"拆分执行 {index}/{len(steps)} · 第 {attempts} 次尝试 · {step.instruction}"
                 report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction)
@@ -838,6 +839,25 @@ class AgentService:
                             "commits": 0, "executed": False})
         result = self.composite_result(records, results, steps)
         return result, trajs
+
+    @staticmethod
+    def _retry_allowed(result):
+        """Return whether a failed execution has explicit no-side-effect evidence.
+
+        A retry is safe only for a complete control report in which every command
+        is explicitly failed and the report contains no moved or held object.  A
+        partial/unknown report must remain terminal for this step: replaying it
+        could duplicate an already applied effect.  The legacy provider doubles
+        used by the isolated orchestration tests do not include an ``execution``
+        envelope, so they retain their historical retry behaviour.
+        """
+        execution = result.get("execution")
+        if execution is None:
+            return True
+        if execution.get("retry_safe") is not True:
+            return False
+        steps = execution.get("steps") or []
+        return bool(steps) and all(item.get("status") == "failed" for item in steps)
 
     @staticmethod
     def verdict(result):
@@ -964,8 +984,23 @@ class AgentService:
             # Nothing was committed and the browser still shows the planned world, so
             # "synchronized" here is a reading rather than an assumption.
             session.sync_state = "synchronized"
+        # ``retry_safe`` is deliberately narrower than a failed status.  A
+        # complete all-failed report with no movement/holding is explicit
+        # evidence that no effect landed; partial/unknown reports are never
+        # replayed automatically.
+        # The retryable control codes are explicit no-effect refusals in the
+        # current adapter contract (grasp/placement search never committed a
+        # pose).  A report with any successful command is partial/unknown and
+        # blocks replay; an explicit held-object state also blocks it.  The
+        # adapter may still include an uncommitted diagnostic pose on an
+        # all-failed report, which is not a committed effect.
+        all_failed = bool(outcome.steps) and all(step.status == "failed" for step in outcome.steps)
+        retry_safe = (not success and all_failed
+                      and outcome.error_code in self.RETRYABLE_EXECUTION_CODES
+                      and outcome.holding_object is None)
         result.update(executed=success, outcome="scene_updated" if success else "failed",
                       execution={**outcome.summary,
+                                 "retry_safe": retry_safe,
                                  "writeback_status": "committed" if candidate is not None else "none"},
                       reply=(f"已执行 {total} 条命令并写回场景。" if success else
                              f"执行未完成：{failure_detail(outcome.detail, outcome.error_code)}。"))
