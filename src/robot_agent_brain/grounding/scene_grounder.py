@@ -21,11 +21,16 @@ class SceneGrounder:
         self.category_aliases = category_aliases or {}
         self.scene_reference_catalog = scene_reference_catalog
         self.table_metadata_ref = table_metadata_ref
+        self.last_selection_decisions = []
 
     discover_candidates = staticmethod(discover_candidates)
 
     def ground(self, intent: TaskIntent, scene: SceneConfig, bindings_override=None, *, resolved_relations=None,
                prefer_auto_resolve: bool = False, logical_task_id: str = "", step_id: str = "ground") -> GroundedTask:
+        # The decision is part of durable turn evidence, not merely a local
+        # grounding detail. Reset per invocation so a retry cannot reuse a
+        # choice from a different semantic request.
+        self.last_selection_decisions = []
         selector = SemanticEntitySelector(self.relations, aliases=self.aliases, category_aliases=self.category_aliases,
                                          assets=self.assets, scene_reference_catalog=self.scene_reference_catalog,
                                          table_metadata_ref=self.table_metadata_ref)
@@ -61,6 +66,7 @@ class SceneGrounder:
                             scene_digest=digest(scene), destructive=destructive, destination=destination,
                             query=False)
                         candidates = [next(item for item in candidates if item.object_id_in_scene == decision.chosen_ids[0])]
+                        self.last_selection_decisions.append(decision.model_dump(mode="json"))
                     except AmbiguityRequiresClarification:
                         raise GroundingAmbiguous(entity, candidates)
                 else:

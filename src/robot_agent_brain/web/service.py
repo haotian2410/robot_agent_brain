@@ -1,5 +1,6 @@
 """Loopback-only persistent Agent service. One worker, no Control dispatch."""
 import asyncio
+import hashlib
 import json
 import threading
 import time
@@ -486,6 +487,16 @@ class AgentService:
             return request.command
         memory = getattr(session, "conversation_memory", None)
         chain = memory.active_failure_chain if memory is not None else None
+        # A checkpointed composite ledger without a finalized outer turn means
+        # the process may have died between a child side effect and its final
+        # receipt.  Do not let the next user message invoke R or replay it;
+        # existing lease/publication reconciliation must establish the effect.
+        if chain is None and getattr(session, "pending_step_ledger", None):
+            return {"taskID": "pending", "sessionID": request.sessionID,
+                    "outcome": "failed", "executed": False,
+                    "reply": "上一次分步任务尚未完成现场核验，不能自动重试；请先处理恢复状态。",
+                    "error": {"code": "conversation_recovery_pending_ledger",
+                              "message": "pending composite step ledger"}}
         if chain is not None and getattr(request, "new_task", False):
             chain.state = type(chain.state).SUPERSEDED
             return request.command
@@ -528,11 +539,14 @@ class AgentService:
             decision = provider.recover_failure(payload)
             if chain.lifecycle_revision != chain_revision:
                 raise ValueError("failure_context_chain_revision_conflict")
-            from ..semantics.recovery_guard import validate_recovery_decision
+            from ..semantics.recovery_guard import validate_recovery_decision, validate_recovery_scope
             validate_recovery_decision(decision, root_failure_turn_id=chain.root_failure_turn_id,
                                        known_turn_ids={t.turn_id for t in memory.recent_turns},
                                        completed_step_ids={x.step_id for x in chain.step_ledger if x.status in {"committed", "executed_confirmed"}},
                                        allowed_actions=set(payload.allowed_recovery_actions))
+            validate_recovery_scope(decision, root_instruction=chain.root_instruction,
+                                    latest_task_draft=chain.semantic_draft.model_dump(mode="json")
+                                    if chain.semantic_draft else None)
         except Exception as exc:
             chain.state = type(chain.state).BLOCKED_SYSTEM
             return {"taskID": "pending", "sessionID": request.sessionID,
@@ -564,6 +578,12 @@ class AgentService:
             "accepted_amendments": [item.model_dump(mode="json") for item in decision.amendments],
             "field_sources": {item.field: item.evidence.get("turn_id", "current") for item in decision.amendments},
             "scope": decision.scope,
+            "base_instruction_digest": hashlib.sha256(chain.root_instruction.encode("utf-8")).hexdigest(),
+            "draft_digest": hashlib.sha256(json.dumps(payload.latest_task_draft, ensure_ascii=False,
+                                                       sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+            "recovery_decision_digest": hashlib.sha256(json.dumps(decision.model_dump(mode="json"),
+                                                                    ensure_ascii=False, sort_keys=True,
+                                                                    separators=(",", ":")).encode("utf-8")).hexdigest(),
         }
         return decision.resolved_instruction
 
@@ -594,7 +614,7 @@ class AgentService:
             from ..session.conversation_memory import (ConversationTurn, EffectEvidence,
                                                         FailureChainState, SemanticDraft,
                                                         RecoveryEvidence,
-                                                        StepLedgerEntry)
+                                                        StepLedgerEntry, SelectionDecision)
             raw_user_command = raw_user_command or request.command
             turn = ConversationTurn(
                 turn_id=turn_id, session_id=request.sessionID,
@@ -615,6 +635,8 @@ class AgentService:
                 effect_evidence=EffectEvidence.model_validate(effect),
                 recovery_evidence=(RecoveryEvidence.model_validate(session.last_recovery_evidence)
                                    if getattr(session, "last_recovery_evidence", None) else None),
+                auto_selection_decisions=[SelectionDecision.model_validate(item) for item in
+                                         (result.get("metrics") or {}).get("selection_decisions", [])],
             )
             failed = outcome in {"failed", "clarification_required"} or (outcome == "plan_ready" and not result.get("executed"))
             if failed and memory.active_failure_chain is not None and memory.active_failure_chain.state in {
@@ -653,6 +675,7 @@ class AgentService:
                     request_ids=[str(item["request_id"])] if item.get("request_id") else [],
                     receipts=list(result.get("commitReceipts") or []))
                     for index, item in enumerate(step_records)]
+                chain.selection_decisions = list(turn.auto_selection_decisions)
             elif memory.active_failure_chain is not None and memory.active_failure_chain.state not in {FailureChainState.EXHAUSTED, FailureChainState.BLOCKED_RECONCILIATION}:
                 memory.active_failure_chain.state = FailureChainState.RESOLVED
                 memory.upsert_turn(turn)
@@ -672,6 +695,13 @@ class AgentService:
             from ..session.conversation_journal import ConversationJournal
             ConversationJournal(self.app.store.directory(request.sessionID)).write(
                 turn.turn_id, {"turn": turn.model_dump(mode="json"), "conversation": conversation})
+            # The durable failure chain now owns the completed ledger.  Clear
+            # the pre-dispatch checkpoint only after that hand-off is written;
+            # if the process dies earlier, recovery can inspect the pending
+            # step statuses instead of assuming no effect occurred.
+            if getattr(session, "pending_step_ledger", None):
+                session.pending_step_ledger = []
+                self.app._save_session(request.sessionID)
             session.last_recovery_evidence = None
             return conversation
         except Exception as exc:
@@ -774,8 +804,35 @@ class AgentService:
         rollback channel, and writing the old poses back would be a second set of
         side effects, not an undo.
         """
+        from ..session.conversation_memory import StepLedgerEntry
         results, records, trajs = [], [], []
+        # Checkpoint the complete plan before the first child can commit a
+        # scene or dispatch commands.  A crash between children therefore
+        # leaves an inspectable ledger instead of an unexplained partial turn.
+        session.pending_step_ledger = [StepLedgerEntry(
+            step_id=f"step-{index}", original_step_index=index,
+            instruction=step.instruction, status="planned")
+            for index, step in enumerate(steps, start=1)]
+        self.app._save_session(request.sessionID)
+
+        def checkpoint_step(ledger, record, report, result, attempts, receipts):
+            ledger.status = ("committed" if record.get("state") == "completed" and record["outcome"] == "scene_updated"
+                             else "executed_confirmed" if record["executed"]
+                             else "clarification" if record["outcome"] == "clarification_required"
+                             else "rejected" if record["outcome"] == "failed"
+                             else "plan_ready_unexecuted" if record["outcome"] == "plan_ready"
+                             else "not_run")
+            ledger.request_ids.append(report.request_id)
+            ledger.attempts.append({"attempt": attempts, "outcome": record["outcome"],
+                                    "executed": record["executed"], "error": result.get("error")})
+            ledger.receipts.extend(receipts)
+            self.app._save_session(request.sessionID)
+
         for index, step in enumerate(steps, start=1):
+            ledger = session.pending_step_ledger[index - 1]
+            ledger.status = "processing"
+            ledger.task_revision += 1
+            self.app._save_session(request.sessionID)
             self.progress[identifier] = f"拆分执行 {index}/{len(steps)} · {step.instruction}"
             receipts_before = len(platform.receipts)
             report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction)
@@ -801,6 +858,7 @@ class AgentService:
                 record["verdict"] += f"、第 {attempts} 次尝试"
             if record["outcome"] in {"clarification_required", "failed"}:
                 record["state"] = "stopped"
+                checkpoint_step(ledger, record, report, result, attempts, platform.receipts[receipts_before:])
                 records.append(record)
                 break
             if record["outcome"] == "plan_ready" and index < len(steps):
@@ -810,6 +868,7 @@ class AgentService:
                 # stops on an unexecuted plan and says which step is waiting.
                 record["state"] = "stopped"
                 record["stop_reason"] = "plan_not_executed"
+                checkpoint_step(ledger, record, report, result, attempts, platform.receipts[receipts_before:])
                 records.append(record)
                 break
             execution = result.get("execution") or {}
@@ -820,6 +879,7 @@ class AgentService:
                 # world the previous run supposedly changed.  Stop rather than chain.
                 record["state"] = "stopped"
                 record["stop_reason"] = "execution_writeback_missing"
+                checkpoint_step(ledger, record, report, result, attempts, platform.receipts[receipts_before:])
                 records.append(record)
                 break
             if index < len(steps) and result.get("executed") and execution.get("holding_object"):
@@ -828,15 +888,19 @@ class AgentService:
                 # once.  Single-step turns keep today's behavior; only the chain stops.
                 record["state"] = "stopped"
                 record["stop_reason"] = "arm_still_holding"
+                checkpoint_step(ledger, record, report, result, attempts, platform.receipts[receipts_before:])
                 records.append(record)
                 break
             record["state"] = "completed"
+            checkpoint_step(ledger, record, report, result, attempts, platform.receipts[receipts_before:])
             records.append(record)
         for index in range(len(records) + 1, len(steps) + 1):
             step = steps[index - 1]
             records.append({"step": index, "kind": step.kind.value, "instruction": step.instruction,
                             "state": "not_run", "verdict": "未执行", "attempts": 0,
                             "commits": 0, "executed": False})
+            session.pending_step_ledger[index - 1].status = "not_run"
+        self.app._save_session(request.sessionID)
         result = self.composite_result(records, results, steps)
         return result, trajs
 

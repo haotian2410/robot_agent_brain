@@ -17,6 +17,7 @@ from ..scene.scene_manager import SceneManager
 from .dialogue_state import DialogueState
 from .original_scene_store import OriginalSceneManifest, OriginalSceneStore
 from .conversation_memory import ConversationMemory
+from .conversation_memory import StepLedgerEntry
 
 
 class SessionState(BaseModel):
@@ -58,6 +59,7 @@ class SessionState(BaseModel):
     recovery_context: ExecutionRecoveryContext | None = None
     conversation_memory: ConversationMemory = Field(default_factory=ConversationMemory)
     prefer_auto_resolve: bool = False
+    pending_step_ledger: list[StepLedgerEntry] = Field(default_factory=list)
 
     @field_validator("profile_object_map", mode="before")
     @classmethod
@@ -201,6 +203,7 @@ class SessionStore:
             last_feedback_source=getattr(session, "last_feedback_source", None), recovery_context=session.recovery_context)
         state.conversation_memory = session.conversation_memory.model_copy(deep=True)
         state.prefer_auto_resolve = bool(getattr(session, "prefer_auto_resolve", False))
+        state.pending_step_ledger = [item.model_copy(deep=True) for item in getattr(session, "pending_step_ledger", [])]
         parent = self.directory(session_id)
         fd, temporary = tempfile.mkstemp(prefix=".state-", dir=parent)
         try:
@@ -252,7 +255,8 @@ class SessionStore:
                      "platform_rebind_revision", "robot_asset", "gripper_asset", "camera_asset", "execution_capability", "last_exported_request",
                      "exported_commands", "dispatched_requests", "pending_commands", "pending_execution_request",
                      "stale_commands",
-                     "last_feedback_source", "recovery_context", "conversation_memory", "prefer_auto_resolve"):
+                     "last_feedback_source", "recovery_context", "conversation_memory", "prefer_auto_resolve",
+                     "pending_step_ledger"):
             setattr(session, name, getattr(state.model_copy(deep=True), name))
         for name in ("robot_setup", "robot_setup_revision", "arm_states", "original_scene_manifest", "platform_object_ids", "profile_object_map"):
             setattr(session, name, getattr(state.model_copy(deep=True), name))

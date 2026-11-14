@@ -3,7 +3,7 @@ from ..contracts.commands import ExecutionFeedback, canonical_commands
 from ..contracts.scene import SceneConfig
 from ..scene.scene_manager import SceneManager
 from .dialogue_state import DialogueState
-from .conversation_memory import ConversationMemory
+from .conversation_memory import ConversationMemory, StepLedgerEntry
 from ..errors import SceneCommitRejected
 
 class BrainSession:
@@ -25,6 +25,10 @@ class BrainSession:
         self.reference_registry = reference_registry or ComponentReferenceRegistry()
         self.dialogue = DialogueState()
         self.conversation_memory = ConversationMemory()
+        # Durable pre-dispatch ledger for composite tasks.  It is checkpointed
+        # before each child turn so a process loss cannot erase which step may
+        # have had side effects.
+        self.pending_step_ledger: list[StepLedgerEntry] = []
         self.prefer_auto_resolve = False
         self.last_recovery_evidence = None
         self.session_action = None
@@ -59,6 +63,7 @@ class BrainSession:
         self.active_task_owner = None
         self.active_task_browser = None
         self.recovery_context = None
+        self.pending_step_ledger = []
         if scene is not None:
             self.initialize_scene(scene)
 

@@ -19,6 +19,7 @@
 | M6 | `7aa9a3c` | 五轮上限、payload 禁止、完成步骤保护测试 | failure-context 单测 |
 | M7 | `1f8b22f` | 保留当前原子规划与 OLS 集成修复；补充用户日志、恢复证据、步骤账本和受控自动选择接缝 | 全量基线分类 |
 | M8 | 待提交（本地） | 控制端部分/未知执行结果不自动重放；仅对明确全失败且无持物的可重采样拒绝保留有限重试 | 组合编排与专项回归 |
+| M9 | 待提交（本地） | 分步副作用前持久化 pending ledger；持久化自动选择决策；增加 R→U scope/authority 护栏与证据摘要 | 专项回归 |
 
 ## 已验证
 
@@ -47,4 +48,6 @@ pytest -q brain_tests/test_web_service.py
 - 真实 Qwen 对 R 的多轮联调、FR01–FR69 仍需在服务和浏览器稳定后逐例运行。
 - unknown/partial execution/lease/recovery 的真实断线证据尚未在本轮自动注入测试中完成。
 - 控制端执行重试已收紧：报告包含成功步骤、持物状态或未知/部分效果时不会自动重放；只有控制端明确返回可重采样的全失败结果才保留现有最多 5 次尝试。
+- 复合任务在首个子步骤执行前写入 `pending_step_ledger`；最终外层轮次落档后才清理。重启发现未完成 ledger 时先进入恢复阻塞，不调用 R、不自动重放。
+- `SelectionDecision` 已进入 `BrainResult`、Web/CLI `ConversationTurn` 和 `FailureChain`；R 的 scope、authority 字段和用户证据经过独立 guard，恢复证据保存根指令/草稿/决策摘要。
 - `prefer_auto_resolve=true` 只允许稳定 ID、非破坏性且非 destination/query 选择；默认值仍为 false。

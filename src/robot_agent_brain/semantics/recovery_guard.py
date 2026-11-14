@@ -10,6 +10,11 @@ from typing import Any
 
 from ..models.failure_context import FailureContextDecision
 
+_FORBIDDEN_RECOVERY_FIELDS = {
+    "id", "object_id", "scene_id", "platform", "robot", "lease", "permission",
+    "commands", "execution", "control", "scene_basis", "original_snapshot",
+}
+
 
 class FailureClass(StrEnum):
     USER_CLARIFICATION = "user_clarification"
@@ -54,4 +59,32 @@ def validate_recovery_decision(decision: FailureContextDecision, *, root_failure
             raise ValueError("failure_context_binding_requires_evidence")
         if amendment.subject_role.strip() == "":
             raise ValueError("failure_context_subject_invalid")
+    return decision
+
+
+def validate_recovery_scope(decision: FailureContextDecision, *, root_instruction: str,
+                            latest_task_draft: dict[str, Any] | None = None) -> FailureContextDecision:
+    """Keep the read-only R round from changing the authority of U.
+
+    ``resolved_instruction`` is only fed back through the ordinary U parser;
+    this guard rejects scope/field attempts that would otherwise look like an
+    instruction to bypass identity, platform, lease or execution validation.
+    The original text and draft are retained as evidence for the caller.
+    """
+    if not root_instruction.strip():
+        raise ValueError("failure_context_root_instruction_missing")
+    if decision.scope == "new_task" and decision.decision != "new_task":
+        raise ValueError("failure_context_scope_new_task_mismatch")
+    if decision.decision == "new_task" and decision.scope != "new_task":
+        raise ValueError("failure_context_new_task_scope_required")
+    for amendment in decision.amendments:
+        field = amendment.field.strip().lower()
+        if field in _FORBIDDEN_RECOVERY_FIELDS:
+            raise ValueError("failure_context_authority_field_forbidden: " + field)
+        # A recovery amendment must either fill a slot recorded by U or carry
+        # explicit user-turn evidence.  Model guesses are never sufficient.
+        evidence = amendment.evidence or {}
+        unresolved = set((latest_task_draft or {}).get("unresolved_slots") or [])
+        if unresolved and field not in unresolved and evidence.get("source") in {None, "model_guess"}:
+            raise ValueError("failure_context_amendment_without_user_evidence: " + field)
     return decision

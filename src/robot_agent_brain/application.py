@@ -363,7 +363,7 @@ class BrainApplication:
 
     def _record_cli_turn(self, session_id, instruction, report):
         """Record direct/CLI outer turns; WebService uses its richer finalizer."""
-        from .session.conversation_memory import ConversationTurn, EffectEvidence, SemanticDraft
+        from .session.conversation_memory import ConversationTurn, EffectEvidence, SemanticDraft, SelectionDecision
         from .session.conversation_journal import ConversationJournal
         session = self.get_session(session_id)
         outcome = "clarification_required" if report.turn_status == "clarification_required" else (
@@ -385,6 +385,8 @@ class BrainApplication:
                 scene_effect="committed" if report.scene_commit_status == "committed" else "none_confirmed",
                 execution_effect="completed" if report.executed else "not_started",
                 evidence_source=["application_report"]),
+            auto_selection_decisions=[SelectionDecision.model_validate(item) for item in
+                                      report.metrics.get("selection_decisions", [])],
         )
         failed = outcome in {"failed", "clarification_required", "plan_ready"}
         if failed:
@@ -393,6 +395,8 @@ class BrainApplication:
                 draft=SemanticDraft(source_request_id=report.request_id,
                     validity="partial_semantics" if outcome == "clarification_required" else "unparsed",
                     unresolved_slots=[report.clarification_question] if report.clarification_question else []))
+            if session.conversation_memory.active_failure_chain is not None:
+                session.conversation_memory.active_failure_chain.selection_decisions = list(turn.auto_selection_decisions)
         else:
             chain = session.conversation_memory.active_failure_chain
             if chain is not None and chain.state.value not in {"exhausted", "blocked_reconciliation"}:
@@ -819,6 +823,8 @@ class BrainApplication:
                               "references": protocol_references,
                               "error_code": report.error.code if report.error is not None else None,
                           }}
+        if result is not None and getattr(result, "selection_decisions", None):
+            report.metrics["selection_decisions"] = list(result.selection_decisions)
         previous_config = getattr(session, "restored_config_fingerprint", None)
         if previous_config and previous_config != self.config_fingerprint:
             report.assumptions.append("configuration_changed_since_restore: confirmed scene retained; review deployment metadata")

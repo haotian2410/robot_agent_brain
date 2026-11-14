@@ -66,6 +66,9 @@ class RecoveryEvidence(BaseModel):
     superseded_fields: dict[str, Any] = Field(default_factory=dict)
     scene_basis_authorization: str | None = None
     scope: Literal["failed_step", "remaining_steps", "new_task"] = "failed_step"
+    base_instruction_digest: str | None = None
+    draft_digest: str | None = None
+    recovery_decision_digest: str | None = None
 
 
 class StepLedgerEntry(BaseModel):

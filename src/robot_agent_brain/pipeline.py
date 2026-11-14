@@ -115,6 +115,9 @@ class BrainResult(BaseModel):
     focus_object_ids: list[SceneId] | None = None
     deleted_object_ids: list[SceneId] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
+    # Durable evidence for opt-in deterministic ambiguity resolution.  Kept as
+    # plain JSON here so BrainResult remains independent of session storage.
+    selection_decisions: list[dict] = Field(default_factory=list)
     planner_used: Literal["recipe", "qwen"] | None = None
     planner_trace: dict | None = Field(default=None, exclude=True)
 
@@ -576,7 +579,8 @@ class BrainPipeline:
             by_entity = {e.entity_id: e.scene_object_id for e in grounded.entities}
             return BrainResult(task_intent=intent, grounded_task=grounded, commands=commands,
                 focus_object_ids=list(dict.fromkeys(by_entity[op.source or op.target] for op in operations)),
-                planner_used=mode, planner_trace=trace.debug_payload())
+                planner_used=mode, planner_trace=trace.debug_payload(),
+                selection_decisions=list(self.grounder.last_selection_decisions))
         # The control runtime consumes the atomic-skill document directly, so
         # the semantic SkillPlan and the legacy exporter stay off this path.
         commands = self.skill_planner.plan_atomic(request_id, grounded, scene, held_object=held_object)
@@ -585,7 +589,8 @@ class BrainPipeline:
         focus = list(dict.fromkeys(by_entity[op.source or op.target] for op in grounded.operations))
         return BrainResult(task_intent=intent, grounded_task=grounded, commands=commands,
                            focus_object_ids=focus, planner_used=trace.used_planner,
-                           planner_trace=trace.debug_payload())
+                           planner_trace=trace.debug_payload(),
+                           selection_decisions=list(self.grounder.last_selection_decisions))
 
     def run(self, request_id: str, instruction: str, scene: SceneConfig, *,
             dialogue=None, capture: Callable[[], CameraFrame] | None = None,
