@@ -26,6 +26,7 @@
 | M13 | `69738fd` | 完整 pytest 复核；R→U 条件校验覆盖 Scene Edit 属性颜色/布局字段 | 全量基线仍 11 项 |
 | M14 | `5e9113e` | 失败链续接复用已持久化的 source/actor 选择；当前 Scene 仍由 Grounder 重新校验 | 专项回归 |
 | M15 | `4190c4f` | 增加独立 failure_context.v1 Qwen HTTP 回归，验证 R 的独立 stage/schema | Qwen/失败上下文回归 |
+| M16 | 待提交（本地） | 恢复复合任务跳过已完成前缀；只为未完成步骤创建新 child request，无法匹配时安全阻断 | 组合编排回归 |
 
 ## 已验证
 
@@ -59,6 +60,7 @@ pytest -q brain_tests/test_web_service.py
 - R→U 条件核对已覆盖颜色、数量、距离、目标/参照、操作和放置字段；缺失时返回 `failure_context_u_condition_lost:*`，不会进入 SceneEditor、Grounder 或 Commands。
 - 恢复输入按配置字符预算检查；超限返回 `context_budget_exceeded`，不调用 R、不截断否定/单位/目标条件。
 - `prefer_auto_resolve=true` 的已选 source/actor ID 会在同链续接中复用；目的地、参照、破坏性目标和查询集合仍不会自动选择，删除/分支变化会重新触发校验而非换 ID。
+- 恢复复合任务要求 R/U 返回完整原始步骤序列；已完成前缀按指令与 ledger 对照后标记 `reused`，不重放、不计入新的 child request。前缀无法匹配时返回 `failure_context_completed_steps_unmatched`。
 - `prefer_auto_resolve=true` 只允许稳定 ID、非破坏性且非 destination/query 选择；默认值仍为 false。
 
 ## 环境与调用统计

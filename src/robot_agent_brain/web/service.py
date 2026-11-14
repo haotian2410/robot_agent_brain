@@ -499,6 +499,7 @@ class AgentService:
                               "message": "pending composite step ledger"}}
         if chain is not None and getattr(request, "new_task", False):
             chain.state = type(chain.state).SUPERSEDED
+            session.last_recovery_evidence = None
             return request.command
         if chain is not None and chain.state.value in {"blocked_environment", "blocked_system", "blocked_reconciliation"}:
             return {"taskID": "pending", "sessionID": request.sessionID,
@@ -637,7 +638,8 @@ class AgentService:
                 effective_instruction=request.command,
                 assistant_final_text=str(result.get("reply") or ""),
                 final_outcome=outcome, final_error_code=error.get("code"),
-                final_stage="web.execute", child_request_ids=[str(x.get("request_id")) for x in (result.get("metrics") or {}).get("steps", []) if x.get("request_id")],
+                final_stage="web.execute", child_request_ids=[str(x.get("request_id")) for x in (result.get("metrics") or {}).get("steps", [])
+                                                               if x.get("request_id") and not x.get("reused")],
                 scene_before={"digest": scene_before_digest} if scene_before_digest else None,
                 scene_after={"digest": after} if after else None,
                 scene_commit_status="changed" if after != scene_before_digest else "unchanged",
@@ -818,14 +820,46 @@ class AgentService:
         side effects, not an undo.
         """
         from ..session.conversation_memory import StepLedgerEntry
+        all_steps = list(steps)
         results, records, trajs = [], [], []
+        prior_ledger = []
+        chain = getattr(session, "conversation_memory", None)
+        chain = chain.active_failure_chain if chain is not None else None
+        if getattr(session, "last_recovery_evidence", None) and chain is not None:
+            prior_ledger = [item.model_copy(deep=True) for item in chain.step_ledger
+                            if item.status in {"committed", "executed_confirmed"}]
+        # Only skip a prefix when the recovered decomposition explicitly
+        # reproduces the completed instructions.  If R returned only the
+        # remaining suffix, nothing is skipped; this avoids accidentally
+        # dropping a new task that happens to share an entity name.
+        skip_count = 0
+        if prior_ledger and len(all_steps) >= len(prior_ledger):
+            def norm(value):
+                return " ".join(str(value).split())
+            if all(norm(all_steps[index].instruction) == norm(item.instruction)
+                   for index, item in enumerate(prior_ledger)):
+                skip_count = len(prior_ledger)
+                records = [{"step": item.original_step_index, "kind": "reused",
+                            "instruction": item.instruction,
+                            "request_id": item.request_ids[-1] if item.request_ids else None,
+                            "outcome": "scene_updated" if item.status == "committed" else "plan_ready",
+                            "attempts": 0, "executed": item.status == "executed_confirmed",
+                            "verdict": "已完成（本轮不重放）", "commits": 0,
+                            "artifacts": [], "state": "completed", "reused": True}
+                           for item in prior_ledger]
+        if prior_ledger and skip_count != len(prior_ledger):
+            # R is required to return the complete repaired intent.  A suffix
+            # that cannot be matched to the completed prefix is ambiguous: do
+            # not risk replaying the old effects or guessing its step offset.
+            raise ValueError("failure_context_completed_steps_unmatched")
+        steps_to_run = all_steps[skip_count:]
         # Checkpoint the complete plan before the first child can commit a
         # scene or dispatch commands.  A crash between children therefore
         # leaves an inspectable ledger instead of an unexplained partial turn.
-        session.pending_step_ledger = [StepLedgerEntry(
+        session.pending_step_ledger = [item.model_copy(deep=True) for item in prior_ledger] + [StepLedgerEntry(
             step_id=f"step-{index}", original_step_index=index,
             instruction=step.instruction, status="planned")
-            for index, step in enumerate(steps, start=1)]
+            for index, step in enumerate(steps_to_run, start=skip_count + 1)]
         self.app._save_session(request.sessionID)
 
         def checkpoint_step(ledger, record, report, result, attempts, receipts):
@@ -841,12 +875,12 @@ class AgentService:
             ledger.receipts.extend(receipts)
             self.app._save_session(request.sessionID)
 
-        for index, step in enumerate(steps, start=1):
+        for index, step in enumerate(steps_to_run, start=skip_count + 1):
             ledger = session.pending_step_ledger[index - 1]
             ledger.status = "processing"
             ledger.task_revision += 1
             self.app._save_session(request.sessionID)
-            self.progress[identifier] = f"拆分执行 {index}/{len(steps)} · {step.instruction}"
+            self.progress[identifier] = f"拆分执行 {index}/{len(all_steps)} · {step.instruction}"
             receipts_before = len(platform.receipts)
             report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction)
             attempts = 1
@@ -854,7 +888,7 @@ class AgentService:
                    and (result.get("error") or {}).get("code") in self.RETRYABLE_EXECUTION_CODES
                    and self._retry_allowed(result)):
                 attempts += 1
-                self.progress[identifier] = f"拆分执行 {index}/{len(steps)} · 第 {attempts} 次尝试 · {step.instruction}"
+                self.progress[identifier] = f"拆分执行 {index}/{len(all_steps)} · 第 {attempts} 次尝试 · {step.instruction}"
                 report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction)
             trajs += step_trajs
             results.append(result)
@@ -874,7 +908,7 @@ class AgentService:
                 checkpoint_step(ledger, record, report, result, attempts, platform.receipts[receipts_before:])
                 records.append(record)
                 break
-            if record["outcome"] == "plan_ready" and index < len(steps):
+            if record["outcome"] == "plan_ready" and index < len(all_steps):
                 # An exported plan is a claim on the arm and on the scene version it
                 # was derived from; committing a later step would invalidate the export
                 # the user was shown without anything ever running it.  So the walk
@@ -885,7 +919,7 @@ class AgentService:
                 records.append(record)
                 break
             execution = result.get("execution") or {}
-            if index < len(steps) and record["outcome"] == "scene_updated" and result.get("executed") \
+            if index < len(all_steps) and record["outcome"] == "scene_updated" and result.get("executed") \
                     and not execution.get("moved_object_ids"):
                 # The next arm run rebuilds its simulator from the browser document, so a
                 # run that reported no executed pose would leave that step acting on a
@@ -895,7 +929,7 @@ class AgentService:
                 checkpoint_step(ledger, record, report, result, attempts, platform.receipts[receipts_before:])
                 records.append(record)
                 break
-            if index < len(steps) and result.get("executed") and execution.get("holding_object"):
+            if index < len(all_steps) and result.get("executed") and execution.get("holding_object"):
                 # A run that ends with the gripper occupied has no follow-up: the rebuild
                 # starts with empty fingers, so the held object would be in two places at
                 # once.  Single-step turns keep today's behavior; only the chain stops.
@@ -907,14 +941,14 @@ class AgentService:
             record["state"] = "completed"
             checkpoint_step(ledger, record, report, result, attempts, platform.receipts[receipts_before:])
             records.append(record)
-        for index in range(len(records) + 1, len(steps) + 1):
-            step = steps[index - 1]
+        for index in range(len(records) + 1, len(all_steps) + 1):
+            step = all_steps[index - 1]
             records.append({"step": index, "kind": step.kind.value, "instruction": step.instruction,
                             "state": "not_run", "verdict": "未执行", "attempts": 0,
                             "commits": 0, "executed": False})
             session.pending_step_ledger[index - 1].status = "not_run"
         self.app._save_session(request.sessionID)
-        result = self.composite_result(records, results, steps)
+        result = self.composite_result(records, results, all_steps)
         return result, trajs
 
     @staticmethod
@@ -951,9 +985,15 @@ class AgentService:
 
     def composite_result(self, records, results, steps):
         """Collapse the per-step envelopes into the one record the panel renders."""
-        result = dict(results[-1])
+        result = dict(results[-1]) if results else {
+            "outcome": "scene_updated", "executed": any(item.get("executed") for item in records),
+            "reply": "已完成步骤已确认，本轮没有需要重放的步骤。"
+        }
         outcome = next((state for state in self.COMPOSITE_PRIORITY
-                        if any(item["outcome"] == state for item in results)), "answered")
+                        if any(item["outcome"] == state for item in results)), None)
+        if outcome is None:
+            outcome = next((state for state in self.COMPOSITE_PRIORITY
+                            if any(item["outcome"] == state for item in records)), "answered")
         stopped = next((record for record in records if record["state"] == "stopped"), None)
         if stopped and stopped.get("stop_reason") == "plan_not_executed":
             outcome = "plan_ready"
