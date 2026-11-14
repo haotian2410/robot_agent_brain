@@ -27,7 +27,7 @@
 | M14 | `5e9113e` | 失败链续接复用已持久化的 source/actor 选择；当前 Scene 仍由 Grounder 重新校验 | 专项回归 |
 | M15 | `4190c4f` | 增加独立 failure_context.v1 Qwen HTTP 回归，验证 R 的独立 stage/schema | Qwen/失败上下文回归 |
 | M16 | `0fcf564` | 恢复复合任务跳过已完成前缀；只为未完成步骤创建新 child request，无法匹配时安全阻断 | 组合编排回归 |
-| M17 | 待提交（本地） | 恢复轮禁止在用户未请求时漂移到 original 场景；补 scope 回归 | failure-context/Web 回归 |
+| M17 | `a41d44c` | 恢复轮禁止在用户未请求时漂移到 original 场景；补 scope 回归 | failure-context/Web 回归 |
 
 ## 已验证
 
