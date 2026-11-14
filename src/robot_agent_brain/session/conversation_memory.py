@@ -158,8 +158,6 @@ class FailureChain(BaseModel):
     selection_decisions: list[SelectionDecision] = Field(default_factory=list)
     constraint_revision: int = 0
     lifecycle_revision: int = 0
-    scene_binding: dict[str, Any] | None = None
-    catalog_revision: str | None = None
     platform_signature: str | None = None
     config_fingerprint: str | None = None
 
