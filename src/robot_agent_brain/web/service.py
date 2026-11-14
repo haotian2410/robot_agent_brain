@@ -533,6 +533,19 @@ class AgentService:
             current_scene_context={"scene_digest": digest(session.scene) if session.scene else None},
             policy_summary=chain.policy_snapshot,
             allowed_recovery_actions=["continue_task", "revise_task", "new_task", "ask_user", "cancel_chain"])
+        # Never truncate a negation, unit, target or step ledger to fit a
+        # prompt budget.  Ask the user to simplify instead and leave the
+        # existing chain untouched; this is still one recovery attempt, not a
+        # provider call or an automatic retry loop.
+        serialized_payload = json.dumps(payload.model_dump(mode="json"), ensure_ascii=False,
+                                         separators=(",", ":"))
+        if len(serialized_payload) > self.config.conversation_recovery_max_input_chars:
+            chain.state = type(chain.state).WAITING_USER
+            return {"taskID": "pending", "sessionID": request.sessionID,
+                    "outcome": "clarification_required", "executed": False,
+                    "clarification_question": "补充信息过长，请保留对象、数量、方向和距离等关键条件后重新说明。",
+                    "reply": "恢复上下文超过安全预算，未截断关键条件；请简化补充说明后重试。",
+                    "error": {"code": "context_budget_exceeded", "message": "failure context input budget exceeded"}}
         chain_revision = chain.lifecycle_revision
         try:
             chain.state = type(chain.state).RESOLVING

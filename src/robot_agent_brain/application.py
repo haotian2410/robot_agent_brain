@@ -141,6 +141,8 @@ class BrainApplication:
             found = False
             if field == "color":
                 found = any(text(getattr(item, "color", None)) == wanted for item in entities)
+                found = found or any(text((getattr(op, "properties", {}) or {}).get("color")) == wanted
+                                     for op in operations)
             elif field == "quantity":
                 found = any(getattr(item, "count", None) == value for item in entities)
             elif field == "distance":
@@ -154,10 +156,12 @@ class BrainApplication:
                     found = any(text(getattr(item, "semantic_name", None)) == wanted
                                 or text(getattr(item, "entity_id", None)) == wanted for item in entities)
             elif field == "operation":
-                found = any(text(getattr(op, "task_type", None)) == wanted for op in operations)
+                found = any(text(getattr(op, "task_type", None)) == wanted
+                            or text(getattr(op, "operation", None)) == wanted for op in operations)
             elif field == "placement":
                 found = any(text(getattr(getattr(op, "placement_target", None), "kind", None)) == wanted
                             or text(getattr(getattr(op, "placement_target", None), "relation", None)) == wanted
+                            or text(getattr(op, "relation", None)) == wanted
                             for op in operations)
             if not found:
                 raise ValueError(f"failure_context_u_condition_lost:{field}")

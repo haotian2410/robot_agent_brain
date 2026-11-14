@@ -115,6 +115,7 @@ class BrainConfig(BaseModel):
     # opt-in at the ambiguity level and never changes execution authority.
     conversation_recovery_enabled: bool = True
     conversation_recovery_max_failed_user_turns: int = Field(default=5, ge=1, le=5)
+    conversation_recovery_max_input_chars: int = Field(default=48000, ge=4096, le=200000)
     prefer_auto_resolve: bool = False
 
     @model_validator(mode="after")

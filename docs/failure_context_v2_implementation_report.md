@@ -22,6 +22,7 @@
 | M9 | `8117210` | 分步副作用前持久化 pending ledger；持久化自动选择决策；增加 R→U scope/authority 护栏与证据摘要 | 专项回归 |
 | M10 | `c41753c` | 对外报告使用配置的失败链上限，避免展示与实际策略不一致 | 专项回归 |
 | M11 | `eac185a` | 在普通 U 副作用前核对 R 已接受字段，丢失条件时阻断；补回归测试 | 专项回归 |
+| M12 | 待提交（本地） | 恢复上下文超过预算时拒绝截断并要求用户简化；补配置上限 | Web/配置回归 |
 
 ## 已验证
 
@@ -53,6 +54,7 @@ pytest -q brain_tests/test_web_service.py
 - 复合任务在首个子步骤执行前写入 `pending_step_ledger`；最终外层轮次落档后才清理。重启发现未完成 ledger 时先进入恢复阻塞，不调用 R、不自动重放。
 - `SelectionDecision` 已进入 `BrainResult`、Web/CLI `ConversationTurn` 和 `FailureChain`；R 的 scope、authority 字段和用户证据经过独立 guard，恢复证据保存根指令/草稿/决策摘要。
 - R→U 条件核对已覆盖颜色、数量、距离、目标/参照、操作和放置字段；缺失时返回 `failure_context_u_condition_lost:*`，不会进入 SceneEditor、Grounder 或 Commands。
+- 恢复输入按配置字符预算检查；超限返回 `context_budget_exceeded`，不调用 R、不截断否定/单位/目标条件。
 - `prefer_auto_resolve=true` 只允许稳定 ID、非破坏性且非 destination/query 选择；默认值仍为 false。
 
 ## 环境与调用统计
