@@ -21,6 +21,7 @@ from .skill_planning import SkillPlanningRequest, SkillPlanLLMOutput
 from .task_understanding import (TaskUnderstandingRequest, parse_qwen_turn,
                                   task_understanding_v3_wire_schema)
 from .vision_grounding import VisionEntity, VisionGroundingOutput
+from .failure_context import FailureContextRequest, FailureContextDecision, failure_context_wire_schema
 
 
 class QwenProviderError(RuntimeError):
@@ -717,6 +718,22 @@ class QwenHTTPProvider:
                 "不要省略其他必填字段，不要解释文字，只返回 JSON。"
             )
             return self._call("task_understanding", repair_prompt, content, schema, parse)
+
+    def recover_failure(self, request: FailureContextRequest) -> FailureContextDecision:
+        """Run the isolated failure-context.v1 round.
+
+        It intentionally has a separate stage and prompt; normal task
+        understanding history is never appended to this request and the
+        result is still subject to ``RecoveryGuard`` before reattachment.
+        """
+        from importlib.resources import files
+        template = files("robot_agent_brain.models.prompt_templates").joinpath("failure_context_v1.txt")
+        prompt = template.read_text(encoding="utf-8")
+        content = json.dumps(request.model_dump(mode="json"), ensure_ascii=False, sort_keys=True)
+        return self._call("failure_context", prompt, content, failure_context_wire_schema(),
+                          FailureContextDecision.model_validate,
+                          max_completion_tokens=min(self.planner_max_completion_tokens, 1024),
+                          response_format="json_schema" if self.structured_output else "json_object")
 
     def _understanding_payload(self, request: TaskUnderstandingRequest) -> dict[str, Any]:
         """Serialize the complete first-stage request, not just user text."""
