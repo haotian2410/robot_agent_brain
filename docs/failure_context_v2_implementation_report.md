@@ -26,7 +26,7 @@
 | M13 | `69738fd` | 完整 pytest 复核；R→U 条件校验覆盖 Scene Edit 属性颜色/布局字段 | 全量基线仍 11 项 |
 | M14 | `5e9113e` | 失败链续接复用已持久化的 source/actor 选择；当前 Scene 仍由 Grounder 重新校验 | 专项回归 |
 | M15 | `4190c4f` | 增加独立 failure_context.v1 Qwen HTTP 回归，验证 R 的独立 stage/schema | Qwen/失败上下文回归 |
-| M16 | `0fcf564` | 恢复复合任务跳过已完成前缀；只为未完成步骤创建新 child request，无法匹配时安全阻断 | 组合编排回归 |
+| M16 | `0fcf564` | 恢复复合任务跳过已完成前缀；只为未完成步骤创建新 child request，无法匹配时安全阻断 | 组合编排回归；补充恢复前缀跳过单测 |
 | M17 | `a41d44c` | 恢复轮禁止在用户未请求时漂移到 original 场景；补 scope 回归 | failure-context/Web 回归 |
 
 ## 阶段证据明细
@@ -58,7 +58,7 @@ conda run --no-capture-output -n robot_agent_integ env PYTHONPATH=src \
   brain_tests/test_qwen_http.py
 ```
 
-结果：全部通过（当前组合 78 项；不包含真实服务调用）。
+结果：全部通过（当前组合 79 项；不包含真实服务调用）。
 
 ## 已验证
 
@@ -68,7 +68,7 @@ pytest -q brain_tests/test_qwen_http.py
 pytest -q brain_tests/test_session_store.py
 pytest -q brain_tests/test_web_protocol.py
 pytest -q brain_tests/test_web_service.py
-专项文件组合回归通过（composite orchestrator、failure-context、Qwen、session store、Web protocol/service）；当前组合共 78 项测试。
+专项文件组合回归通过（composite orchestrator、failure-context、Qwen、session store、Web protocol/service）；当前组合共 79 项测试。
 ```
 
 普通任务理解不会拼接 failure history；只有存在活动失败链的下一次外层用户轮次才会构造独立

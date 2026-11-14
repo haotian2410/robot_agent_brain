@@ -9,6 +9,9 @@ from robot_agent_brain.semantics.recovery_guard import validate_recovery_decisio
 from robot_agent_brain.application import BrainApplication
 from robot_agent_brain.contracts.turn import BrainTurn
 from robot_agent_brain.contracts.task_intent import TaskIntent, TaskEntity, Operation, TaskType
+from robot_agent_brain.session.conversation_memory import FailureChain, FailureChainState, StepLedgerEntry
+from robot_agent_brain.web.service import AgentService
+from types import SimpleNamespace
 
 
 def test_failure_context_schema_is_payload_free_for_ask_user():
@@ -110,3 +113,50 @@ def test_recovery_cannot_drift_to_original_scene_without_user_request():
     with pytest.raises(ValueError, match="scene_basis_drift"):
         validate_recovery_scope(decision, root_instruction="增加一个苹果",
                                 current_user_text="把它改成蓝色")
+
+
+def test_recovered_composite_skips_completed_prefix_and_runs_only_suffix():
+    """A recovered full decomposition must not replay already committed steps."""
+    class FakeService:
+        _run_steps = AgentService._run_steps
+        MAX_STEP_ATTEMPTS = 5
+        RETRYABLE_EXECUTION_CODES = set()
+        _retry_allowed = staticmethod(AgentService._retry_allowed)
+        verdict = staticmethod(AgentService.verdict)
+
+        def __init__(self):
+            self.progress = {}
+            self.calls = []
+            self.app = SimpleNamespace(_save_session=lambda _session_id: None)
+
+        def _run_step(self, session, platform, request, identifier, instruction):
+            self.calls.append(instruction)
+            return (SimpleNamespace(request_id="new-child"),
+                    {"outcome": "answered", "executed": False, "artifacts": []}, [])
+
+        def composite_result(self, records, results, steps):
+            return {"records": records, "results": results}
+
+    session = SimpleNamespace(
+        conversation_memory=SimpleNamespace(
+            active_failure_chain=FailureChain(
+                chain_id="c1", root_failure_turn_id="t1", root_instruction="两步任务",
+                state=FailureChainState.WAITING_USER,
+                step_ledger=[StepLedgerEntry(
+                    step_id="step-1", original_step_index=1,
+                    instruction="第一步", status="committed", request_ids=["old-child"])])),
+        last_recovery_evidence={"scope": "remaining_steps"},
+        pending_step_ledger=[],
+    )
+    request = SimpleNamespace(sessionID="s")
+    platform = SimpleNamespace(receipts=[])
+    steps = [SimpleNamespace(kind=SimpleNamespace(value="scene_edit"), instruction="第一步"),
+             SimpleNamespace(kind=SimpleNamespace(value="scene_query"), instruction="第二步")]
+
+    service = FakeService()
+    result, _ = service._run_steps(session, platform, request, "task-2", steps)
+
+    assert service.calls == ["第二步"]
+    assert result["records"][0]["reused"] is True
+    assert result["records"][0]["request_id"] == "old-child"
+    assert result["records"][1]["instruction"] == "第二步"
