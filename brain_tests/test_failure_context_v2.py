@@ -1,7 +1,7 @@
 import pytest
 
 from robot_agent_brain.models.failure_context import (
-    FailureContextDecision, FailureContextRequest,
+    FailureContextAmendment, FailureContextDecision, FailureContextRequest,
 )
 from robot_agent_brain.session.conversation_memory import ConversationMemory, ConversationTurn, SelectionDecision
 from robot_agent_brain.session.conversation_journal import ConversationJournal
@@ -9,7 +9,9 @@ from robot_agent_brain.semantics.recovery_guard import validate_recovery_decisio
 from robot_agent_brain.application import BrainApplication
 from robot_agent_brain.contracts.turn import BrainTurn
 from robot_agent_brain.contracts.task_intent import TaskIntent, TaskEntity, Operation, TaskType
-from robot_agent_brain.session.conversation_memory import FailureChain, FailureChainState, StepLedgerEntry
+from robot_agent_brain.session.conversation_memory import (
+    FailureChain, FailureChainState, StepLedgerEntry, SemanticDraft,
+)
 from robot_agent_brain.web.service import AgentService
 from types import SimpleNamespace
 
@@ -160,3 +162,35 @@ def test_recovered_composite_skips_completed_prefix_and_runs_only_suffix():
     assert result["records"][0]["reused"] is True
     assert result["records"][0]["request_id"] == "old-child"
     assert result["records"][1]["instruction"] == "第二步"
+
+
+def test_recovery_amendments_are_kept_in_semantic_draft_before_u():
+    class RecoveryProvider:
+        def recover_failure(self, payload):
+            return FailureContextDecision(
+                decision="revise_task", source_turn_id="t1",
+                resolved_instruction="把苹果改成蓝色并放进篮子",
+                amendments=[FailureContextAmendment(
+                    subject_role="apple", field="color", value="blue",
+                    evidence={"turn_id": "t2"})])
+
+    memory = ConversationMemory()
+    root = ConversationTurn(turn_id="t1", session_id="s", sequence=1,
+                            raw_user_text="把苹果放进篮子", final_outcome="clarification_required")
+    memory.begin_failure(root, draft=SemanticDraft(
+        source_request_id="t1", validity="partial_semantics", unresolved_slots=["color"]))
+    session = SimpleNamespace(conversation_memory=memory, last_recovery_evidence=None, scene=None)
+    service = object.__new__(AgentService)
+    service.config = SimpleNamespace(conversation_recovery_enabled=True,
+                                     conversation_recovery_max_failed_user_turns=5,
+                                     conversation_recovery_max_input_chars=48000)
+    service.app = SimpleNamespace(provider=RecoveryProvider())
+    request = SimpleNamespace(sessionID="s", clientRequestID="t2", command="改成蓝色")
+
+    assert service._maybe_recover(session, request) == "把苹果改成蓝色并放进篮子"
+    draft = memory.active_failure_chain.semantic_draft
+    assert draft.validity == "partial_semantics"
+    assert "color" in draft.known_fields
+    assert draft.canonical_turn["effective_instruction"] == "把苹果改成蓝色并放进篮子"
+    assert draft.field_provenance[0]["source_turn_id"] == "t2"
+    assert draft.execution_authority == "none"

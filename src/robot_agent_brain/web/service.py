@@ -585,6 +585,42 @@ class AgentService:
             chain.state = type(chain.state).SUPERSEDED
             return request.command
         chain.state = type(chain.state).WAITING_USER
+        # Keep the fields that R accepted in the durable semantic draft as
+        # evidence, but do not mark the draft executable.  The normal U round
+        # still has to validate the complete instruction before any editor,
+        # planner or execution side effect is allowed.
+        from ..session.conversation_memory import SemanticDraft
+        draft = chain.semantic_draft
+        if draft is None:
+            draft = SemanticDraft(source_request_id=chain.root_failure_turn_id,
+                                  validity="partial_semantics")
+        canonical = dict(draft.canonical_turn or {})
+        canonical["effective_instruction"] = decision.resolved_instruction
+        known_fields = list(draft.known_fields)
+        field_provenance = list(draft.field_provenance)
+        confirmed_bindings = list(draft.confirmed_bindings)
+        for amendment in decision.amendments:
+            field = amendment.field
+            if field not in known_fields:
+                known_fields.append(field)
+            provenance = {
+                "field": field,
+                "value": amendment.value,
+                "source_turn_id": amendment.evidence.get("turn_id", request.clientRequestID),
+                "evidence": dict(amendment.evidence),
+            }
+            field_provenance.append(provenance)
+            if field in {"selection", "target", "reference"}:
+                confirmed_bindings.append({"field": field, "value": amendment.value,
+                                           "source_turn_id": provenance["source_turn_id"]})
+        chain.semantic_draft = draft.model_copy(update={
+            "validity": "partial_semantics",
+            "canonical_turn": canonical,
+            "known_fields": known_fields,
+            "confirmed_bindings": confirmed_bindings,
+            "field_provenance": field_provenance,
+            "execution_authority": "none",
+        })
         session.last_recovery_evidence = {
             "raw_current_user_text": request.command,
             "source_turn_ids": [item.turn_id for item in memory.recent_turns],

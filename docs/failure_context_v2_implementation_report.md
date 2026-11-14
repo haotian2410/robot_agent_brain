@@ -28,6 +28,7 @@
 | M15 | `4190c4f` | 增加独立 failure_context.v1 Qwen HTTP 回归，验证 R 的独立 stage/schema | Qwen/失败上下文回归 |
 | M16 | `0fcf564` | 恢复复合任务跳过已完成前缀；只为未完成步骤创建新 child request，无法匹配时安全阻断 | 组合编排回归；补充恢复前缀跳过单测 |
 | M17 | `a41d44c` | 恢复轮禁止在用户未请求时漂移到 original 场景；补 scope 回归 | failure-context/Web 回归 |
+| M18 | 工作区当前提交 | 将 R 接受的修订字段同步写入 `SemanticDraft`，保留字段来源且继续保持 `execution_authority=none`；补恢复草稿回归 | failure-context 专项回归 |
 
 ## 阶段证据明细
 
@@ -43,7 +44,7 @@
 | M5 | `web/service.py` | 外层任务完成后再终结用户轮次；R 结果先过 guard 再进入 U/接地/执行 | `test_web_service.py` 通过 | Mock R 按需调用 | unknown/lease 断线实证未跑 |
 | M6 | `brain_tests/test_failure_context_v2.py` | 固定根轮、五轮上限、payload 禁止、晚到修订和完成事实保护 | 专项测试通过 | 0 | FR09–FR18 未全部映射执行 |
 | M7 | `application.py`、`pipeline.py`、`session/conversation_journal.py`、`grounding/scene_grounder.py` 等 | 保留原子规划/OLS；记录 child request、选择决策和最终事实 | 组合专项回归通过 | replay/mock | 全量旧 fixture 仍有基线失败 |
-| M8–M17 | `web/service.py`、`session/store.py`、`semantics/recovery_guard.py`、相关测试/文档 | 控制重试安全、pending ledger、R→U 字段核对、预算保护、选择复用、复合前缀防重放、scene basis 防漂移 | 组合专项回归通过 | replay/mock | 真实 Qwen、Control、FR01–FR69 未执行 |
+| M8–M18 | `web/service.py`、`session/store.py`、`semantics/recovery_guard.py`、相关测试/文档 | 控制重试安全、pending ledger、R→U 字段核对、预算保护、选择复用、复合前缀防重放、scene basis 防漂移、SemanticDraft 修订证据 | 组合专项回归通过 | replay/mock | 真实 Qwen、Control、FR01–FR69 未执行 |
 
 专项组合命令：
 
@@ -58,7 +59,7 @@ conda run --no-capture-output -n robot_agent_integ env PYTHONPATH=src \
   brain_tests/test_qwen_http.py
 ```
 
-结果：全部通过（当前组合 79 项；不包含真实服务调用）。
+结果：全部通过（当前组合 80 项；不包含真实服务调用）。
 
 ## 已验证
 
@@ -68,7 +69,7 @@ pytest -q brain_tests/test_qwen_http.py
 pytest -q brain_tests/test_session_store.py
 pytest -q brain_tests/test_web_protocol.py
 pytest -q brain_tests/test_web_service.py
-专项文件组合回归通过（composite orchestrator、failure-context、Qwen、session store、Web protocol/service）；当前组合共 79 项测试。
+专项文件组合回归通过（composite orchestrator、failure-context、Qwen、session store、Web protocol/service）；当前组合共 80 项测试。
 ```
 
 普通任务理解不会拼接 failure history；只有存在活动失败链的下一次外层用户轮次才会构造独立
