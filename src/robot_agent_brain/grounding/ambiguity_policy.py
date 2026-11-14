@@ -26,6 +26,8 @@ class AmbiguityPolicy:
                explicit: Any | None = None, destructive: bool = False,
                destination: bool = False, query: bool = False,
                evidence: dict[str, Any] | None = None) -> SelectionDecision:
+        evidence = evidence or {}
+        color_evidence_status = evidence.get("color_evidence_status", "not_applicable")
         if explicit is not None:
             for item in candidates:
                 if item == explicit or getattr(item, "object_id_in_scene", None) == explicit:
@@ -39,6 +41,7 @@ class AmbiguityPolicy:
             # Auto resolve is deliberately narrow: it never picks a destination,
             # destructive target, query member, or anything without a stable key.
             if not (self.prefer_auto_resolve and not (destructive or destination or query)
+                    and color_evidence_status != "unverifiable_fallback"
                     and len(ids) > 0 and all(isinstance(i, int) for i in ids)):
                 raise AmbiguityRequiresClarification("grounding_ambiguous")
             index = int(hashlib.sha256(self.decision_key(session_id, logical_task_id, step_id, role, revision, scene_digest).encode()).hexdigest(), 16) % len(ids)
@@ -50,4 +53,7 @@ class AmbiguityPolicy:
             raise AmbiguityRequiresClarification("grounding_missing")
         return SelectionDecision(entity_role=role, chosen_ids=[chosen], candidate_ids=ids,
                                  decision_key=self.decision_key(session_id, logical_task_id, step_id, role, revision, scene_digest),
-                                 policy="auto" if policy != "ask" else "ask")
+                                 policy="auto" if policy != "ask" else "ask",
+                                 color_evidence_status=color_evidence_status,
+                                 color_verified=(color_evidence_status == "verified")
+                                 if color_evidence_status != "not_applicable" else None)

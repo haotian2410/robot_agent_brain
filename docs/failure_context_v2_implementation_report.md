@@ -32,6 +32,7 @@
 | M19 | 工作区当前提交 | 耗尽失败链在状态门控前显式返回 `conversation_recovery_exhausted`，防止裸补充误落入新任务路径；补 FR01/FR18 关键门控回归 | failure-context/Web 专项回归 |
 | M20 | 工作区当前提交 | 补二值歧义策略回归：默认询问、source/actor 可复现自动选择、destination/破坏性目标禁止自动选择、显式 ID 不得改选 | failure-context/grounding 专项回归 |
 | M21 | 工作区当前提交 | unknown lease/transaction 不再记录为 `none_confirmed` 或 `not_started`；改为 `EffectEvidence` 的 `unknown` 并进入 reconciliation 阻断 | Web recovery 专项回归 |
+| M22 | 工作区当前提交 | 颜色证据不可验证时禁止 `prefer_auto_resolve` 随机选择；有可靠颜色证据时保留可复现 source/actor 选择 | grounding/failure-context 专项回归 |
 
 ## 阶段证据明细
 
@@ -47,7 +48,7 @@
 | M5 | `web/service.py` | 外层任务完成后再终结用户轮次；R 结果先过 guard 再进入 U/接地/执行 | `test_web_service.py` 通过 | Mock R 按需调用 | unknown/lease 断线实证未跑 |
 | M6 | `brain_tests/test_failure_context_v2.py` | 固定根轮、五轮上限、payload 禁止、晚到修订和完成事实保护 | 专项测试通过 | 0 | FR09–FR18 未全部映射执行 |
 | M7 | `application.py`、`pipeline.py`、`session/conversation_journal.py`、`grounding/scene_grounder.py` 等 | 保留原子规划/OLS；记录 child request、选择决策和最终事实 | 组合专项回归通过 | replay/mock | 全量旧 fixture 仍有基线失败 |
-| M8–M21 | `web/service.py`、`session/store.py`、`semantics/recovery_guard.py`、`grounding/ambiguity_policy.py`、相关测试/文档 | 控制重试安全、pending ledger、R→U 字段核对、预算保护、选择复用、复合前缀防重放、scene basis 防漂移、SemanticDraft 修订证据、耗尽链显式阻断、二值歧义策略门控、unknown 效果证据保护 | 组合专项回归通过 | replay/mock | 真实 Qwen、Control、FR01–FR69 未执行 |
+| M8–M22 | `web/service.py`、`session/store.py`、`semantics/recovery_guard.py`、`grounding/ambiguity_policy.py`、`grounding/scene_grounder.py`、相关测试/文档 | 控制重试安全、pending ledger、R→U 字段核对、预算保护、选择复用、复合前缀防重放、scene basis 防漂移、SemanticDraft 修订证据、耗尽链显式阻断、二值歧义策略门控、unknown 效果证据保护、颜色证据门控 | 组合专项回归通过 | replay/mock | 真实 Qwen、Control、FR01–FR69 未执行 |
 
 专项组合命令：
 

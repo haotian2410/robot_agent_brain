@@ -55,6 +55,22 @@ class SceneGrounder:
                 if prefer_auto_resolve:
                     from .ambiguity_policy import AmbiguityPolicy, AmbiguityRequiresClarification
                     from ..web.protocol import digest
+                    color_evidence_status = "not_applicable"
+                    requested_colors = []
+                    if entity.color:
+                        requested_colors.append(entity.color)
+                    if entity.tags:
+                        from ..scene.colors import PALETTE, color_name
+                        requested_colors.extend(tag for tag in entity.tags
+                                                if color_name(tag) in PALETTE)
+                    if requested_colors:
+                        from ..scene.colors import ColorEvidenceResolver
+                        evidence_resolver = ColorEvidenceResolver(self.assets)
+                        color_values = [evidence_resolver.matches(value, item, SceneIndex(scene))
+                                        for item in candidates for value in requested_colors]
+                        color_evidence_status = (
+                            "verified" if any(value is not None for value in color_values)
+                            else "unverifiable_fallback")
                     destructive = any(getattr(getattr(op, "task_type", None), "value", getattr(op, "task_type", None)) in {"remove", "replace"} and op.target == entity.entity_id
                                       for op in intent.operations)
                     destination = any(op.destination == entity.entity_id or op.reference == entity.entity_id
@@ -64,7 +80,7 @@ class SceneGrounder:
                             candidates, session_id=logical_task_id or "session", logical_task_id=logical_task_id or intent.instruction,
                             step_id=step_id, role=entity.entity_id, revision=scene.scene_version,
                             scene_digest=digest(scene), destructive=destructive, destination=destination,
-                            query=False)
+                            query=False, evidence={"color_evidence_status": color_evidence_status})
                         candidates = [next(item for item in candidates if item.object_id_in_scene == decision.chosen_ids[0])]
                         self.last_selection_decisions.append(decision.model_dump(mode="json"))
                     except AmbiguityRequiresClarification:

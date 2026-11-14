@@ -255,6 +255,12 @@ def test_ambiguity_policy_defaults_to_question_and_auto_resolve_is_narrow():
         policy.choose(candidates, **common, destination=True)
     with pytest.raises(AmbiguityRequiresClarification):
         policy.choose(candidates, **common, destructive=True)
+    with pytest.raises(AmbiguityRequiresClarification):
+        policy.choose(candidates, **common,
+                      evidence={"color_evidence_status": "unverifiable_fallback"})
+    verified = policy.choose(candidates, **common,
+                             evidence={"color_evidence_status": "verified"})
+    assert verified.color_evidence_status == "verified"
 
 
 def test_ambiguity_policy_never_overrides_explicit_id():
