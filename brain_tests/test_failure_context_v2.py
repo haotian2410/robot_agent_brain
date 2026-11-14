@@ -13,6 +13,7 @@ from robot_agent_brain.session.conversation_memory import (
     FailureChain, FailureChainState, StepLedgerEntry, SemanticDraft,
 )
 from robot_agent_brain.web.service import AgentService
+from robot_agent_brain.grounding.ambiguity_policy import AmbiguityPolicy, AmbiguityRequiresClarification
 from types import SimpleNamespace
 
 
@@ -235,3 +236,29 @@ def test_exhausted_failure_chain_does_not_start_a_new_recovery_round():
     result = service._maybe_recover(session, request)
     assert result["outcome"] == "failed"
     assert result["error"]["code"] == "conversation_recovery_exhausted"
+
+
+def test_ambiguity_policy_defaults_to_question_and_auto_resolve_is_narrow():
+    candidates = [11, 17]
+    common = dict(session_id="s", logical_task_id="task", step_id="step-1",
+                  role="apple", revision=1, scene_digest="scene")
+    with pytest.raises(AmbiguityRequiresClarification):
+        AmbiguityPolicy().choose(candidates, **common)
+
+    policy = AmbiguityPolicy(prefer_auto_resolve=True)
+    first = policy.choose(candidates, **common)
+    second = policy.choose(list(reversed(candidates)), **common)
+    assert first.chosen_ids == second.chosen_ids
+    assert first.candidate_ids == [11, 17]
+
+    with pytest.raises(AmbiguityRequiresClarification):
+        policy.choose(candidates, **common, destination=True)
+    with pytest.raises(AmbiguityRequiresClarification):
+        policy.choose(candidates, **common, destructive=True)
+
+
+def test_ambiguity_policy_never_overrides_explicit_id():
+    decision = AmbiguityPolicy(prefer_auto_resolve=True).choose(
+        [11, 17], session_id="s", logical_task_id="task", step_id="step-1",
+        role="apple", revision=1, scene_digest="scene", explicit=17)
+    assert decision.chosen_ids == [17]
