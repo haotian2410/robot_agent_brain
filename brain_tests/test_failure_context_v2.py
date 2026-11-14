@@ -6,6 +6,9 @@ from robot_agent_brain.models.failure_context import (
 from robot_agent_brain.session.conversation_memory import ConversationMemory, ConversationTurn, SelectionDecision
 from robot_agent_brain.session.conversation_journal import ConversationJournal
 from robot_agent_brain.semantics.recovery_guard import validate_recovery_decision, validate_recovery_scope
+from robot_agent_brain.application import BrainApplication
+from robot_agent_brain.contracts.turn import BrainTurn
+from robot_agent_brain.contracts.task_intent import TaskIntent, TaskEntity, Operation, TaskType
 
 
 def test_failure_context_schema_is_payload_free_for_ask_user():
@@ -85,3 +88,17 @@ def test_recovery_scope_rejects_authority_amendments():
                                       resolved_instruction="换成另一个目标", scope="new_task")
     with pytest.raises(ValueError, match="scope_new_task_mismatch"):
         validate_recovery_scope(decision, root_instruction="把苹果放进篮子")
+
+
+def test_u_payload_that_drops_recovery_color_is_rejected_before_side_effects():
+    turn = BrainTurn(status="accepted", turn_kind="robot_task", instruction="把苹果放进篮子",
+                     task_intent=TaskIntent(instruction="把苹果放进篮子", entities=[
+                         TaskEntity(entity_id="apple", semantic_name="apple", category="fruit"),
+                         TaskEntity(entity_id="basket", semantic_name="basket", category="container")],
+                         operations=[Operation(operation_id="op-1", task_type=TaskType.PICK_AND_PLACE,
+                                               source="apple", destination="basket",
+                                               placement_target={"kind": "container_interior", "reference": "basket"})]))
+    with pytest.raises(ValueError, match="u_condition_lost:color"):
+        BrainApplication._validate_recovery_u_conditions(turn, {
+            "accepted_amendments": [{"field": "color", "value": "blue"}]
+        })

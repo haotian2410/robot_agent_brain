@@ -118,6 +118,50 @@ class BrainApplication:
         self.revisions = {}
         self.platform_factory = platform_factory
 
+    @staticmethod
+    def _validate_recovery_u_conditions(turn, evidence):
+        """Ensure ordinary U did not silently drop R's accepted fields."""
+        amendments = (evidence or {}).get("accepted_amendments") or []
+        if not amendments:
+            return
+        operations = []
+        entities = []
+        if getattr(turn, "task_intent", None) is not None:
+            operations = list(turn.task_intent.operations)
+            entities = list(turn.task_intent.entities)
+        scene_edit = getattr(turn, "scene_edit", None)
+        if scene_edit is not None:
+            operations = list(scene_edit.operations)
+            entities = list(scene_edit.entities)
+        def text(value):
+            return str(value).strip().lower() if value is not None else ""
+        for amendment in amendments:
+            field, value = text(amendment.get("field")), amendment.get("value")
+            wanted = text(value)
+            found = False
+            if field == "color":
+                found = any(text(getattr(item, "color", None)) == wanted for item in entities)
+            elif field == "quantity":
+                found = any(getattr(item, "count", None) == value for item in entities)
+            elif field == "distance":
+                found = any(getattr(item, "distance_m", None) is not None
+                            and abs(float(item.distance_m) - float(value)) <= 1e-9 for item in operations)
+            elif field in {"target", "reference", "selection"}:
+                found = any(wanted in {text(getattr(op, "target", None)), text(getattr(op, "source", None)),
+                                       text(getattr(op, "destination", None)), text(getattr(op, "reference", None))}
+                            for op in operations)
+                if not found and field == "selection":
+                    found = any(text(getattr(item, "semantic_name", None)) == wanted
+                                or text(getattr(item, "entity_id", None)) == wanted for item in entities)
+            elif field == "operation":
+                found = any(text(getattr(op, "task_type", None)) == wanted for op in operations)
+            elif field == "placement":
+                found = any(text(getattr(getattr(op, "placement_target", None), "kind", None)) == wanted
+                            or text(getattr(getattr(op, "placement_target", None), "relation", None)) == wanted
+                            for op in operations)
+            if not found:
+                raise ValueError(f"failure_context_u_condition_lost:{field}")
+
     def refresh_assets(self) -> bool:
         """Reload a changed OLS catalog without rebuilding sessions.
 
@@ -595,6 +639,8 @@ class BrainApplication:
                              or any(op.arm in {"left", "right"} or op.parallel_group is not None
                                     for op in turn.task_intent.operations))):
                     raise ValueError("control_dual_arm_not_ready")
+                if session.last_recovery_evidence is not None:
+                    self._validate_recovery_u_conditions(turn, session.last_recovery_evidence)
                 session.check_turn(turn)
                 if pending_import is not None:
                     self._load_scene_object(session_id, pending_import)
