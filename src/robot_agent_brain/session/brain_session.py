@@ -3,6 +3,7 @@ from ..contracts.commands import ExecutionFeedback, canonical_commands
 from ..contracts.scene import SceneConfig
 from ..scene.scene_manager import SceneManager
 from .dialogue_state import DialogueState
+from .conversation_memory import ConversationMemory
 from ..errors import SceneCommitRejected
 
 class BrainSession:
@@ -23,6 +24,7 @@ class BrainSession:
         from ..scene.component_reference_registry import ComponentReferenceRegistry
         self.reference_registry = reference_registry or ComponentReferenceRegistry()
         self.dialogue = DialogueState()
+        self.conversation_memory = ConversationMemory()
         self.session_action = None
         self.sync_state = "synchronized"
         self.session_phase = "setup"

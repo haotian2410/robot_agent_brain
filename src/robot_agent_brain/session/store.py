@@ -16,6 +16,7 @@ from ..contracts.scene import SceneConfig, SceneId
 from ..scene.scene_manager import SceneManager
 from .dialogue_state import DialogueState
 from .original_scene_store import OriginalSceneManifest, OriginalSceneStore
+from .conversation_memory import ConversationMemory
 
 
 class SessionState(BaseModel):
@@ -55,6 +56,7 @@ class SessionState(BaseModel):
     pending_execution_request: str | None = None
     last_feedback_source: Literal["external", "simulated"] | None = None
     recovery_context: ExecutionRecoveryContext | None = None
+    conversation_memory: ConversationMemory = Field(default_factory=ConversationMemory)
 
     @field_validator("profile_object_map", mode="before")
     @classmethod
@@ -196,6 +198,7 @@ class SessionStore:
             stale_commands=getattr(session, "stale_commands", {}),
             pending_commands=session.pending_commands, pending_execution_request=session.pending_execution_request,
             last_feedback_source=getattr(session, "last_feedback_source", None), recovery_context=session.recovery_context)
+        state.conversation_memory = session.conversation_memory.model_copy(deep=True)
         parent = self.directory(session_id)
         fd, temporary = tempfile.mkstemp(prefix=".state-", dir=parent)
         try:
@@ -247,7 +250,7 @@ class SessionStore:
                      "platform_rebind_revision", "robot_asset", "gripper_asset", "camera_asset", "execution_capability", "last_exported_request",
                      "exported_commands", "dispatched_requests", "pending_commands", "pending_execution_request",
                      "stale_commands",
-                     "last_feedback_source", "recovery_context"):
+                     "last_feedback_source", "recovery_context", "conversation_memory"):
             setattr(session, name, getattr(state.model_copy(deep=True), name))
         for name in ("robot_setup", "robot_setup_revision", "arm_states", "original_scene_manifest", "platform_object_ids", "profile_object_map"):
             setattr(session, name, getattr(state.model_copy(deep=True), name))
