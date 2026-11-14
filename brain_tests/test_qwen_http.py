@@ -3,6 +3,7 @@ import httpx
 import pytest
 from robot_agent_brain.models.qwen_http import QwenHTTPProvider, QwenProviderError
 from robot_agent_brain.models.task_understanding import TaskUnderstandingRequest
+from robot_agent_brain.models.failure_context import FailureContextRequest
 
 
 PAUSE = {"status":"accepted", "turn_kind":"session_control", "session_control":{"action":"pause"}}
@@ -83,6 +84,26 @@ def test_application_records_only_current_round(tmp_path):
     assert len(provider.calls) == 2
     assert len(first.metrics["model_calls"]) == len(second.metrics["model_calls"]) == 1
     assert first.metrics["model_calls"][0]["request_id"] != second.metrics["model_calls"][0]["request_id"]
+
+
+def test_failure_context_is_a_separate_read_only_round():
+    requests = []
+    raw = {"protocol_version": "failure_context.v1", "decision": "ask_user",
+           "source_turn_id": "t1", "scope": "failed_step",
+           "question": "请说明参照物。", "target_step_id": None,
+           "resolved_instruction": None, "amendments": [], "rationale": None}
+    def handler(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json=response(raw=json.dumps(raw)))
+    provider = QwenHTTPProvider("http://example/v1", "qwen-test",
+                                transport=httpx.MockTransport(handler))
+    decision = provider.recover_failure(FailureContextRequest(
+        current_user_text="在左边", root_failure_turn_id="t1"))
+    assert decision.decision == "ask_user"
+    assert provider.calls[0]["stage"] == "failure_context"
+    assert len(requests) == 1
+    schema = requests[0]["response_format"]["json_schema"]["schema"]
+    assert set(schema["properties"]) >= {"decision", "source_turn_id", "resolved_instruction", "amendments"}
 
 
 def _task_payload(**updates):

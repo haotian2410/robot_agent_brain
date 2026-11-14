@@ -25,6 +25,7 @@
 | M12 | `e66b2b2` | 恢复上下文超过预算时拒绝截断并要求用户简化；补配置上限 | Web/配置回归 |
 | M13 | `69738fd` | 完整 pytest 复核；R→U 条件校验覆盖 Scene Edit 属性颜色/布局字段 | 全量基线仍 11 项 |
 | M14 | 待提交（本地） | 失败链续接复用已持久化的 source/actor 选择；当前 Scene 仍由 Grounder 重新校验 | 专项回归 |
+| M15 | 待提交（本地） | 增加独立 failure_context.v1 Qwen HTTP 回归，验证 R 的独立 stage/schema | Qwen/失败上下文回归 |
 
 ## 已验证
 
