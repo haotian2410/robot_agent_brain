@@ -26,7 +26,7 @@
 | M13 | `69738fd` | 完整 pytest 复核；R→U 条件校验覆盖 Scene Edit 属性颜色/布局字段 | 全量基线仍 11 项 |
 | M14 | `5e9113e` | 失败链续接复用已持久化的 source/actor 选择；当前 Scene 仍由 Grounder 重新校验 | 专项回归 |
 | M15 | `4190c4f` | 增加独立 failure_context.v1 Qwen HTTP 回归，验证 R 的独立 stage/schema | Qwen/失败上下文回归 |
-| M16 | 待提交（本地） | 恢复复合任务跳过已完成前缀；只为未完成步骤创建新 child request，无法匹配时安全阻断 | 组合编排回归 |
+| M16 | `0fcf564` | 恢复复合任务跳过已完成前缀；只为未完成步骤创建新 child request，无法匹配时安全阻断 | 组合编排回归 |
 
 ## 已验证
 
