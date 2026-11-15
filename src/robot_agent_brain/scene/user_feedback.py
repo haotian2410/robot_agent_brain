@@ -39,10 +39,68 @@ def explain_issue(issue, exc, scene, assets):
             "请明确选择：" + "、".join(names) + "；不会自动将盒子替换成篮子或糖盒。" if names else "请提供库中已有的具体模型名称。")
     elif code.startswith(("grounding_ambiguous", "grounding_binding_invalid", "query_reference_ambiguous", "dialogue_")):
         candidates = getattr(exc, "candidates", [])
-        choices = "、".join(f"{o.object_name_in_scene}（#{o.object_id_in_scene}）" for o in candidates)
+        try:
+            from ..scene.component_access import SceneIndex
+            candidate_index = SceneIndex(scene)
+        except Exception:
+            candidate_index = None
+        def candidate_name(item):
+            name = str(item.object_name_in_scene or "").strip()
+            if not name or name.casefold() in {"not a semantic identifier", "object"}:
+                try:
+                    semantic = candidate_index.semantic(item.object_id_in_scene) if candidate_index else None
+                    name = str(semantic.semantic_name or "").strip() if semantic else name
+                except Exception:
+                    pass
+            return name or "对象"
+        choices = "、".join(f"{candidate_name(o)}（#{o.object_id_in_scene}）" for o in candidates)
+        # Keep machine-readable candidate evidence with the result.  The UI only
+        # needs clarification_question, while an object picker/diagnostic view
+        # can use these stable IDs and positions without re-running grounding.
+        if candidates:
+            try:
+                from ..scene.scene_graph import world_transform
+                candidate_ids = [item.object_id_in_scene for item in candidates]
+                issue.details["candidate_ids"] = candidate_ids
+                issue.details["candidate_descriptions"] = [
+                    {
+                        "id": item.object_id_in_scene,
+                        "name": candidate_name(item),
+                        "position": {
+                            "x": float(world_transform(scene, item.object_id_in_scene).position[0]),
+                            "y": float(world_transform(scene, item.object_id_in_scene).position[1]),
+                            "z": float(world_transform(scene, item.object_id_in_scene).position[2]),
+                        },
+                    }
+                    for item in candidates
+                ]
+            except Exception:
+                # Feedback must never turn a safe clarification into an internal
+                # error merely because optional pose evidence is unavailable.
+                issue.details["candidate_ids"] = [item.object_id_in_scene for item in candidates]
         if not choices and code == "query_reference_ambiguous" and "候选：" in original:
             choices = original.split("候选：", 1)[1]
-        question = "无法唯一确定你指的是哪个物体。" + ("当前候选：" + choices + "。" if choices else "") + "请补充颜色、方位或实例编号；已删除对象不能继续作为指代。"
+        reason = getattr(exc, "reason", "")
+        if reason:
+            issue.details["grounding_reason"] = reason
+        if reason.endswith("_tie"):
+            relation_label = {
+                "leftmost_tie": "左右位置相同",
+                "rightmost_tie": "左右位置相同",
+                "frontmost_tie": "前后位置相同",
+                "backmost_tie": "前后位置相同",
+                "highest_tie": "高度相同",
+                "lowest_tie": "高度相同",
+                "nearest_tie": "距离相同",
+                "farthest_tie": "距离相同",
+            }.get(reason, "比较结果相同")
+            question = f"当前候选的{relation_label}，无法唯一选择。"
+        elif reason == "vision_ambiguous":
+            question = "视觉检测到了多个候选，但无法把它们唯一对应到场景对象。"
+        else:
+            question = "无法唯一确定你指的是哪个物体。"
+        question += ("当前候选：" + choices + "。" if choices else "")
+        question += "请补充颜色、比较级方位（如最左边/最右边）、位置或实例编号；已删除对象不能继续作为指代。"
     elif code.startswith("grounding_missing"):
         original_detail = original.split(":", 1)[-1].strip()
         if original_detail.startswith("insufficient members for "):

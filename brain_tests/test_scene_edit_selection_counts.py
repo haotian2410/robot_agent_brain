@@ -13,6 +13,7 @@ from robot_agent_brain.scene.scene_manager import SceneManager
 from robot_agent_brain.models.qwen_http import (
     _repair_live_explicit_instance_delete,
     _repair_live_scene_edit_quantity,
+    _normalize_recovery_comparative_selection,
 )
 from robot_agent_brain.models.task_understanding import parse_qwen_turn
 from test_query_scene_continuity import supported_scene
@@ -173,6 +174,27 @@ def test_explicit_scene_object_id_filters_semantic_candidates():
         SceneObjectSelector(assets=BrainConfig().load_assets()).resolve(
             "target", [apples(ids=[2])], [], scene
         )
+
+
+def test_recovery_left_phrase_becomes_leftmost_without_changing_robot_payload():
+    payload = {
+        "status": "accepted", "turn_kind": "robot_task",
+        "entities": [{"entity_id": "apple", "semantic_name": "apple", "category": "fruit"}],
+        "operations": [{"operation_id": "op-1", "task_type": "pick_and_place",
+                         "source": "apple", "destination": "tray"}],
+        "relations": [{"scope": "selection", "subject": "apple",
+                       "relation": "left", "reference": "table"}],
+    }
+    normalized = _normalize_recovery_comparative_selection(payload, "左边的")
+    assert normalized["operations"] == payload["operations"]
+    assert normalized["relations"] == [{"scope": "selection", "subject": "apple",
+                                         "relation": "leftmost", "reference": None}]
+
+
+def test_recovery_layout_phrase_is_not_rewritten_as_selection():
+    payload = {"status": "accepted", "turn_kind": "scene_edit",
+               "scene_edit": {"operations": [{"operation": "add"}]}}
+    assert _normalize_recovery_comparative_selection(payload, "在桌面左侧增加苹果") == payload
 
 
 def test_a_pronoun_with_no_description_trusts_the_previous_turn_binding():

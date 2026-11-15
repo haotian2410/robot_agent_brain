@@ -8,9 +8,10 @@ from .scene_relation_resolver import SceneRelationResolver
 from .semantic_entity_selector import SemanticEntitySelector, discover_candidates
 
 class GroundingAmbiguous(ValueError):
-    def __init__(self, entity, candidates):
-        self.entity, self.candidates = entity, candidates
-        super().__init__(f"grounding_ambiguous: entity={entity.entity_id} candidates={[o.object_id_in_scene for o in candidates]}")
+    def __init__(self, entity, candidates, *, reason="multiple_candidates"):
+        self.entity, self.candidates, self.reason = entity, candidates, reason
+        super().__init__(f"grounding_ambiguous: entity={entity.entity_id} candidates="
+                         f"{[o.object_id_in_scene for o in candidates]} reason={reason}")
 
 class SceneGrounder:
     def __init__(self, relation_resolver=None, *, aliases=None, category_aliases=None, assets=None,
@@ -45,6 +46,9 @@ class SceneGrounder:
                                          allow_description_fallback=True)
             if not candidates:
                 raise ValueError("grounding_missing: " + entity_id)
+            selection_relations = [relation for relation in intent.spatial_relations
+                                   if relation.scope == "selection" and relation.subject == entity.entity_id]
+            has_selection_constraint = bool(selection_relations)
             if entity.quantity_mode == QuantityMode.ALL:
                 count = len(candidates) if entity.all_available else entity.count
                 if len(candidates) < count:
@@ -52,41 +56,22 @@ class SceneGrounder:
                 if len(candidates) > count:
                     raise GroundingAmbiguous(entity, candidates)
             elif len(candidates) != 1:
-                if prefer_auto_resolve:
-                    from .ambiguity_policy import AmbiguityPolicy, AmbiguityRequiresClarification
-                    from ..web.protocol import digest
-                    color_evidence_status = "not_applicable"
-                    requested_colors = []
-                    if entity.color:
-                        requested_colors.append(entity.color)
-                    if entity.tags:
-                        from ..scene.colors import PALETTE, color_name
-                        requested_colors.extend(tag for tag in entity.tags
-                                                if color_name(tag) in PALETTE)
-                    if requested_colors:
-                        from ..scene.colors import ColorEvidenceResolver
-                        evidence_resolver = ColorEvidenceResolver(self.assets)
-                        color_values = [evidence_resolver.matches(value, item, SceneIndex(scene))
-                                        for item in candidates for value in requested_colors]
-                        color_evidence_status = (
-                            "verified" if any(value is not None for value in color_values)
-                            else "unverifiable_fallback")
-                    destructive = any(getattr(getattr(op, "task_type", None), "value", getattr(op, "task_type", None)) in {"remove", "replace"} and op.target == entity.entity_id
-                                      for op in intent.operations)
-                    destination = any(op.destination == entity.entity_id or op.reference == entity.entity_id
-                                      for op in intent.operations)
-                    try:
-                        decision = AmbiguityPolicy(prefer_auto_resolve=True).choose(
-                            candidates, session_id=logical_task_id or "session", logical_task_id=logical_task_id or intent.instruction,
-                            step_id=step_id, role=entity.entity_id, revision=scene.scene_version,
-                            scene_digest=digest(scene), destructive=destructive, destination=destination,
-                            query=False, evidence={"color_evidence_status": color_evidence_status})
-                        candidates = [next(item for item in candidates if item.object_id_in_scene == decision.chosen_ids[0])]
-                        self.last_selection_decisions.append(decision.model_dump(mode="json"))
-                    except AmbiguityRequiresClarification:
-                        raise GroundingAmbiguous(entity, candidates)
-                else:
-                    raise GroundingAmbiguous(entity, candidates)
+                # A relation that still leaves multiple candidates is a tie or
+                # a half-plane selection (left/right).  It is not safe to use
+                # the deterministic auto-resolve policy for it.  Likewise,
+                # three or more unqualified candidates require an explicit
+                # extremum/description even when the session opted in.
+                # Automatic session policy is deliberately not a substitute for
+                # user evidence.  Even with prefer_auto_resolve enabled, two
+                # unqualified candidates must be named by a comparative/unique
+                # description (which the selector has already applied) and ties
+                # must remain actionable clarifications.
+                relation = selection_relations[0].relation.value if selection_relations else None
+                reason = (f"{relation}_tie" if relation in {
+                    "leftmost", "rightmost", "frontmost", "backmost",
+                    "highest", "lowest", "nearest", "farthest"
+                } else "selection_not_unique" if relation else "multiple_candidates")
+                raise GroundingAmbiguous(entity, candidates, reason=reason)
             return candidates
         entities = []
         index = SceneIndex(scene)

@@ -7,6 +7,7 @@ import re
 import time
 import uuid
 from copy import deepcopy
+from dataclasses import dataclass, replace
 from urllib.parse import urlsplit, urlunsplit
 from typing import Any
 
@@ -28,6 +29,52 @@ class QwenProviderError(RuntimeError):
     def __init__(self, message, *, code="provider_error"):
         super().__init__(message)
         self.code = code
+
+
+@dataclass(frozen=True)
+class QwenStageRequest:
+    """Immutable wire request shared by production calls and benchmarks."""
+
+    stage: str
+    prompt: str
+    content: Any
+    schema: dict[str, Any]
+    response_format: str
+    max_completion_tokens: int | None = None
+
+    @property
+    def system_prompt(self) -> str:
+        """Explicit name used by benchmark/report consumers."""
+        return self.prompt
+
+    @property
+    def user_content(self) -> Any:
+        """Explicit name used by benchmark/report consumers."""
+        return self.content
+
+    def payload(self, model: str) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "model": model,
+            "temperature": 0,
+            "messages": [
+                {"role": "system", "content": self.prompt},
+                {"role": "user", "content": self.content},
+            ],
+        }
+        if self.max_completion_tokens is not None:
+            payload["max_completion_tokens"] = self.max_completion_tokens
+        if self.response_format == "json_schema":
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": self.stage,
+                    "strict": True,
+                    "schema": self.schema,
+                },
+            }
+        elif self.response_format == "json_object":
+            payload["response_format"] = {"type": "json_object"}
+        return payload
 
 
 # Model-output failures the atomic planning round may quote back for one retry.
@@ -297,6 +344,45 @@ def _repair_live_scene_edit_quantity(value, instruction, catalog):
     return {**value, "scene_edit": {**edit, "entities": entities}} if changed else value
 
 
+def _normalize_recovery_comparative_selection(value, instruction):
+    """Turn short recovery phrases into an extremum selector.
+
+    In a failed robot-task chain, ``左边的`` means the leftmost candidate,
+    not the whole left half of the table.  The latter is a valid layout/region
+    relation and must remain ``left``.  This narrow normalization only applies
+    to an accepted robot task whose source entity already has a selection
+    relation; it never changes scene-edit placement semantics.
+    """
+    if not isinstance(value, dict) or value.get("status") != "accepted" \
+            or value.get("turn_kind") != "robot_task":
+        return value
+    text = str(instruction or "").casefold()
+    cues = (("左边的", "leftmost"), ("左边那个", "leftmost"), ("左面的", "leftmost"),
+            ("右边的", "rightmost"), ("右边那个", "rightmost"), ("右面的", "rightmost"),
+            ("前面的", "frontmost"), ("前面那个", "frontmost"), ("后面的", "backmost"),
+            ("后面那个", "backmost"))
+    selected = next((relation for cue, relation in cues if cue in text), None)
+    if selected is None:
+        return value
+    entities = value.get("entities") or []
+    operations = value.get("operations") or []
+    source_ids = {item.get("source") for item in operations if isinstance(item, dict) and item.get("source")}
+    if len(source_ids) != 1:
+        return value
+    source = next(iter(source_ids))
+    relations = [dict(item) for item in value.get("relations") or [] if isinstance(item, dict)]
+    matched = False
+    for relation in relations:
+        if relation.get("scope") == "selection" and relation.get("subject") == source:
+            if relation.get("relation") in {"left", "right", "front", "back"}:
+                relation.update(relation=selected, reference=None)
+                matched = True
+    if not matched:
+        relations.append({"scope": "selection", "subject": source,
+                          "relation": selected, "reference": None})
+    return {**value, "relations": relations}
+
+
 def _repair_live_top_view_replace_clarification(value, instruction, catalog):
     """Interpret unqualified tabletop 'topmost' as frontmost in the top view."""
     if not isinstance(value, dict) or value.get("status") != "clarification_required":
@@ -516,26 +602,71 @@ class QwenHTTPProvider:
     def _redact(self, text):
         return text.replace(self.api_key, "[REDACTED]") if self.api_key else text
 
+    def build_understanding_request(self, request: TaskUnderstandingRequest) -> QwenStageRequest:
+        """Build the canonical task-understanding wire request."""
+        return QwenStageRequest(
+            stage="task_understanding",
+            prompt=TASK_UNDERSTANDING_PROMPT + self.asset_catalog_prompt,
+            content=prompt_payload(self._understanding_payload(request)),
+            schema=task_understanding_v3_wire_schema(),
+            response_format="json_schema" if self.structured_output else "text",
+        )
+
+    def build_vision_request(self, frame: CameraFrame,
+                             entities: list[VisionEntity]) -> QwenStageRequest:
+        """Build the canonical image-plus-entity grounding request."""
+        if frame.rgb is None:
+            raise QwenProviderError("vision_grounding: RGB frame is missing")
+        content = [
+            {"type": "text", "text": prompt_payload({
+                "entities": [item.model_dump(mode="json") for item in entities]
+            })},
+            {"type": "image_url", "image_url": {
+                "url": f"data:image/png;base64,{base64.b64encode(frame.rgb).decode('ascii')}"
+            }},
+        ]
+        return QwenStageRequest(
+            stage="vision_grounding",
+            prompt=VISION_GROUNDING_PROMPT,
+            content=content,
+            schema=VisionGroundingOutput.model_json_schema(),
+            response_format="json_schema" if self.structured_output else "text",
+        )
+
+    def build_atomic_planning_request(self, context) -> QwenStageRequest:
+        """Build the control atomic-skill request used by the live planner."""
+        from ..contracts.commands_atomic import AtomicCommandDraft
+        budget = min(self.planner_max_completion_tokens,
+                     256 + 512 * max(len(context.operations), 1))
+        return QwenStageRequest(
+            stage="skill_planning",
+            prompt=self.atomic_skill_prompt,
+            content=prompt_payload(context.model_dump(mode="json", exclude_none=True)),
+            schema=AtomicCommandDraft.model_json_schema(),
+            response_format=(self.skill_planning_response_format
+                             if self.structured_output else "text"),
+            max_completion_tokens=budget,
+        )
+
     def _call(self, stage: str, prompt: str, content, schema: dict[str, Any], parse=None, *,
               max_completion_tokens=None, response_format: str | None = None):
-        format_kind = response_format or ("json_schema" if self.structured_output else "text")
-        payload: dict[str, Any] = {
-            "model": self.model,
-            "temperature": 0,
-            "messages": [
-                {"role": "system", "content": prompt},
-                {"role": "user", "content": content},
-            ],
-        }
-        if max_completion_tokens is not None:
-            payload["max_completion_tokens"] = max_completion_tokens
-        if format_kind == "json_schema":
-            payload["response_format"] = {
-                "type": "json_schema",
-                "json_schema": {"name": stage, "strict": True, "schema": schema},
-            }
-        elif format_kind == "json_object":
-            payload["response_format"] = {"type": "json_object"}
+        request = QwenStageRequest(
+            stage=stage,
+            prompt=prompt,
+            content=content,
+            schema=schema,
+            response_format=response_format or ("json_schema" if self.structured_output else "text"),
+            max_completion_tokens=max_completion_tokens,
+        )
+        return self._call_request(request, parse)
+
+    def _call_request(self, request: QwenStageRequest, parse=None):
+        """Execute one already-built request and retain historical diagnostics."""
+        stage = request.stage
+        prompt = request.prompt
+        schema = request.schema
+        format_kind = request.response_format
+        payload = request.payload(self.model)
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         request_id = uuid.uuid4().hex
         headers["X-Request-ID"] = request_id
@@ -657,11 +788,8 @@ class QwenHTTPProvider:
                 self.asset_catalog_snapshot is None
                 or request.asset_catalog.revision != self.asset_catalog_snapshot.revision):
             self.set_asset_catalog(request.asset_catalog)
-        return self._call(
-            "task_understanding",
-            TASK_UNDERSTANDING_PROMPT + self.asset_catalog_prompt,
-            prompt_payload(self._understanding_payload(request)),
-            task_understanding_v3_wire_schema(),
+        return self._call_request(
+            self.build_understanding_request(request),
             lambda value: _task_intent_from_v3(value, request.instruction),
         )
 
@@ -694,15 +822,14 @@ class QwenHTTPProvider:
                                                              request.asset_catalog)
                 value = _repair_live_explicit_instance_delete(
                     value, request.instruction, request.scene_context, request.asset_catalog)
+                value = _normalize_recovery_comparative_selection(value, request.instruction)
             turn = parse_qwen_turn(value, request.instruction)
             if request.asset_catalog is not None:
                 self._validate_live_asset_choices(value, request)
             return turn
-        prompt = TASK_UNDERSTANDING_PROMPT + self.asset_catalog_prompt
-        content = prompt_payload(self._understanding_payload(request))
-        schema = task_understanding_v3_wire_schema()
+        stage_request = self.build_understanding_request(request)
         try:
-            return self._call("task_understanding", prompt, content, schema, parse)
+            return self._call_request(stage_request, parse)
         except QwenProviderError as exc:
             # A live v3.1 response must explicitly choose an OLS asset for
             # every add/replace operation.  Qwen occasionally emits an
@@ -711,13 +838,13 @@ class QwenHTTPProvider:
             # Python because doing so would make a stale catalog authoritative.
             if request.asset_catalog is None or exc.code != "asset_choice_missing":
                 raise
-            repair_prompt = prompt + (
+            repair_prompt = stage_request.prompt + (
                 "\n\n上一轮输出缺少 asset_choices。请重新输出完整的 task_understanding.v3.1 JSON："
                 "scene_edit 中每一个 operation=add 或 operation=replace 都必须有一个"
                 "asset_choices 项，entity_id 必须与实体一致，asset_key 必须来自本次 OLS 资产目录。"
                 "不要省略其他必填字段，不要解释文字，只返回 JSON。"
             )
-            return self._call("task_understanding", repair_prompt, content, schema, parse)
+            return self._call_request(replace(stage_request, prompt=repair_prompt), parse)
 
     def recover_failure(self, request: FailureContextRequest) -> FailureContextDecision:
         """Run the isolated failure-context.v1 round.
@@ -883,13 +1010,6 @@ class QwenHTTPProvider:
         specification a suggestion.
         """
         from ..contracts.commands_atomic import AtomicCommandDraft
-        content = prompt_payload(context.model_dump(mode="json", exclude_none=True))
-        schema = AtomicCommandDraft.model_json_schema()
-        # A pick-and-place expands to seven commands, so an operation-count
-        # budget derived from the old one-step-per-skill plan would truncate.
-        budget = min(self.planner_max_completion_tokens,
-                     256 + 512 * max(len(context.operations), 1))
-        answer_format = (self.skill_planning_response_format if self.structured_output else "text")
 
         def parse(value):
             draft = AtomicCommandDraft.model_validate(value)
@@ -897,11 +1017,14 @@ class QwenHTTPProvider:
                 validate(draft)
             return draft
 
-        prompt, tokens = self.atomic_skill_prompt, budget
+        stage_request = self.build_atomic_planning_request(context)
+        prompt, tokens = stage_request.prompt, stage_request.max_completion_tokens
         for attempt in range(2):
             try:
-                return self._call("skill_planning", prompt, content, schema, parse,
-                                  max_completion_tokens=tokens, response_format=answer_format)
+                return self._call_request(
+                    replace(stage_request, prompt=prompt, max_completion_tokens=tokens),
+                    parse,
+                )
             except QwenProviderError as exc:
                 truncated = "model_output_truncated" in str(exc)
                 if attempt or not (truncated or exc.code in ATOMIC_OUTPUT_CODES
@@ -931,17 +1054,8 @@ class QwenHTTPProvider:
                           max_completion_tokens=self.planner_max_completion_tokens)
 
     def detect(self, frame: CameraFrame, entities: list[VisionEntity]) -> VisionGroundingOutput:
-        if frame.rgb is None:
-            raise QwenProviderError("vision_grounding: RGB frame is missing")
-        content = [
-            {"type": "text", "text": prompt_payload({"entities": [item.model_dump(mode="json") for item in entities]})},
-            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{base64.b64encode(frame.rgb).decode('ascii')}"}},
-        ]
-        return self._call(
-            "vision_grounding",
-            VISION_GROUNDING_PROMPT,
-            content,
-            VisionGroundingOutput.model_json_schema(),
+        return self._call_request(
+            self.build_vision_request(frame, entities),
             VisionGroundingOutput.model_validate,
         )
 

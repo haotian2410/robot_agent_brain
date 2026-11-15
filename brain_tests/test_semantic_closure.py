@@ -8,7 +8,9 @@ from robot_agent_brain.contracts.scene import SceneConfig, SceneObject, Transfor
 from robot_agent_brain.contracts.spatial import SpatialRelationType
 from robot_agent_brain.contracts.task_intent import Direction, MotionScale, Operation, QuantityMode, TaskEntity, TaskIntent, TaskType
 from robot_agent_brain.contracts.turn import BrainTurn, SceneEditIntent, TurnKind, TurnStatus, SceneEditPlan
-from robot_agent_brain.grounding.scene_grounder import SceneGrounder
+from robot_agent_brain.grounding.scene_grounder import GroundingAmbiguous, SceneGrounder
+from robot_agent_brain.scene.user_feedback import explain_issue
+from robot_agent_brain.errors import BrainIssue
 from robot_agent_brain.models.prompts import TASK_UNDERSTANDING_PROMPT
 from robot_agent_brain.models.task_understanding import normalize_motion_language
 from robot_agent_brain.planning.command_exporter import CommandExporter
@@ -42,6 +44,59 @@ def test_relations_are_preserved_and_resolved_by_scene_coordinates():
     scene = component_scene([object_(0, "apple"), object_(1, "apple", position=(1,0,0))])
     grounded = SceneGrounder().ground(intent, scene)
     assert grounded.entities[0].scene_object_id == 1
+
+
+def _selection_scene(positions):
+    return component_scene([
+        object_(object_id, "apple", position=position)
+        for object_id, position in enumerate(positions, start=8)
+    ])
+
+
+def _selection_intent(relation=None, count=1):
+    relations = [] if relation is None else [{"subject": "apple", "relation": relation}]
+    return TaskIntent(
+        instruction="select apple", entities=[TaskEntity(
+            entity_id="apple", semantic_name="apple", category="fruit", count=count,
+        )], operations=[Operation(operation_id="op-1", task_type=TaskType.GRASP, target="apple")],
+        spatial_relations=relations,
+    )
+
+
+def test_two_candidates_frontmost_tie_is_actionable_clarification():
+    # This is the geometry from the reported 012bb138 case: different X but
+    # identical Y, so “前面的苹果” cannot identify either instance.
+    scene = _selection_scene([(-0.0002, 0.0, 0.04), (-0.3566, 0.0, 0.04)])
+    with pytest.raises(GroundingAmbiguous) as caught:
+        SceneGrounder().ground(_selection_intent("frontmost"), scene, prefer_auto_resolve=True)
+    assert caught.value.reason == "frontmost_tie"
+    issue = BrainIssue(code="grounding_ambiguous", stage="grounding", message=str(caught.value))
+    explain_issue(issue, caught.value, scene, BrainConfig().load_assets())
+    assert "前后位置相同" in issue.clarification_question
+    assert "#8" in issue.clarification_question and "#9" in issue.clarification_question
+    assert issue.details["candidate_ids"] == [8, 9]
+
+
+def test_two_candidates_comparative_direction_selects_unique_instance():
+    scene = _selection_scene([(-0.3, 0.0, 0.04), (0.2, 0.0, 0.04)])
+    grounded = SceneGrounder().ground(_selection_intent("leftmost"), scene)
+    assert grounded.entities[0].scene_object_id == 8
+    grounded = SceneGrounder().ground(_selection_intent("rightmost"), scene)
+    assert grounded.entities[0].scene_object_id == 9
+
+
+def test_three_candidates_without_selection_are_never_auto_resolved():
+    scene = _selection_scene([(-0.3, 0.0, 0.04), (0.0, 0.0, 0.04), (0.2, 0.0, 0.04)])
+    with pytest.raises(GroundingAmbiguous) as caught:
+        SceneGrounder().ground(_selection_intent(), scene, prefer_auto_resolve=True)
+    assert caught.value.reason == "multiple_candidates"
+
+
+def test_left_half_is_not_mistaken_for_leftmost_selection():
+    scene = _selection_scene([(-0.3, 0.0, 0.04), (-0.1, 0.0, 0.04)])
+    with pytest.raises(GroundingAmbiguous) as caught:
+        SceneGrounder().ground(_selection_intent("left"), scene)
+    assert caught.value.reason == "selection_not_unique"
 
 
 def test_multi_move_clauses_bind_in_order():

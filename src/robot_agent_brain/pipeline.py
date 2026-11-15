@@ -547,11 +547,26 @@ class BrainPipeline:
                                                 logical_task_id=request_id)
                 break
             except GroundingAmbiguous as exc:
-                if self.vision_provider is None or capture is None or exc.entity.entity_id in overrides:
+                # Geometry already proved that a comparative relation is tied
+                # (or that a half-plane still contains multiple objects). A
+                # generic RGB detector cannot establish the missing object-ID
+                # binding, so ask the user instead of producing a misleading
+                # vision-evidence error.
+                if exc.reason != "multiple_candidates" or self.vision_provider is None \
+                        or capture is None or exc.entity.entity_id in overrides:
                     raise
                 if frame is None:
                     frame = capture()
-                ids = self.vision_fallback.resolve(exc.entity, exc.candidates, scene, frame, self.vision_provider)
+                try:
+                    ids = self.vision_fallback.resolve(exc.entity, exc.candidates, scene, frame, self.vision_provider)
+                except ValueError as vision_error:
+                    # The VLM output is useful evidence for diagnostics, but
+                    # without a unique scene-object mapping it is still an
+                    # ordinary grounding ambiguity from the user's point of
+                    # view.
+                    if str(vision_error).startswith("vision_grounding_"):
+                        raise GroundingAmbiguous(exc.entity, exc.candidates, reason="vision_ambiguous") from vision_error
+                    raise
                 overrides[exc.entity.entity_id] = ids
         grounded = self.expander.expand(grounded, scene)
         grounded = self.motion.resolve(grounded)
