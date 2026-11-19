@@ -351,8 +351,9 @@ def _normalize_recovery_comparative_selection(value, instruction):
     In a failed robot-task chain, ``左边的`` means the leftmost candidate,
     not the whole left half of the table.  The latter is a valid layout/region
     relation and must remain ``left``.  This narrow normalization only applies
-    to an accepted robot task whose source entity already has a selection
-    relation; it never changes scene-edit placement semantics.
+    to an accepted robot task: an explicitly named noun selects that role;
+    a standalone cue selects the unique source role. It never changes
+    scene-edit placement semantics or another object's selection.
     """
     if not isinstance(value, dict) or value.get("status") != "accepted" \
             or value.get("turn_kind") != "robot_task":
@@ -362,25 +363,30 @@ def _normalize_recovery_comparative_selection(value, instruction):
             ("右边的", "rightmost"), ("右边那个", "rightmost"), ("右面的", "rightmost"),
             ("前面的", "frontmost"), ("前面那个", "frontmost"), ("后面的", "backmost"),
             ("后面那个", "backmost"))
-    selected = next((relation for cue, relation in cues if cue in text), None)
-    if selected is None:
-        return value
     entities = value.get("entities") or []
     operations = value.get("operations") or []
     source_ids = {item.get("source") for item in operations if isinstance(item, dict) and item.get("source")}
-    if len(source_ids) != 1:
-        return value
-    source = next(iter(source_ids))
     relations = [dict(item) for item in value.get("relations") or [] if isinstance(item, dict)]
-    matched = False
-    for relation in relations:
-        if relation.get("scope") == "selection" and relation.get("subject") == source:
-            if relation.get("relation") in {"left", "right", "front", "back"}:
+    for cue, selected in cues:
+        if cue not in text:
+            continue
+        # Bind the adjective to its noun, never blindly to the grasp source.
+        suffix = text.split(cue, 1)[1].lstrip()
+        matches = {e.get("entity_id") for e in entities if any(
+            suffix.startswith(str(name).casefold()) for name in
+            [e.get("semantic_name"), e.get("entity_id"), *(e.get("aliases") or []), *(e.get("tags") or [])]
+            if name)}
+        if text.rstrip("。！？!? ") == cue and len(source_ids) == 1:
+            matches = source_ids
+        if len(matches) != 1:
+            continue
+        subject = next(iter(matches))
+        matching = [r for r in relations if r.get("scope") == "selection" and r.get("subject") == subject]
+        for relation in matching:
+            if relation.get("relation") in {"left", "right", "front", "back"} and relation.get("reference") in {None,"table","桌子","桌面"}:
                 relation.update(relation=selected, reference=None)
-                matched = True
-    if not matched:
-        relations.append({"scope": "selection", "subject": source,
-                          "relation": selected, "reference": None})
+        if not matching:
+            relations.append({"scope":"selection", "subject":subject,"relation":selected,"reference":None})
     return {**value, "relations": relations}
 
 

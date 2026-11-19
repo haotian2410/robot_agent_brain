@@ -16,4 +16,18 @@ def continuation_candidate(text: str) -> bool:
         "两个都要", "算了", "取消", "哪个我也不知道",
     }:
         return True
-    return re.fullmatch(r"ID\s*[0-9]+\s*的", text, re.IGNORECASE) is not None
+    if re.fullmatch(r"ID\s*[0-9]+\s*的", text, re.IGNORECASE):
+        return True
+    # These identify/revise a slot but contain no independent action. In
+    # particular, U can interpret "最左边那个苹果" as a selection query; that
+    # must not supersede the pending pick/place task before R sees it.
+    selector = r"(?:最)?(?:左|右|前|后)(?:边|面|侧)?(?:的|那个|那只)?(?:苹果|香蕉|篮子|托盘|物体|对象)?"
+    if re.fullmatch(selector, text):
+        return True
+    if re.fullmatch(r"(?:不对[，,]?|不是[，,]?)?(?:改成|换成)" + selector, text):
+        return True
+    if re.fullmatch(r"(?:那)?(?:两个|两只|2个)(?:苹果|香蕉|物体|对象)?(?:都要|都放)", text):
+        return True
+    if re.fullmatch(r"(?:换成|不是.+[，,]是)(?:篮子|托盘|杯子)", text):
+        return True
+    return False

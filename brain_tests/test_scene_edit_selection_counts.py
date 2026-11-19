@@ -45,6 +45,22 @@ def test_single_target_still_requires_clarification_with_multiple_matches():
         )
 
 
+def test_plural_all_dialogue_binding_uses_only_the_confirmed_set():
+    from robot_agent_brain.session.dialogue_state import DialogueState
+    scene=scene_with_apples()
+    entity=apples().model_copy(update={"dialogue_ref_set":True,"all_available":True})
+    selected=SceneObjectSelector(assets=BrainConfig().load_assets()).resolve(
+        "target",[entity],[],scene,dialogue=DialogueState(last_entity_ids=[3,4]))
+    assert {o.object_id_in_scene for o in selected}=={3,4}
+
+
+def test_plural_all_without_a_confirmed_dialogue_set_does_not_select_everything():
+    scene=scene_with_apples()
+    entity=apples().model_copy(update={"dialogue_ref_set":True,"all_available":True})
+    with pytest.raises(ValueError,match="grounding_ambiguous"):
+        SceneObjectSelector(assets=BrainConfig().load_assets()).resolve("target",[entity],[],scene)
+
+
 def test_explicit_count_selects_stable_subset_after_direction_filter():
     scene = scene_with_apples()
     selected = SceneObjectSelector(assets=BrainConfig().load_assets()).resolve(
@@ -195,6 +211,17 @@ def test_recovery_layout_phrase_is_not_rewritten_as_selection():
     payload = {"status": "accepted", "turn_kind": "scene_edit",
                "scene_edit": {"operations": [{"operation": "add"}]}}
     assert _normalize_recovery_comparative_selection(payload, "在桌面左侧增加苹果") == payload
+
+
+def test_destination_direction_does_not_select_grasp_source():
+    payload={"status":"accepted","turn_kind":"robot_task",
+        "entities":[{"entity_id":"apple","semantic_name":"apple","tags":["苹果"]},
+                    {"entity_id":"basket_right","semantic_name":"basket","tags":["篮子"]}],
+        "operations":[{"source":"apple","destination":"basket_right"}],
+        "relations":[{"scope":"selection","subject":"basket_right","relation":"right","reference":"table"}]}
+    result=_normalize_recovery_comparative_selection(payload,"把两个苹果放到右边的篮子里")
+    assert result['relations']==[{"scope":"selection","subject":"basket_right","relation":"rightmost","reference":None}]
+    assert payload['relations'][0]['relation']=='right'
 
 
 def test_a_pronoun_with_no_description_trusts_the_previous_turn_binding():

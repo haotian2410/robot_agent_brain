@@ -26,6 +26,34 @@ def configured(tmp_path):
     return service,browser
 
 
+def test_composite_artifact_scope_allows_recorded_child_not_other_task(tmp_path):
+    from robot_agent_brain.web.service import task_artifact_is_scoped
+    result={"request_id":"last", "metrics":{"steps":[{"request_id":"first"},{"request_id":"last"}]}}
+    assert task_artifact_is_scoped(tmp_path/'first/scene_patch.json',tmp_path,result)
+    assert task_artifact_is_scoped(tmp_path/'last/scene.json',tmp_path,result)
+    assert not task_artifact_is_scoped(tmp_path/'another/scene_patch.json',tmp_path,result)
+    assert not task_artifact_is_scoped(tmp_path/'../private.json',tmp_path,result)
+    assert not task_artifact_is_scoped(tmp_path/'../private.json',tmp_path,{"request_id":".."})
+    (tmp_path/'first').symlink_to(tmp_path.parent, target_is_directory=True)
+    assert not task_artifact_is_scoped(tmp_path/'first/private.json',tmp_path,result)
+
+
+def test_plan_ready_unexecuted_is_not_a_failure_chain(tmp_path):
+    service,browser=configured(tmp_path)
+    sid=service.activate(SessionRequest(browserID="b"))["sessionID"]
+    session=service._bind(sid)
+    service.app.accept_browser_scene(sid,browser.scene)
+    request=StartTask(sessionID=sid,browserID="b",clientRequestID="plan-only",command="把苹果放进篮子",
+                      scene=session.scene.model_dump(mode="json"),sceneDigest=digest(session.scene))
+    result={"outcome":"plan_ready","executed":False,"reply":"计划已生成未执行","artifacts":[]}
+    before=digest(session.scene)
+    service._record_conversation_turn(request,999,result,before,False)
+    assert session.conversation_memory.active_failure_chain is None
+    assert session.conversation_memory.recent_turns[-1].final_outcome=='plan_ready'
+    assert session.conversation_memory.recent_turns[-1].execution_status=='not_executed'
+    assert digest(session.scene)==before
+
+
 def test_http_lifecycle_results_and_artifact_whitelist(tmp_path):
     async def scenario():
         service,browser=configured(tmp_path)

@@ -52,7 +52,9 @@ class SceneGrounder:
             selection_relations = [relation for relation in intent.spatial_relations
                                    if relation.scope == "selection" and relation.subject == entity.entity_id]
             has_selection_constraint = bool(selection_relations)
-            if entity.quantity_mode == QuantityMode.ALL:
+            bound_dialogue_set = (entity.dialogue_ref_set and entity.all_available
+                                  and entity.entity_id in (bindings_override or {}))
+            if entity.quantity_mode == QuantityMode.ALL or bound_dialogue_set:
                 count = len(candidates) if entity.all_available else entity.count
                 if len(candidates) < count:
                     raise ValueError("grounding_missing: insufficient members for " + entity_id)

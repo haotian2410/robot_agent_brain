@@ -121,7 +121,7 @@ class BrainApplication:
         self.platform_factory = platform_factory
 
     @staticmethod
-    def _validate_recovery_u_conditions(turn, evidence):
+    def _validate_recovery_u_conditions(turn, evidence, *, aliases=None):
         """Ensure ordinary U did not silently drop R's accepted fields."""
         amendments = (evidence or {}).get("accepted_amendments") or []
         if not amendments:
@@ -140,6 +140,20 @@ class BrainApplication:
             relations = list(scene_edit.relations)
         def text(value):
             return str(value).strip().lower() if value is not None else ""
+        from .asset_name_normalization import canonical_name
+        def subjects_for(role):
+            # R describes the manipulated object as source. Scene edits use
+            # target for that same role; do not apply this alias to robot goals.
+            attribute = "target" if scene_edit is not None and role == "source" else role
+            if attribute in {"source", "destination", "target", "reference"}:
+                return {text(getattr(op, attribute, None)) for op in operations} - {""}
+            return {text(e.entity_id) for e in entities
+                    if canonical_name(role, aliases) in {canonical_name(e.entity_id, aliases),
+                                                        canonical_name(e.semantic_name, aliases)}}
+        def entity_matches(entity, value):
+            names = [entity.entity_id, entity.semantic_name, *getattr(entity, "aliases", []),
+                     *getattr(entity, "tags", [])]
+            return canonical_name(value, aliases) in {canonical_name(n, aliases) for n in names}
         for amendment in amendments:
             field, value = text(amendment.get("field")), amendment.get("value")
             wanted = text(value)
@@ -157,11 +171,7 @@ class BrainApplication:
                     int(value) if isinstance(value, str) and value.isascii()
                     and value.isdigit() and len(value) < 10 else None)
                 role = text(amendment.get("subject_role"))
-                subjects = {text(getattr(op, role, None)) for op in operations}
-                subjects.discard("")
-                if role not in {"source", "destination", "target", "reference"}:
-                    subjects = {text(e.entity_id) for e in entities
-                                if role in {text(e.entity_id), text(e.semantic_name)}}
+                subjects = subjects_for(role)
                 found = count is not None and count > 0 and any(
                     text(item.entity_id) in subjects and getattr(item, "count", None) == count
                     for item in entities)
@@ -169,21 +179,14 @@ class BrainApplication:
                 found = any(getattr(item, "distance_m", None) is not None
                             and abs(float(item.distance_m) - float(value)) <= 1e-9 for item in operations)
             elif field in {"target", "reference", "selection"}:
-                found = any(wanted in {text(getattr(op, "target", None)), text(getattr(op, "source", None)),
-                                       text(getattr(op, "destination", None)), text(getattr(op, "reference", None))}
-                            for op in operations)
+                role = text(amendment.get("subject_role"))
+                subjects = subjects_for(role)
+                found = wanted in subjects or any(text(e.entity_id) in subjects and entity_matches(e, value)
+                                                  for e in entities)
                 if not found and field == "selection":
-                    found = any(text(getattr(item, "semantic_name", None)) == wanted
-                                or text(getattr(item, "entity_id", None)) == wanted for item in entities)
                     # Selection predicates live on spatial relations, not on
                     # entity names. Match the accepted role AND exact relation;
                     # a leftmost destination must not prove a leftmost source.
-                    role = text(amendment.get("subject_role"))
-                    subjects = {text(getattr(op, role, None)) for op in operations}
-                    subjects.discard("")
-                    if role not in {"source", "destination", "target", "reference"}:
-                        subjects = {text(e.entity_id) for e in entities
-                                    if role in {text(e.entity_id), text(e.semantic_name)}}
                     found = found or any(text(getattr(r, "scope", None)) == "selection"
                         and text(getattr(r, "subject", None)) in subjects
                         and text(getattr(r, "relation", None)) == wanted for r in relations)
@@ -705,7 +708,8 @@ class BrainApplication:
                                     for op in turn.task_intent.operations))):
                     raise ValueError("control_dual_arm_not_ready")
                 if session.last_recovery_evidence is not None:
-                    self._validate_recovery_u_conditions(turn, session.last_recovery_evidence)
+                    self._validate_recovery_u_conditions(turn, session.last_recovery_evidence,
+                        aliases=self.pipeline.grounder.aliases)
                 session.check_turn(turn)
                 if pending_import is not None:
                     self._load_scene_object(session_id, pending_import)

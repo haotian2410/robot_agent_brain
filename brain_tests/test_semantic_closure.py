@@ -92,6 +92,24 @@ def test_three_candidates_without_selection_are_never_auto_resolved():
     assert caught.value.reason == "multiple_candidates"
 
 
+@pytest.mark.parametrize("tags", [[], ["apple"], ["苹果"]])
+def test_unqualified_robot_source_ambiguity_does_not_capture_or_guess_visually(tags, monkeypatch):
+    scene = _selection_scene([(-.25,0,.04),(.25,0,.04)])
+    intent = _selection_intent()
+    pipeline = BrainPipeline(object(), BrainConfig().load_assets())
+    pipeline.grounder.aliases["苹果"] = "apple"
+    intent.entities[0].tags = tags
+    def ambiguous(*args, **kwargs):
+        raise GroundingAmbiguous(intent.entities[0], scene.objects, reason="multiple_candidates")
+    monkeypatch.setattr(pipeline.grounder, "ground", ambiguous)
+    pipeline.vision_provider = object()
+    turn = BrainTurn(turn_kind="robot_task",status="accepted",instruction=intent.instruction,task_intent=intent)
+    def forbidden_capture():
+        pytest.fail("Unqualified source has no visual criterion")
+    with pytest.raises(GroundingAmbiguous):
+        pipeline.process_turn("r",turn,scene,capture=forbidden_capture)
+
+
 def test_left_half_is_not_mistaken_for_leftmost_selection():
     scene = _selection_scene([(-0.3, 0.0, 0.04), (-0.1, 0.0, 0.04)])
     with pytest.raises(GroundingAmbiguous) as caught:

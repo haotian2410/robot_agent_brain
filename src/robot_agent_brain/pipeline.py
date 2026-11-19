@@ -561,7 +561,15 @@ class BrainPipeline:
                 # generic RGB detector cannot establish the missing object-ID
                 # binding, so ask the user instead of producing a misleading
                 # vision-evidence error.
-                if exc.reason != "multiple_candidates" or self.vision_provider is None \
+                # An unqualified noun supplies no visual selection criterion.
+                # A picture cannot tell which of two apples the user intends;
+                # ask instead of invoking capture/VLM as an arbitrary chooser.
+                identifying_tags = [tag for tag in exc.entity.tags
+                                    if canonical_name(tag, self.grounder.aliases) !=
+                                    canonical_name(exc.entity.semantic_name, self.grounder.aliases)]
+                visual_selector = bool(exc.entity.color or identifying_tags) or any(
+                    marker in intent.instruction for marker in ("根据画面", "根据图像", "看图", "画面中"))
+                if not visual_selector or exc.reason != "multiple_candidates" or self.vision_provider is None \
                         or capture is None or exc.entity.entity_id in overrides:
                     raise
                 if frame is None:

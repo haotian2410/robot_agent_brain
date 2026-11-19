@@ -62,6 +62,19 @@ def discover_candidates(entity, scene: SceneConfig, category_aliases=None, *, al
         except (ValueError, AttributeError):
             return None
 
+    # Imported scenes often use the protocol-level category "graspable".
+    # A category-only request must still see the catalog's fruit/container
+    # classification. Never override an explicit, non-generic scene category.
+    if entity.category_only and assets is not None:
+        known_ids = {obj.object_id_in_scene for obj in available}
+        for obj in all_available:
+            if obj.object_id_in_scene in known_ids or category(index.semantic(obj.object_id_in_scene).category) not in {"object", "graspable", "placement"}:
+                continue
+            asset = resolve_asset(obj)
+            asset_category = getattr(asset, "category", None)
+            if asset_category and category(asset_category) == category(entity.category):
+                available.append(obj)
+
     def paintable(value):
         from ..scene.colors import ColorResolver
         try:

@@ -118,6 +118,67 @@ def test_recovery_cannot_drift_to_original_scene_without_user_request():
                                 current_user_text="把它改成蓝色")
 
 
+def test_recovery_inherits_explicit_original_authority_from_same_failure_chain():
+    decision = FailureContextDecision(decision="continue_task", source_turn_id="t1",
+        resolved_instruction="在原始场景中把最左边的苹果改成蓝色")
+    assert validate_recovery_scope(decision,
+        root_instruction="在原始场景中把苹果改成蓝色", current_user_text="最左边的") is decision
+
+
+def test_new_task_does_not_inherit_original_authority_from_old_chain():
+    decision = FailureContextDecision(decision="new_task", scope="new_task", source_turn_id="t1",
+        resolved_instruction="在原始场景中增加一个苹果")
+    with pytest.raises(ValueError, match="scene_basis_drift"):
+        validate_recovery_scope(decision, root_instruction="在原始场景中改色",
+                                current_user_text="增加一个苹果")
+
+
+def test_model_draft_cannot_grant_original_authority():
+    decision = FailureContextDecision(decision="continue_task", source_turn_id="t1",
+        resolved_instruction="在原始场景中把最左边的苹果改成蓝色")
+    with pytest.raises(ValueError, match="scene_basis_drift"):
+        validate_recovery_scope(decision, root_instruction="把苹果改成蓝色",
+            latest_task_draft={"canonical_turn":{"scene_basis":"original"}},
+            current_user_text="最左边的")
+
+
+@pytest.mark.parametrize("text", ["最左边那个。", "最左边那个苹果。", "左边的苹果。",
+    "右边那个篮子。", "不对，改成右边的苹果。", "换成托盘。", "那两个苹果都要。"])
+def test_selector_supplement_stays_on_recovery_route(text):
+    from robot_agent_brain.semantics.recovery_routing import continuation_candidate
+    assert continuation_candidate(text)
+
+
+@pytest.mark.parametrize("text", ["把左边的苹果放进篮子。", "有几个香蕉？", "拉开抽屉",
+    "不放了，改为把最左边的苹果改成蓝色。"])
+def test_complete_action_is_not_a_selector_supplement(text):
+    from robot_agent_brain.semantics.recovery_routing import continuation_candidate
+    assert not continuation_candidate(text)
+
+
+def test_recovery_source_selection_maps_to_scene_edit_target():
+    from robot_agent_brain.contracts.turn import SceneEditPlan, SceneEditIntent
+    plan=SceneEditPlan(entities=[TaskEntity(entity_id="apple",semantic_name="apple",category="fruit")],
+        operations=[SceneEditIntent(operation="translate",target="apple",direction="right",distance_m=.05)],
+        relations=[{"subject":"apple","relation":"leftmost"}])
+    turn=BrainTurn(turn_kind="scene_edit",status="accepted",instruction="把最左边的苹果向右移动5厘米",scene_edit=plan)
+    BrainApplication._validate_recovery_u_conditions(turn,{"accepted_amendments":[
+        {"subject_role":"source","field":"selection","value":"leftmost"}]})
+
+
+@pytest.mark.parametrize("destination,accepted", [("tray", True),("apple", False)])
+def test_recovery_chinese_destination_matches_canonical_asset_only_in_correct_role(destination,accepted):
+    turn=SimpleNamespace(task_intent=SimpleNamespace(
+        entities=[SimpleNamespace(entity_id=n,semantic_name=n) for n in ("apple","tray")],
+        operations=[SimpleNamespace(source="tray" if destination=="apple" else "apple",destination=destination)],
+        spatial_relations=[]))
+    evidence={"accepted_amendments":[{"subject_role":"destination","field":"target","value":"托盘"}]}
+    if accepted: BrainApplication._validate_recovery_u_conditions(turn,evidence,aliases={"托盘":"tray"})
+    else:
+        with pytest.raises(ValueError,match="u_condition_lost:target"):
+            BrainApplication._validate_recovery_u_conditions(turn,evidence,aliases={"托盘":"tray"})
+
+
 def test_recovered_composite_skips_completed_prefix_and_runs_only_suffix():
     """A recovered full decomposition must not replay already committed steps."""
     class FakeService:
@@ -166,7 +227,7 @@ def test_recovered_composite_skips_completed_prefix_and_runs_only_suffix():
     assert result["records"][1]["instruction"] == "第二步"
 
 
-def test_recovery_amendments_are_kept_in_semantic_draft_before_u():
+def test_recovery_amendments_are_kept_in_semantic_draft_before_u(tmp_path):
     class RecoveryProvider:
         def recover_failure(self, payload):
             return FailureContextDecision(
@@ -183,6 +244,7 @@ def test_recovery_amendments_are_kept_in_semantic_draft_before_u():
         source_request_id="t1", validity="partial_semantics", unresolved_slots=["color"]))
     session = SimpleNamespace(conversation_memory=memory, last_recovery_evidence=None, scene=None)
     service = object.__new__(AgentService)
+    service.output = tmp_path
     service.config = SimpleNamespace(conversation_recovery_enabled=True,
                                      conversation_recovery_max_failed_user_turns=5,
                                      conversation_recovery_max_input_chars=48000)
@@ -195,6 +257,11 @@ def test_recovery_amendments_are_kept_in_semantic_draft_before_u():
     assert "color" in draft.known_fields
     assert draft.canonical_turn["effective_instruction"] == "把苹果改成蓝色并放进篮子"
     assert draft.field_provenance[0]["source_turn_id"] == "t2"
+    assert draft.field_provenance[0]["subject_role"] == "apple"
+    import json
+    audit = json.loads(next((tmp_path / "s/conversation/recovery").glob("*.json")).read_text())
+    assert audit["request"]["current_user_text"] == "改成蓝色"
+    assert audit["client_request_id"] == "t2"
     assert draft.execution_authority == "none"
 
 

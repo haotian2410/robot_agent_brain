@@ -82,7 +82,11 @@ def validate_recovery_scope(decision: FailureContextDecision, *, root_instructio
         original_markers = ("原始场景", "原场景", "original scene", "original")
         resolved_original = any(marker in decision.resolved_instruction.lower() for marker in original_markers)
         user_original = any(marker in current_user_text.lower() for marker in original_markers)
-        if resolved_original and not user_original:
+        # Short supplements inherit explicit user authority from this chain,
+        # never from a model draft or an unrelated new task.
+        inherited_original = decision.scope != "new_task" and any(
+            marker in root_instruction.lower() for marker in original_markers)
+        if resolved_original and not (user_original or inherited_original):
             raise ValueError("failure_context_scene_basis_drift")
     for amendment in decision.amendments:
         field = amendment.field.strip().lower()

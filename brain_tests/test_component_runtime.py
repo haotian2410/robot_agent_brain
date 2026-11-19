@@ -83,6 +83,27 @@ def test_global_alias_category_and_absent_semantic():
     assert selector.select("a", [entity], [], changed)[0].object_id_in_scene == 11
 
 
+def test_category_only_uses_catalog_for_generic_imported_categories():
+    from types import SimpleNamespace
+    from robot_agent_brain.contracts.asset_library import BrainAssetView
+    asset = BrainAssetView(library_asset_id=1, metadata_ref="$LIBRARY_SERVER/1",
+                           semantic_name="apple", category="fruit", tags=("苹果",),
+                           dimensions_m=(.1,.1,.1), local_aabb_min_m=(-.05,-.05,-.05),
+                           local_aabb_max_m=(.05,.05,.05))
+    assets = SimpleNamespace(resolve=lambda *args: asset)
+    scene = scene_()
+    for obj in scene.objects:
+        for c in obj.components:
+            if c.component_type == "Semantic" and c.properties.get("semantic_name") == "apple":
+                c.properties["category"] = "graspable"
+    entity = entity_(category_only=True, tags=["苹果"])
+    selector = SemanticEntitySelector(assets=assets)
+    assert {o.object_id_in_scene for o in selector.select("apple", [entity], [], scene)} == {11,12}
+    # Catalog fallback does not override a specific scene classification.
+    next(c for c in scene.objects[-1].components if c.component_type=="Semantic").properties["category"]="tool"
+    assert {o.object_id_in_scene for o in selector.select("apple", [entity], [], scene)} == {11}
+
+
 def test_a_display_name_is_no_colour_evidence_and_the_colour_is_dropped():
     scene = scene_()
     scene.objects[2].object_name_in_scene = "red apple"

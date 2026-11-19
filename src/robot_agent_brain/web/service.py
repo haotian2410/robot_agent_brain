@@ -23,6 +23,21 @@ from .protocol import PROTOCOL_VERSION, StartTask, SessionRequest, digest, loopb
 from .task_store import TaskStore
 
 
+def task_artifact_is_scoped(path, session_root, result):
+    """Allow this task's persisted child artifacts, never sibling task data."""
+    import re
+    root = Path(session_root).resolve()
+    ids = [result.get("request_id")]
+    ids.extend(s.get("request_id") for s in (result.get("metrics") or {}).get("steps", []))
+    for identifier in ids:
+        if not isinstance(identifier, str) or not re.fullmatch(r"[A-Za-z0-9_-]+", identifier):
+            continue
+        allowed = (root / identifier).resolve()
+        if allowed.is_relative_to(root) and Path(path).resolve().is_relative_to(allowed):
+            return True
+    return False
+
+
 class _RecoveryReply(RuntimeError):
     def __init__(self, result):
         super().__init__("failure_context_reply")
@@ -643,7 +658,22 @@ class AgentService:
         chain_revision = chain.lifecycle_revision
         try:
             chain.state = type(chain.state).RESOLVING
-            decision = provider.recover_failure(payload)
+            call_offset = len(getattr(provider, "calls", []))
+            try:
+                decision = provider.recover_failure(payload)
+            finally:
+                # R runs before U resets the provider's diagnostics. Persist
+                # its real input/output now, including rejected responses.
+                if getattr(self, "output", None) is not None:
+                    key = hashlib.sha256(request.clientRequestID.encode("utf-8")).hexdigest()
+                    durable_json(self.output / request.sessionID / "conversation" / "recovery" / f"{key}.json", {
+                        "client_request_id": request.clientRequestID,
+                        "request": payload.model_dump(mode="json"),
+                        "raw_response": getattr(provider, "last_raw_text", {}).get("failure_context"),
+                        "parsed_response": getattr(provider, "last_raw_values", {}).get("failure_context"),
+                        "model_calls": [c for c in getattr(provider, "calls", [])[call_offset:]
+                                        if c.get("stage") == "failure_context"],
+                    })
             if chain.lifecycle_revision != chain_revision:
                 raise ValueError("failure_context_chain_revision_conflict")
             from ..semantics.recovery_guard import validate_recovery_decision, validate_recovery_scope
@@ -697,6 +727,7 @@ class AgentService:
             if field not in known_fields:
                 known_fields.append(field)
             provenance = {
+                "subject_role": amendment.subject_role,
                 "field": field,
                 "value": amendment.value,
                 "source_turn_id": amendment.evidence.get("turn_id", request.clientRequestID),
@@ -704,7 +735,8 @@ class AgentService:
             }
             field_provenance.append(provenance)
             if field in {"selection", "target", "reference"}:
-                confirmed_bindings.append({"field": field, "value": amendment.value,
+                confirmed_bindings.append({"subject_role": amendment.subject_role,
+                                           "field": field, "value": amendment.value,
                                            "source_turn_id": provenance["source_turn_id"]})
         chain.semantic_draft = draft.model_copy(update={
             "validity": "partial_semantics",
@@ -796,7 +828,10 @@ class AgentService:
                 auto_selection_decisions=[SelectionDecision.model_validate(item) for item in
                                          (result.get("metrics") or {}).get("selection_decisions", [])],
             )
-            failed = outcome in {"failed", "clarification_required"} or (outcome == "plan_ready" and not result.get("executed"))
+            # Planning-only delivery is successful interpretation, not a
+            # failed execution. It must not create an R chain or authorize
+            # later replay. Unknown external effects still require recovery.
+            failed = outcome in {"failed", "clarification_required"} or effect_unknown
             if failed and memory.active_failure_chain is not None and memory.active_failure_chain.state in {
                     FailureChainState.EXHAUSTED, FailureChainState.CANCELLED,
                     FailureChainState.BLOCKED_RECONCILIATION,
@@ -1857,8 +1892,10 @@ def create_http_app(service):
         if not target:
             raise ValueError("artifact_not_found")
         path = Path(target).resolve()
-        allowed = service.output / record["session"] / value["request_id"]
-        if not path.is_relative_to(allowed.resolve()):
+        # Composite envelopes may retain a scene patch from an earlier child
+        # while request_id names the last (possibly rejected) child. Authorize
+        # only the recorded children of THIS task, not every request in session.
+        if not task_artifact_is_scoped(path, service.output / record["session"], value):
             raise ValueError("artifact_not_found")
         if name == "debug":
             if not path.is_dir():
