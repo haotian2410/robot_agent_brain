@@ -3,6 +3,7 @@ from typing import ClassVar
 from pydantic import BaseModel, ConfigDict, Field
 from ..contracts.scene import SceneId
 from ..scene.component_access import SceneIndex
+from ..asset_name_normalization import canonical_name
 
 class DialogueState(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -41,7 +42,7 @@ class DialogueState(BaseModel):
         semantics = [SceneIndex(scene).semantic(i) for i in ids]
         if any(value is None for value in semantics):
             raise ValueError("dialogue_reference_missing")
-        names = list(dict.fromkeys(value.semantic_name for value in semantics))
+        names = list(dict.fromkeys(canonical_name(value.semantic_name) for value in semantics))
         return instruction + f" [{marker}={','.join(names)}]"
 
     def apply_exclusions(self, turn, scene, *, aliases=None):
@@ -60,7 +61,7 @@ class DialogueState(BaseModel):
         payload = getattr(turn, field)
         aliases = {key.casefold(): value.casefold() for key, value in (aliases or {}).items()}
         def canonical(name):
-            return aliases.get(name.casefold(), name.casefold())
+            return canonical_name(name, aliases)
         candidates = [entity for entity in payload.entities
                       if canonical(semantic.semantic_name) in
                       {canonical(name) for name in [entity.semantic_name, *entity.aliases]}

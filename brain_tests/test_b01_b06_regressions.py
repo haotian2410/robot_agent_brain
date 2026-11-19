@@ -20,7 +20,7 @@ from test_original_scene_commit import session_store
 
 class Assets:
     def resolve(self, ref, kind=None):
-        return BrainAssetView(library_asset_id=1, metadata_ref=ref, semantic_name="fixture",
+        return BrainAssetView(library_asset_id=1, metadata_ref=ref, semantic_name=ref,
             dimensions_m=(.1, .1, .1), local_aabb_min_m=(-.05, -.05, 0), local_aabb_max_m=(.05, .05, .1))
 
 

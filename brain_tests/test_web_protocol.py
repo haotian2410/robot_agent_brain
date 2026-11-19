@@ -128,7 +128,7 @@ def test_live_schema_requires_explicit_query_payload():
     from robot_agent_brain.models.task_understanding import task_understanding_wire_schema
     from jsonschema import Draft202012Validator
     schema = task_understanding_wire_schema()
-    assert set(schema['required']) == set(schema['properties'])
+    assert set(schema['required']) == set(schema['properties']) - {'initial_robot_asset'}
     payload = {"arm_usage":"unspecified","hold_constraints":[],"status":"accepted","turn_kind":"scene_query",
                "robot_setup_request":None,"entities":[],"operations":[],"relations":[]}
     assert list(Draft202012Validator(schema).iter_errors(payload))

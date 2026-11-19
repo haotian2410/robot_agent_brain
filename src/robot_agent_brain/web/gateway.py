@@ -60,6 +60,10 @@ class GatewayScenePlatformAdapter:
             self.camera_id = json.loads((self.journal_dir / "camera_binding.json").read_text(encoding="utf-8"))["camera_id"]
 
     def _call(self, method, route, **kwargs):
+        # Multipart trajectory uploads have no JSON browserID. Every machine
+        # callback must select the same authenticated browser profile explicitly.
+        kwargs["headers"] = {**kwargs.get("headers", {}),
+                             "X-WebEditor-Browser-ID": self.browser_id}
         if self.lease:
             kwargs["headers"] = {**kwargs.get("headers", {}), "X-Brain-Lease": self.lease}
         if self.session_id:
@@ -105,7 +109,7 @@ class GatewayScenePlatformAdapter:
             self.lease = None
             self.lease_state = "released" if not uncertain else "unknown"
 
-    def push_trajs(self, paths, *, request_id=None):
+    def push_trajs(self, paths, *, request_id=None, expected_identity=None):
         """Give the browser the recorded trajectories to play back.
 
         A trajectory is not a world change: no expected version, no bumped
@@ -117,8 +121,12 @@ class GatewayScenePlatformAdapter:
         paths = [Path(path) for path in paths]
         if not paths:
             raise ValueError("gateway_traj_batch_empty")
+        params = {"count": len(paths)}
+        if expected_identity is not None:
+            params.update(expected=json.dumps(expected_identity), sessionID=self.session_id,
+                          sourceRequestID=request_id)
         with ExitStack() as clips:
-            value = self._call("POST", "/updateTraj", params={"count": len(paths)}, files=[
+            value = self._call("POST", "/updateTraj", params=params, files=[
                 ("trajs", (path.name, clips.enter_context(path.open("rb")), "application/octet-stream"))
                 for path in paths]).json()
         self._journal(f"updateTraj_{request_id}" if request_id else "updateTraj",

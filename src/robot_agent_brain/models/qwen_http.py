@@ -638,9 +638,15 @@ class QwenHTTPProvider:
         from ..contracts.commands_atomic import AtomicCommandDraft
         budget = min(self.planner_max_completion_tokens,
                      256 + 512 * max(len(context.operations), 1))
+        prompt = self.atomic_skill_prompt
+        if len(context.operations) > 1:
+            prompt += ("\n本请求是一个连续机器人操作段：按 operations 顺序生成一份完整 commands，"
+                       "所有操作共用控制端的运行时状态。保留跨操作持物关系，不在子任务边界"
+                       "额外初始化或回 home；用户明确要求或技能规范确有要求的动作仍须保留。"
+                       "command_id 在整份文档中唯一，不省略任何操作。")
         return QwenStageRequest(
             stage="skill_planning",
-            prompt=self.atomic_skill_prompt,
+            prompt=prompt,
             content=prompt_payload(context.model_dump(mode="json", exclude_none=True)),
             schema=AtomicCommandDraft.model_json_schema(),
             response_format=(self.skill_planning_response_format
@@ -823,6 +829,7 @@ class QwenHTTPProvider:
                 value = _repair_live_explicit_instance_delete(
                     value, request.instruction, request.scene_context, request.asset_catalog)
                 value = _normalize_recovery_comparative_selection(value, request.instruction)
+                value = _repair_drawer_push_synonym(value, request.instruction)
             turn = parse_qwen_turn(value, request.instruction)
             if request.asset_catalog is not None:
                 self._validate_live_asset_choices(value, request)
@@ -845,7 +852,6 @@ class QwenHTTPProvider:
                 "不要省略其他必填字段，不要解释文字，只返回 JSON。"
             )
             return self._call_request(replace(stage_request, prompt=repair_prompt), parse)
-
     def recover_failure(self, request: FailureContextRequest) -> FailureContextDecision:
         """Run the isolated failure-context.v1 round.
 
@@ -1036,7 +1042,7 @@ class QwenHTTPProvider:
                         raise
                     tokens = retry
                 else:
-                    prompt = self.atomic_skill_prompt + (
+                    prompt = stage_request.prompt + (
                         "\n\n上一轮输出不被接受：" + str(exc) +
                         "\n请严格按规范重新输出一份完整文档，只返回 {\"commands\":[...]} JSON，"
                         "不要解释文字：命令必须来自 approach/pick/lift_up/retreat/move_to/put/pull/push，"
@@ -1058,6 +1064,44 @@ class QwenHTTPProvider:
             self.build_vision_request(frame, entities),
             VisionGroundingOutput.model_validate,
         )
+
+
+def _repair_drawer_push_synonym(value: dict[str, Any], instruction: str) -> dict[str, Any]:
+    """Normalize unambiguous Chinese drawer-closing wording.
+
+    Qwen occasionally treats ``推回/推入抽屉`` as an underspecified scene
+    question even though the control contract addresses the single drawer
+    scene object and chooses its internal layer. This narrow repair is only
+    for an explicit drawer push-back phrase; it never invents a handle, layer,
+    pose, or asset and therefore remains fail-closed for other objects.
+    """
+    if not isinstance(value, dict) or value.get("status") != "clarification_required":
+        return value
+    text = str(instruction or "").strip().casefold()
+    drawer_terms = ("抽屉", "抽屜", "drawer")
+    push_back_terms = ("推回", "推入", "推回去", "推上", "关上", "關上", "push back", "push in")
+    if not any(term in text for term in drawer_terms) or not any(term in text for term in push_back_terms):
+        return value
+    repaired = dict(value)
+    repaired.update({
+        "status": "accepted",
+        "turn_kind": "robot_task",
+        "clarification_question": None,
+        "scene_edit": None,
+        "scene_query": None,
+        "session_control": None,
+        "robot_setup_request": None,
+        "robot_asset_switch": None,
+        "robot_asset": None,
+        "gripper_asset": None,
+        "camera_asset": None,
+        "profile_id": None,
+        "entities": [{"entity_id": "drawer", "semantic_name": "drawer",
+                      "category": "furniture", "tags": ["抽屉"]}],
+        "operations": [{"operation": "close", "target": "drawer"}],
+        "relations": [],
+    })
+    return repaired
 
 
 def _task_intent_from_v3(value: dict[str, Any], instruction: str) -> TaskIntent:

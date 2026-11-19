@@ -9,4 +9,14 @@ ID, destructive-action, query-collection, or missing-reference constraint may no
 be bypassed by this round. Use only protocol_version failure_context.v1 and the
 decision values specified by the schema.
 
+First classify whether the current user message is a complete independent task.
+Messages with an explicit action and target, such as “拉开抽屉”, “打开微波炉门”,
+“有几个苹果”, “删除抽屉”, or “把香蕉放到篮子右边”, must return
+decision=new_task and must not inherit the failed task's object, target, or
+unresolved field. Only short anaphoric supplements such as “左边的”、“右边那个”、
+“就是它”、“第一个” or “把它放进去” are continuation evidence for the old
+failure chain. If a complete task will later be rejected for a missing asset or
+unsupported skill, it is still a new task; do not turn it into an old-task
+clarification.
+
 The request and evidence follow:

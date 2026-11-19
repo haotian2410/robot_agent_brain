@@ -4,6 +4,7 @@ from ..contracts.spatial import ResolvedSelectionRelation
 from ..contracts.task_intent import QuantityMode, TaskEntity
 from ..scene.component_access import SceneIndex
 from .scene_relation_resolver import SceneRelationResolver
+from ..asset_name_normalization import asset_name_for_object, canonical_name
 
 # A single extremum/nearest phrase describes the result cardinality, not the
 # size of the candidate pool.
@@ -25,7 +26,7 @@ def without_colour(entity: TaskEntity) -> TaskEntity:
 def discover_candidates(entity, scene: SceneConfig, category_aliases=None, *, aliases=None, assets=None):
     names = {key.strip().casefold(): value.strip().casefold() for key, value in (aliases or {}).items()}
     def canonicalize_name(value):
-        normalized = value.strip().casefold()
+        normalized = canonical_name(value, names)
         return names.get(normalized, normalized)
     categories = {key.strip().casefold(): value.strip().casefold() for key, value in (category_aliases or {}).items()}
     def category(value):
@@ -47,7 +48,7 @@ def discover_candidates(entity, scene: SceneConfig, category_aliases=None, *, al
             ident = canonicalize_name(entity.entity_id)
             same_name = {obj.object_id_in_scene for obj in all_available
                          if ident and canonicalize_name(
-                             index.semantic(obj.object_id_in_scene).semantic_name) == ident}
+                             asset_name_for_object(obj, index, assets, names)) == ident}
             if same_name and not requested <= same_name:
                 return []
             return [obj for obj in all_available if obj.object_id_in_scene in requested]
@@ -147,8 +148,8 @@ def discover_candidates(entity, scene: SceneConfig, category_aliases=None, *, al
     named = [obj for obj in all_available
              if (getattr(assets, "typed_namespaces", False)
                  or category(index.semantic(obj.object_id_in_scene).category) in {"object", "graspable", "placement"})
-             and canonicalize_name(index.semantic(obj.object_id_in_scene).semantic_name) == name]
-    exact = [obj for obj in available if canonicalize_name(index.semantic(obj.object_id_in_scene).semantic_name) == name]
+             and canonicalize_name(asset_name_for_object(obj, index, assets, names)) == name]
+    exact = [obj for obj in available if canonicalize_name(asset_name_for_object(obj, index, assets, names)) == name]
     # Imported Scene v1 objects use broad categories while newly added objects
     # use lexical ones. Both are the same named candidates; adding one must not
     # make the imported instances disappear from counts or nearest/farthest.
@@ -160,8 +161,8 @@ def discover_candidates(entity, scene: SceneConfig, category_aliases=None, *, al
     named = [obj for obj in all_available
              if (getattr(assets, "typed_namespaces", False)
                  or category(index.semantic(obj.object_id_in_scene).category) in {"object", "graspable", "placement"})
-             and canonicalize_name(index.semantic(obj.object_id_in_scene).semantic_name) in requested_names]
-    matched = [obj for obj in available if canonicalize_name(index.semantic(obj.object_id_in_scene).semantic_name) in requested_names]
+             and canonicalize_name(asset_name_for_object(obj, index, assets, names)) in requested_names]
+    matched = [obj for obj in available if canonicalize_name(asset_name_for_object(obj, index, assets, names)) in requested_names]
     matched_ids = {obj.object_id_in_scene for obj in matched}
     by_name = features(matched + [obj for obj in named if obj.object_id_in_scene not in matched_ids])
     if by_name:
@@ -184,7 +185,8 @@ class SemanticEntitySelector:
         self.category_aliases = category_aliases or {}
         from .scene_reference_resolver import SceneReferenceResolver
         self.reference_resolver = SceneReferenceResolver(scene_reference_catalog,
-                                                         table_metadata_ref=table_metadata_ref)
+                                                         table_metadata_ref=table_metadata_ref,
+                                                         assets=assets, aliases=self.aliases)
 
     def select(self, entity_id, entities, relations, scene, *, bindings_override=None, resolved_relations=None,
                allow_description_fallback=False):

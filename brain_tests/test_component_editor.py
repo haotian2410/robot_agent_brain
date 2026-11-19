@@ -17,7 +17,7 @@ from test_component_bootstrap import FixtureLibrary, configured, turn
 
 
 class UnavailableGeometry:
-    def resolve(self, reference):
+    def resolve(self, reference, asset_type=None):
         raise LookupError("asset_missing")
 
 

@@ -36,21 +36,21 @@ def turn(kind="grasp"):
         "operations": [{"type": kind, "target": "a", "arm": "right"}]}).to_brain_turn("用双臂的右臂抓苹果")
 
 
-def test_profile_bootstrap_keeps_both_arms_and_commits_after_planning(tmp_path):
+def test_public_application_rejects_dual_control_before_bootstrap(tmp_path):
     provider = Provider(turn())
     app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path), robot_profiles=registry(),
         release_policy=ReleasePolicy(version="experiment", runtime_robot_setup_change=True,
                                      dynamic_platform_rebind=True)), provider=provider)
     report = app.handle("用双臂的右臂抓苹果")
-    assert report.run_status == "success", report
-    scene = json.loads(Path(report.artifacts["scene_config"]).read_text(encoding="utf-8"))
-    commands = json.loads(Path(report.artifacts["commands"]).read_text(encoding="utf-8"))
-    assert commands["schema_version"] == "3.0"
-    assert {arm["robot_object_id"] for arm in commands["robot_setup"]["arms"].values()} == {2, 3}
-    assert {obj["object_id_in_scene"] for obj in scene["objects"]} == {0, 2, 3, 4}
+    # A configured dual profile is not proof the integrated Control supports
+    # dual execution. The public application is currently single-arm only.
+    assert report.run_status != "success"
+    assert report.error.code == "control_dual_arm_not_ready"
+    assert not report.executed
+    assert "commands" not in report.artifacts
+    assert app.get_session(report.session_id).scene is None
     assert provider.count == 1
-    snapshot = app.store.load(report.session_id).original_scene_manifest
-    assert snapshot.task_object_ids == [4]
+    assert not (tmp_path / report.session_id / "original_scene.json").exists()
 
 
 def test_profile_bootstrap_failed_plan_never_loads_scene(tmp_path):

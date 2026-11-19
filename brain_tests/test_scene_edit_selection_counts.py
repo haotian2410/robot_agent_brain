@@ -281,6 +281,15 @@ def test_explicit_multiple_instance_ids_are_deleted_as_a_set():
             "category"
         ] = "object"
         scene.objects.append(cube)
+    # These synthetic cubes were cloned from an apple. MetadataRef is the
+    # authoritative asset identity: a renamed apple must not be deleted as a
+    # cube, even when the caller supplies its instance ID.
+    with pytest.raises(ValueError, match="grounding_binding_invalid"):
+        SceneEditor(BrainConfig().load_assets()).edit_result(turn.scene_edit, scene)
+    for cube in scene.objects:
+        if cube.object_id_in_scene in (18, 19, 20):
+            cube.components = [component for component in cube.components
+                               if component.component_type != "MetadataRef"]
     result = SceneEditor(BrainConfig().load_assets()).edit_result(turn.scene_edit, scene)
     assert result.deleted_object_ids == [18, 19, 20]
 

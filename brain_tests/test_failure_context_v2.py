@@ -132,7 +132,7 @@ def test_recovered_composite_skips_completed_prefix_and_runs_only_suffix():
             self.calls = []
             self.app = SimpleNamespace(_save_session=lambda _session_id: None)
 
-        def _run_step(self, session, platform, request, identifier, instruction):
+        def _run_step(self, session, platform, request, identifier, instruction, **kwargs):
             self.calls.append(instruction)
             return (SimpleNamespace(request_id="new-child"),
                     {"outcome": "answered", "executed": False, "artifacts": []}, [])
@@ -153,8 +153,9 @@ def test_recovered_composite_skips_completed_prefix_and_runs_only_suffix():
     )
     request = SimpleNamespace(sessionID="s")
     platform = SimpleNamespace(receipts=[])
-    steps = [SimpleNamespace(kind=SimpleNamespace(value="scene_edit"), instruction="第一步"),
-             SimpleNamespace(kind=SimpleNamespace(value="scene_query"), instruction="第二步")]
+    from robot_agent_brain.contracts.decomposition import Subtask
+    steps = [Subtask(kind="scene_edit", instruction="第一步"),
+             Subtask(kind="scene_query", instruction="第二步")]
 
     service = FakeService()
     result, _ = service._run_steps(session, platform, request, "task-2", steps)

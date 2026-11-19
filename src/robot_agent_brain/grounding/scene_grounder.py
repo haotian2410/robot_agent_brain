@@ -4,6 +4,7 @@ from ..contracts.task_intent import QuantityMode, TaskIntent
 from ..scene.component_access import SceneIndex
 from ..scene.scene_graph import world_transform
 from .scene_relation_resolver import SceneRelationResolver
+from ..asset_name_normalization import canonical_name
 
 from .semantic_entity_selector import SemanticEntitySelector, discover_candidates
 
@@ -79,7 +80,7 @@ class SceneGrounder:
             primary = members[0].object_id_in_scene
             semantic = index.semantic(primary)
             return GroundedEntity(
-                entity_id=entity_id, semantic_name=semantic.semantic_name,
+                entity_id=entity_id, semantic_name=canonical_name(semantic.semantic_name, self.aliases),
                 scene_object_id=primary,
                 scene_object_ids=[o.object_id_in_scene for o in members],
                 metadata_ref=index.metadata_ref(primary), metadata_type=index.metadata_type(primary), category=semantic.category,

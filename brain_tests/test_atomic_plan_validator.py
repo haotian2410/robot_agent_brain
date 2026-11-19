@@ -71,6 +71,25 @@ def test_golden_assembly_graph_is_accepted():
         "approach", "pick", "lift_up", "retreat", "move_to", "approach", "put", "retreat"]
 
 
+def test_mentioning_objects_without_placing_is_not_complete():
+    with pytest.raises(BrainError, match="atomic_plan_operation_incomplete"):
+        check([approach(), retreat(), approach(False), retreat(False)])
+
+
+def test_commands_have_operation_provenance_including_transit():
+    value = placement_task()
+    value.operations.append(Operation(operation_id="op-2", task_type="pick_and_place",
+                                      source="b", destination="a", placement_target={
+                                          "kind": "support_surface", "reference": "a", "relation": "on"}))
+    document = AtomicCommandsFile(request_id="segment", scene_id=1, scene_version=0,
+                                 commands=numbered(GOLDEN + transfer(DESTINATION, SOURCE)))
+    validator = AtomicPlanValidator()
+    result = validator.validate(document, value)
+    mapping = validator.command_operation_map
+    assert [item['command_id'] for item in mapping] == [c.command_id for c in result.commands]
+    assert [item['operation_id'] for item in mapping] == ['op-1'] * 8 + ['op-2'] * 8
+
+
 @pytest.mark.parametrize("item", [without(2), without(4), replace(2, HOME)])
 def test_lift_and_transit_moves_are_optional(item):
     assert len(check(item).commands) == len(item)

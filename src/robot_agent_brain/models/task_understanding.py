@@ -40,7 +40,9 @@ def task_understanding_v3_wire_schema():
     present (or ``null``/empty), and the two scene routes have typed schemas.
     """
     schema = TaskParseWireOutput.model_json_schema()
-    _require_schema_fields(schema, *schema.get("properties", {}))
+    # Optional first-session extension; recorded v3 payloads need not carry it.
+    _require_schema_fields(schema, *(key for key in schema.get("properties", {})
+                                     if key != "initial_robot_asset"))
     defs = schema.get("$defs", {})
     for name in ("SceneEditWire", "SceneQueryWire"):
         if name in defs:
@@ -385,6 +387,7 @@ class TaskParseWireOutput(BaseModel):
     status: TurnStatus = TurnStatus.ACCEPTED
     turn_kind: TurnKind = TurnKind.ROBOT_TASK
     clarification_question: str | None = None
+    initial_robot_asset: str | None = None
     scene_edit: SceneEditWire | None = None
     scene_query: SceneQueryWire | None = None
     session_control: SessionControlIntent | None = None
@@ -1010,11 +1013,20 @@ def _open_close_reference_missing(value, error):
         return False
     missing = [item for item in operations if isinstance(item, dict)
                and item.get("type") in {TaskType.OPEN.value, TaskType.CLOSE.value}
-               and not item.get("reference")]
+               and not item.get("reference")
+               and str(item.get("target") or "").strip().casefold()
+               not in {"drawer", "cabinet", "microwave"}]
     return bool(missing) and "reference" in str(error)
 
 
 def parse_qwen_turn(value, instruction: str) -> BrainTurn:
+    if isinstance(value, dict) and value.get('initial_robot_asset') is not None:
+        payload = dict(value)
+        name = payload.pop('initial_robot_asset')
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError('initial_robot_asset_invalid')
+        turn = parse_qwen_turn(payload, instruction)
+        return turn.model_copy(update={'initial_robot_asset': name.strip().casefold()})
     """Parse live model output with narrow, fail-closed clarification recovery."""
     # v3.1 live requests carry an explicit tabletop WorkspaceSemanticPolicy and
     # therefore treat bare "桌子左/右边" as a tabletop region.  Older replay
@@ -1124,9 +1136,15 @@ def parse_qwen_turn(value, instruction: str) -> BrainTurn:
                 isinstance(item, dict)
                 and item.get("operation", item.get("type")) in {TaskType.OPEN.value, TaskType.CLOSE.value}
                 and not item.get("reference") for item in operations):
-            return BrainTurn(status=TurnStatus.CLARIFICATION_REQUIRED,
-                             turn_kind=TurnKind.ROBOT_TASK, instruction=instruction,
-                             clarification_question="请说明对应的门/抽屉把手或明确参照物，不能仅指定要打开的门。")
+            missing_reference = next((item for item in operations
+                                      if isinstance(item, dict)
+                                      and item.get("operation", item.get("type")) in {TaskType.OPEN.value, TaskType.CLOSE.value}
+                                      and not item.get("reference")), None)
+            target = str((missing_reference or {}).get("target") or "").strip().casefold()
+            if target not in {"drawer", "cabinet", "microwave"}:
+                return BrainTurn(status=TurnStatus.CLARIFICATION_REQUIRED,
+                                 turn_kind=TurnKind.ROBOT_TASK, instruction=instruction,
+                                 clarification_question="请说明对应的门把手或明确参照物，不能仅指定要打开的门。")
         # Keep the historical robot envelope available for old replay files
         # and direct test providers.  The v3.1 prompt uses the canonical
         # ``entity_id``/``semantic_name``/``operation`` fields and is parsed

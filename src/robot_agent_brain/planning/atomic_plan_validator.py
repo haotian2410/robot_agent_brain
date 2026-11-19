@@ -112,10 +112,14 @@ class AtomicPlanValidator:
         covered: list[int] = []
         pinned: dict[int, AtomicCommand] = {}
         expanded: dict[int, list[AtomicCommand]] = {}
+        command_operations = {}
+        actions = {position: set() for position in range(len(operations))}
+        last_position = 0
         for index, command in enumerate(commands.commands):
             skill = command.skill_name
             target = getattr(command.parameters, "target", None)
             if target is None:
+                command_operations[index] = last_position
                 if skill is AtomicSkillName.LIFT_UP and held is None:
                     self.fail("atomic_plan_nothing_lifted", "lift_up 只在抓住物体之后、撤离之前执行")
                 if skill in {AtomicSkillName.PULL, AtomicSkillName.PUSH}:
@@ -125,17 +129,22 @@ class AtomicPlanValidator:
                     # A finished stroke releases the handle on the control's side,
                     # so the next pull has to grip again.
                     held = None
+                    actions[last_position].add(skill.value)
                 continue
             if isinstance(target, str):
+                command_operations[index] = last_position
                 continue
             if target not in known:
                 self.fail("atomic_plan_unknown_target", f"第 {index + 1} 条命令的 target {target} 不在本场景对象中")
             if skill is AtomicSkillName.MOVE_TO:
+                command_operations[index] = last_position
                 continue
             positions = operations_for_object.get(target)
             if not positions:
                 self.fail("atomic_plan_unbound_target", f"target {target} 不属于本次任务的任何 operation")
             position = positions[cursor[target]]
+            last_position = position
+            command_operations[index] = position
             if not covered or covered[-1] != position:
                 covered.append(position)
 
@@ -151,9 +160,13 @@ class AtomicPlanValidator:
                 open_interaction[target] = skill
                 interaction_index[target] = index
                 held = target
+                actions[position].add("pick")
             elif skill is AtomicSkillName.PUT:
                 if held is None:
                     self.fail("atomic_plan_nothing_held", f"第 {index + 1} 条 put 之前没有夹持任何物体")
+                expected_source = bindings.get(operations[position].source, [held])[0]
+                if held != expected_source:
+                    self.fail("atomic_plan_source_mismatch", "put 持有对象与当前 operation 的 source 不一致")
                 self._require_approach(open_interaction, target, "put")
                 if destination_for_operation.get(position, target) != target:
                     self.fail("atomic_plan_put_target_mismatch",
@@ -177,11 +190,13 @@ class AtomicPlanValidator:
                 open_interaction[target] = skill
                 interaction_index[target] = index
                 held = None
+                actions[position].add("put")
             elif skill is AtomicSkillName.RELEASE:
                 if held != target:
                     self.fail("atomic_plan_release_without_grasp",
                               f"第 {index + 1} 条 release 之前夹爪握住的是 {held}，不是 {target}")
                 held = None
+                actions[position].add("put")
             elif skill is AtomicSkillName.RETREAT:
                 action = open_interaction.pop(target, None)
                 if action is None:
@@ -207,8 +222,19 @@ class AtomicPlanValidator:
         if missing:
             self.fail("atomic_plan_operation_coverage_mismatch",
                       "以下 operation 没有任何对应命令: " + ",".join(sorted(missing)))
+        required_actions = {"pick_and_place": "put", "grasp": "pick", "release": "put",
+                            "open": "pull", "close": "push"}
+        for position, operation in enumerate(operations):
+            required = required_actions.get(operation.task_type)
+            # A grasp of the already-held object is an idempotent semantic action.
+            already_held = (operation.task_type == "grasp" and held_object is not None
+                            and bindings.get(operation.target or operation.source) == [held_object])
+            if required and required not in actions[position] and not already_held:
+                self.fail("atomic_plan_operation_incomplete", f"{operation.operation_id} 缺少 {required} 动作")
         if scene is not None and held is not None and held not in known:
             self.fail("atomic_plan_unknown_held_object", f"结束时持有的 {held} 不在场景中")
+        mapping_positions = [command_operations[index] for index in range(len(commands.commands))
+                             for _ in (expanded.get(index) or [commands.commands[index]])]
         if pinned or expanded:
             # The carry replaces one command with four, so the ids are re-issued in
             # order; they are labels for the report, not references the model keeps.
@@ -217,6 +243,10 @@ class AtomicPlanValidator:
             commands = commands.model_copy(update={
                 "commands": [command.model_copy(update={"command_id": str(position)})
                              for position, command in enumerate(rebuilt, start=1)]})
+        self.command_operation_map = [
+            {"command_id": command.command_id, "operation_id": operations[position].operation_id,
+             "operation_index": position + 1}
+            for command, position in zip(commands.commands, mapping_positions)]
         return commands
 
     @staticmethod

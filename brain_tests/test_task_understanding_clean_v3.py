@@ -70,7 +70,7 @@ def test_runtime_prompt_uses_primary_table_for_bare_tabletop_adds():
 
 def test_v3_schema_requires_route_and_all_payload_slots():
     schema = task_understanding_v3_wire_schema()
-    assert set(schema["required"]) == set(schema["properties"])
+    assert set(schema["required"]) == set(schema["properties"]) - {"initial_robot_asset"}
     assert set(schema["$defs"]["SceneEditWire"]["required"]) == {
         "scene_basis", "entities", "relations", "operations"
     }

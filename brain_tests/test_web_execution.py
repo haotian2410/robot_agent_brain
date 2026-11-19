@@ -95,13 +95,69 @@ def dispatch(service, tmp_path, session, commands, task_id):
     path = tmp_path / "commands.json"
     path.write_text(json.dumps(canonical_commands(commands)), encoding="utf-8")
     report = SimpleNamespace(artifacts={"commands": str(path)}, request_id=commands.request_id)
-    result = {"outcome": "plan_ready", "executed": False}
-    return result, service.dispatch(session, session.platform, report, task_id, result)
+    result = {"outcome": "plan_ready", "executed": False, "scene_commit_status": "unchanged"}
+    trajs = service.dispatch(session, session.platform, report, task_id, result)
+    # Mirror _run_step/finalization: playback reads the immutable task result,
+    # not whatever world a later request may already have installed.
+    result.update(request_id=commands.request_id, scene_id=session.scene.scene_id,
+                  scene_version=session.scene.scene_version,
+                  scene_sub_version=session.scene.scene_sub_version, sceneDigest=digest(session.scene))
+    service.tasks.update(task_id, "finished", result, terminal=True)
+    return result, trajs
 
 
 def pose(scene, object_id):
     from robot_agent_brain.scene.component_access import SceneIndex
     return SceneIndex(scene).component(object_id, "Transform").properties
+
+
+def test_joint_only_writeback_is_displayed_as_committed():
+    result = {"outcome": "scene_updated", "executed": True,
+              "execution": {"moved_object_ids": [], "articulated_joint_object_ids": [6],
+                            "writeback_status": "committed"}}
+    assert AgentService.verdict(result) == "已执行并写回场景"
+    result["execution"]["writeback_status"] = "none"
+    assert AgentService.verdict(result) == "已执行未报告位姿"
+
+
+def test_verified_preflight_rejection_does_not_poison_session(tmp_path):
+    service, browser, session, commands, record, _ = world(tmp_path, ExecutionOutcome(
+        ok=False, no_effect_verified=True, error_code="unsupported_kinematic_chain"))
+    before = digest(session.scene)
+    prior_arms = session.arm_states
+    result, trajectories = dispatch(service, tmp_path, session, commands, record["id"])
+    assert result["outcome"] == "failed" and result["executed"] is False
+    assert result["execution"]["effect"] == "none"
+    assert result["scene_commit_status"] == "unchanged"
+    assert result["execution"]["retry_safe"] is False
+    assert session.sync_state == "synchronized"
+    assert session.arm_states == prior_arms
+    assert session.pending_execution_request is None
+    assert digest(session.scene) == before
+    assert not trajectories
+    assert ("POST", "/commitWorld") not in browser.calls
+
+
+def test_empty_initialization_progress_preserves_control_failure(tmp_path):
+    service, browser, session, commands, record, _ = world(tmp_path, ExecutionOutcome(
+        ok=False, no_effect_verified=True, error_code="execution_initialization",
+        detail="No validated gripper proxy template"), progress_at=[])
+    before = digest(session.scene)
+    result, trajectories = dispatch(service, tmp_path, session, commands, record["id"])
+    assert service.progress[record["id"]] == f"控制端初始化中 0/{len(commands.commands)}"
+    assert "execution_initialization" in json.dumps(result)
+    assert "execution_dispatch_failed" not in json.dumps(result)
+    assert digest(session.scene) == before
+    assert not trajectories
+    assert session.sync_state == "synchronized"
+
+
+def test_missing_preflight_evidence_still_requires_reconciliation(tmp_path):
+    service, _, session, commands, record, _ = world(tmp_path, ExecutionOutcome(
+        ok=False, error_code="unsupported_kinematic_chain"))
+    result, _ = dispatch(service, tmp_path, session, commands, record["id"])
+    assert session.sync_state == "unknown"
+    assert result["execution"]["effect"] == "unknown"
 
 
 def test_executed_poses_become_the_next_world(tmp_path):
@@ -112,6 +168,7 @@ def test_executed_poses_become_the_next_world(tmp_path):
     started = pose(session.scene, APPLE)["position"]
     result, trajs = dispatch(service, tmp_path, session, commands, record["id"])
     assert result["outcome"] == "scene_updated" and result["executed"] is True
+    assert result["scene_commit_status"] == "committed"
     assert result["execution"]["writeback_status"] == "committed"
     assert result["execution"]["trajectory_available"] is True
     assert result["execution"]["moved_object_ids"] == [APPLE]
@@ -130,6 +187,33 @@ def test_executed_poses_become_the_next_world(tmp_path):
     detail = json.loads((tmp_path / identifier / "traj_playback" / f"{record['id']}.json")
                         .read_text(encoding="utf-8"))
     assert detail["reply"]["ignored_objects"] == [] and detail["accepted"] is True
+
+
+def test_executed_articulated_joint_state_is_written_back_without_transform_edit():
+    from robot_agent_brain.contracts.scene import SceneConfig
+    scene = SceneConfig.model_validate({
+        "scene_schema_version": 1, "scene_version": 4, "scene_id": 7,
+        "scene_name": "drawer", "objects": [{
+            "object_id_in_scene": 9, "object_name_in_scene": "Drawer",
+            "components": [
+                {"component_type": "Transform", "properties": {
+                    "position": [0, 0, 0], "quaternion_xyzw": [0, 0, 0, 1],
+                    "scale": [1, 1, 1], "parent": None}},
+                {"component_type": "RobotDriver", "properties": {
+                    "role": "passive", "joint_sequence": ["drawer01", "drawer02"],
+                    "joint_limits": {"drawer01": [0, 1], "drawer02": [0, 1]}}},
+            ],
+        }]})
+    commands = AtomicCommandsFile(request_id="drawer-1", scene_id=7, scene_version=4,
+        commands=[AtomicCommand(command_id="1", skill_name="approach", parameters={"target": 9}),
+                  AtomicCommand(command_id="2", skill_name="push", parameters={"distance": .12})])
+    outcome = ExecutionOutcome(ok=True, articulated_joints={9: {"drawer01": .2, "drawer02": .18}})
+    candidate = AgentService.executed_scene(scene, outcome, commands)
+    assert candidate.scene_version == 5
+    driver = next(c for c in candidate.objects[0].components if c.component_type == "RobotDriver")
+    transform = next(c for c in candidate.objects[0].components if c.component_type == "Transform")
+    assert driver.properties["now_joint_positions_rad"] == {"drawer01": .2, "drawer02": .18}
+    assert list(transform.properties["position"]) == [0.0, 0.0, 0.0]
 
 
 def test_nothing_is_played_while_the_lease_is_still_held(tmp_path):
@@ -157,7 +241,7 @@ def test_a_run_that_did_not_account_for_every_command_is_never_a_success(tmp_pat
     assert browser.calls.count(("POST", "/commitWorld")) == 0
     assert session.scene.scene_version == commands.scene_version
     assert session.pending_execution_request is None
-    assert session.sync_state == "synchronized"
+    assert session.sync_state == "unknown"
 
 
 def test_a_service_that_forbids_execution_never_reaches_the_runner(tmp_path):
@@ -174,6 +258,36 @@ def test_a_service_that_forbids_execution_never_reaches_the_runner(tmp_path):
     assert session.pending_commands is None and session.pending_execution_request is None
     assert browser.calls.count(("POST", "/commitWorld")) == 0
     assert session.scene.scene_version == commands.scene_version
+
+
+def test_verified_partial_execution_commits_actual_state_but_remains_failed(tmp_path):
+    service, browser, session, commands, record, _ = world(tmp_path, ExecutionOutcome(
+        ok=False, steps=stopped_at(3), moved=MOVED, state_verified=True,
+        error_code="EXECUTION_TIMEOUT", detail="partial physical movement"))
+    result, _ = dispatch(service, tmp_path, session, commands, record["id"])
+    assert result["outcome"] == "failed" and result["executed"] is False
+    assert result["execution"]["writeback_status"] == "committed"
+    assert not result["execution"]["retry_safe"]
+    assert result["scene_commit_status"] == "committed"
+    assert session.sync_state == "synchronized"
+    assert pose(session.scene, APPLE)["position"] == MOVED[APPLE]["position"]
+
+
+def test_active_robot_joint_state_does_not_require_command_target(tmp_path):
+    from robot_agent_brain.contracts.scene import SceneObject, SceneComponent
+    service, browser, session, commands, record, _ = world(tmp_path, None)
+    scene = session.scene.model_copy(deep=True)
+    scene.objects.append(SceneObject(object_id_in_scene=99, object_name_in_scene="Arm", components=[
+        SceneComponent(component_type="Transform", properties={"position": [0, 0, 0],
+            "quaternion_xyzw": [0, 0, 0, 1], "scale": [1, 1, 1]}),
+        SceneComponent(component_type="RobotDriver", properties={"joint_sequence": ["j"],
+            "joint_limits": {"j": [-3, 3]}, "initial_joint_positions_rad": {"j": 0.0}})]))
+    outcome = ExecutionOutcome(ok=True, articulated_joints={99: {"j": 1.2}}, active_joint_ids=[99])
+    updated = service.executed_scene(scene, outcome, commands)
+    arm = next(o for o in updated.objects if o.object_id_in_scene == 99)
+    driver = next(c.properties for c in arm.components if c.component_type == "RobotDriver")
+    assert driver["now_joint_positions_rad"] == {"j": 1.2}
+    assert driver["initial_joint_positions_rad"] == {"j": 0.0}
 
 
 def test_execution_authorization_names_the_interpreter_it_will_run(tmp_path):
@@ -218,7 +332,7 @@ def test_a_runner_that_never_started_still_closes_the_dispatch(tmp_path):
     result, trajs = dispatch(service, tmp_path, session, commands, record["id"])
     assert result["error"]["code"] == "execution_dispatch_failed"
     assert result["execution"]["steps"] == []
-    assert session.pending_execution_request is None and session.sync_state == "synchronized"
+    assert session.pending_execution_request is None and session.sync_state == "unknown"
     assert trajs == [] and browser.calls.count(("POST", "/commitWorld")) == 0
 
 

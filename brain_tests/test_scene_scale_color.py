@@ -104,8 +104,11 @@ def test_limits_and_rollback():
 def test_collision_and_workspace():
     library,scene=fixture()
     scene.objects.append(make_object(2,"obstacle","basket",(.25,0,.1),category="container",support=0))
+    # Both instances intentionally use the basket asset. Select the original
+    # explicitly so this test reaches geometry rather than name ambiguity.
     with pytest.raises(ValueError,match="collision"):
-        apply(library,scene,plan(dict(operation="scale",scale_mode="set",scale_xyz=[2]*3)))
+        apply(library,scene,plan(dict(operation="scale",scale_mode="set",scale_xyz=[2]*3),
+                                 scene_object_ids=[1]))
     scene.objects.pop()
     with pytest.raises(ValueError,match="workspace"):
         apply(library,scene,plan(dict(operation="scale",scale_mode="set",scale_xyz=[2]*3)),
@@ -191,7 +194,8 @@ def test_unsupported_scale_targets(kind):
             child.components[0].properties["parent"]=1
         scene.objects.append(child)
     with pytest.raises(ValueError,match="target_unsupported"):
-        apply(library,scene,plan(dict(operation="scale",scale_mode="set",scale_xyz=[2]*3)))
+        apply(library,scene,plan(dict(operation="scale",scale_mode="set",scale_xyz=[2]*3),
+                                 scene_object_ids=[1]))
 
 
 def test_parented_supported_nonuniform_transform():

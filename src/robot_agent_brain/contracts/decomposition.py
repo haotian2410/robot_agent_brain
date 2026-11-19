@@ -28,6 +28,7 @@ class Subtask(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: SubtaskKind
     instruction: str = Field(min_length=1)
+    requires_fresh_observation: bool = False
 
     @model_validator(mode="after")
     def trimmed(self):
@@ -43,13 +44,10 @@ class TaskDecomposition(BaseModel):
 
     @model_validator(mode="after")
     def legal_sequence(self):
-        # Several arm tasks in one utterance are legal because each dispatch commits
-        # the executed poses back to the browser before the next one is understood:
-        # the second run rebuilds its simulator from the world the first run left,
-        # which is exactly the intermediate state the user asked for in sequence.
-        # What must not happen is a run that leaves the gripper occupied -- the next
-        # rebuild starts with empty fingers -- and the orchestrator stops the walk
-        # there rather than chaining onto it.
+        # Adjacent arm clauses are merged by execution_segments and planned as
+        # one control request. Edits/queries are segment boundaries; the next
+        # segment uses the confirmed final scene, never a predicted intermediate
+        # pose. An unresolved held object prevents rebuilding another segment.
         if len(self.steps) > 1 and len({step.instruction for step in self.steps}) != len(self.steps):
             # A model that pastes the whole utterance into every step has not
             # split anything; falling back is safer than running it twice.

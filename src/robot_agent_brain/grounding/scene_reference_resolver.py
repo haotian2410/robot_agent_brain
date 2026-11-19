@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from ..errors import BrainError
 from ..semantics.scene_references import CanonicalReference, RefScope, SceneReferenceCatalog
 from ..scene.component_access import SceneIndex
+from ..asset_name_normalization import asset_name_for_object, canonical_name
 
 
 @dataclass(frozen=True)
@@ -22,17 +23,18 @@ class ResolvedSceneReference:
 
 
 class SceneReferenceResolver:
-    def __init__(self, catalog=None, *, table_metadata_ref=None):
+    def __init__(self, catalog=None, *, table_metadata_ref=None, assets=None, aliases=None):
         self.catalog = catalog or SceneReferenceCatalog()
         self.table_metadata_ref = table_metadata_ref
+        self.assets = assets
+        self.aliases = aliases or {}
 
     @staticmethod
     def _entity_ids(entities):
         return {getattr(entity, "entity_id", None) for entity in (entities or [])}
 
-    @staticmethod
-    def _key(value):
-        return str(value).strip().casefold().replace("-", "_")
+    def _key(self, value):
+        return canonical_name(value, self.aliases)
 
     def _scene_candidates(self, selector, spec, scene):
         if scene is None:
@@ -46,7 +48,8 @@ class SceneReferenceResolver:
                 continue
             semantic = index.semantic(identifier)
             object_name = self._key(obj.object_name_in_scene or "")
-            if str(identifier) == str(selector) or object_name == raw:
+            object_asset = asset_name_for_object(obj, index, self.assets, self.aliases)
+            if str(identifier) == str(selector) or object_name == raw or object_asset == raw:
                 candidates.append(identifier)
                 continue
             if spec is not None and spec.canonical_id == "table" and self.table_metadata_ref is not None:
@@ -55,7 +58,7 @@ class SceneReferenceResolver:
                     continue
             if semantic is None:
                 continue
-            name = str(semantic.semantic_name or "").strip().casefold().replace("-", "_")
+            name = asset_name_for_object(obj, index, self.assets, self.aliases)
             if spec is not None and (name == spec.canonical_id or (spec.canonical_id == "table" and
                     semantic.category == "surface" and name in {"table", "work_table", "工作台", "桌子"})):
                 candidates.append(identifier)

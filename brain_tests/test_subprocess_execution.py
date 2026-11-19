@@ -78,7 +78,7 @@ def test_the_reduction_reads_the_world_the_browser_is_showing(tmp_path, monkeypa
     # objects to name -- reducing against it silently reports nothing moved.
     summary = {"ok": True, "steps": [{"command_id": "1", "skill_name": "pick", "status": "success",
                                       "error_code": None, "detail": None}],
-               "moved": MOVED, "holding_object": None,
+               "moved": MOVED, "holding_object": None, "state_verified": True,
                "traj_path": str(tmp_path / "trajectory.traj"), "error_code": None, "detail": None}
     link = Link(summary)
     runner = adapter(tmp_path, link, monkeypatch)
@@ -120,3 +120,19 @@ def test_a_deployment_that_names_no_endpoint_leaves_the_child_to_its_defaults(
     runner = adapter(tmp_path, link, monkeypatch)
     runner.run(commands(), SCENE)
     assert link.seen["runner_kwargs"]["child_env"] == {}
+
+
+def test_collision_representation_is_an_explicit_execution_option(tmp_path, monkeypatch):
+    link = Link({"ok": True, "steps": [], "moved": {}, "holding_object": None,
+                 "state_verified": True, "traj_path": None, "error_code": None, "detail": None})
+    adapter(tmp_path, link, monkeypatch, collision_model="precise").run(commands(), SCENE)
+    assert link.seen["runner_kwargs"]["collision_model"] == "precise"
+    assert "planning_collision_proxy" not in SCENE
+
+
+def test_success_without_restorable_state_is_not_reported_complete(tmp_path, monkeypatch):
+    link = Link({"ok": True, "steps": [], "moved": {}, "holding_object": None,
+                 "traj_path": None, "error_code": None, "detail": None})
+    result = adapter(tmp_path, link, monkeypatch).run(commands(), SCENE)
+    assert not result.ok
+    assert result.error_code == "execution_final_state_incomplete"

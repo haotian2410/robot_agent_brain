@@ -13,6 +13,7 @@ from .contracts.grounded_task import GroundedTask
 from .contracts.scene import SceneConfig, ScenePatch, SceneId
 from .contracts.skill_plan import SkillPlan
 from .contracts.task_intent import TaskIntent
+from .asset_name_normalization import canonical_name
 from .contracts.turn import BrainTurn, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
 from .scene.query import SceneQueryEngine, SceneQueryResult
 from .scene.editor import SceneEditor
@@ -228,6 +229,7 @@ class BrainPipeline:
             # deliberately different and has no implicit table.
             return {
                 "basis": "bootstrap",
+                "create_task_objects": True,
                 "primary_table_available": True,
                 "primary_table_object_id": None,
                 "object_count": 0,
@@ -252,13 +254,13 @@ class BrainPipeline:
             renderer = index.properties(oid, "MeshRenderer")
             semantic_name = semantic.semantic_name if semantic is not None else ""
             category = semantic.category if semantic is not None else ""
-            canonical_name = self.aliases.get(semantic_name.casefold(), semantic_name.casefold())
+            canonical_asset_name = canonical_name(semantic_name, self.aliases)
             metadata_ref = index.metadata_ref(oid)
             metadata_type = index.metadata_type(oid)
             if configured_ref is not None:
                 is_table = (metadata_ref == configured_ref and metadata_type == "model"
-                            and (canonical_name in table_aliases
-                                 or category.casefold() in {"surface", "support_surface", "table"}))
+                            and (canonical_asset_name in table_aliases
+                            or category.casefold() in {"surface", "support_surface", "table"}))
                 # An explicitly configured table must also be resolvable by
                 # the read-only asset adapter; otherwise do not advertise a
                 # usable support plane to Qwen.
@@ -268,7 +270,7 @@ class BrainPipeline:
                     except Exception:
                         is_table = False
             else:
-                is_table = canonical_name in table_aliases and category.casefold() in {
+                is_table = canonical_asset_name in table_aliases and category.casefold() in {
                     "surface", "support_surface", "table", "furniture", ""
                 }
             if is_table:
@@ -280,12 +282,14 @@ class BrainPipeline:
                 try:
                     asset = self.assets.resolve(metadata_ref, metadata_type) if metadata_type else self.assets.resolve(metadata_ref)
                     asset_tags = list(asset.tags) if asset else []
-                except (ValueError, AttributeError):
+                except (LookupError, ValueError, AttributeError):
+                    # Tags are optional understanding context, not authorization
+                    # to edit an unresolved asset. Binding/geometry still validates it.
                     pass
             objects.append({
                 "object_id": oid,
                 "object_name": item.object_name_in_scene,
-                "semantic_name": semantic_name,
+                "semantic_name": canonical_asset_name,
                 "category": category,
                 "support": semantic.support if semantic is not None else None,
                 "parent": transform.parent if transform is not None else None,
@@ -352,6 +356,11 @@ class BrainPipeline:
     def understand_turn(self, instruction: str, *, scene: SceneConfig | None = None,
                         dialogue=None) -> BrainTurn:
         """Call understanding once; keep injected context out of the user text."""
+        from .scene.initial_robot import split_initial_robot
+        initial_robot, task_instruction = split_initial_robot(instruction)
+        if initial_robot is not None:
+            turn = self.understand_turn(task_instruction, scene=scene, dialogue=dialogue)
+            return turn.model_copy(update={"initial_robot_asset": initial_robot, "instruction": instruction})
         # The OLS directory is a per-turn input, not a process-start constant.
         # Adapters backed by a read-only local index can cheaply return the same
         # revision; adapters that refresh from OLS expose the new revision here.

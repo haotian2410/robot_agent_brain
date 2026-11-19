@@ -55,12 +55,16 @@ class SubprocessExecutionAdapter:
     def __init__(self, *, python: str, control_root: str, library: str, asset_root: str,
                  object_library_url: str, workspace_root: str, link_root: str | None = None,
                  timeout_seconds: float = 180.0, backend: str = "mujoco",
-                 vlm_base_url: str | None = None, vlm_model: str | None = None):
+                 vlm_base_url: str | None = None, vlm_model: str | None = None,
+                 collision_model: str | None = None):
         self.python, self.control_root, self.library = python, control_root, library
         self.asset_root, self.object_library_url = asset_root, object_library_url
         self.workspace_root, self.link_root = workspace_root, link_root
         self.timeout_seconds, self.backend = timeout_seconds, backend
         self.vlm_base_url, self.vlm_model = vlm_base_url, vlm_model
+        if collision_model not in (None, 'proxy', 'precise'):
+            raise ValueError('collision_model_invalid')
+        self.collision_model = collision_model
 
     def child_env(self) -> dict:
         """The perception endpoint the child must use instead of its built-in one.
@@ -96,6 +100,7 @@ class SubprocessExecutionAdapter:
                             python=self.python, control_root=self.control_root, library=self.library,
                             object_library_url=self.object_library_url,
                             timeout_seconds=self.timeout_seconds, backend=self.backend,
+                            **({'collision_model': self.collision_model} if self.collision_model else {}),
                             child_env=self.child_env(),
                             progress=(lambda report: progress([ExecutionStep(
                                 command_id=row["command_id"], skill_name=row["skill_name"],
@@ -105,7 +110,14 @@ class SubprocessExecutionAdapter:
         # The reduction reads poses back by object name, and only the scene
         # document carries those names: ``workspace.build`` returns the stamped
         # task document, which would reduce every moved object to nothing.
-        return self.outcome(feedback.summarize(result, header, describe), result)
+        summary = feedback.summarize(result, header, describe)
+        # Only the report for this exact request can certify a pre-execution rejection.
+        summary["no_effect_verified"] = (summary.get("no_effect_verified") is True
+                                         and result.report.get("request_id") == commands.request_id)
+        if summary["ok"] and not summary.get("state_verified"):
+            summary.update(ok=False, error_code="execution_final_state_incomplete",
+                           detail="控制端报告命令完成，但没有完整可恢复的最终关节、物体或持物状态；请核验后继续。")
+        return self.outcome(summary, result)
 
     @staticmethod
     def outcome(summary: dict, result) -> ExecutionOutcome:
@@ -115,4 +127,9 @@ class SubprocessExecutionAdapter:
                                  status=step["status"], error_code=step["error_code"],
                                  detail=step["detail"]) for step in summary["steps"]],
             moved=summary["moved"], holding_object=summary["holding_object"],
+            articulated_joints=summary.get("articulated_joints", {}),
+            active_joint_ids=summary.get("active_joint_ids", []),
+            state_verified=summary.get("state_verified", False),
+            no_effect_verified=summary.get("no_effect_verified", False),
+            final_scene=summary.get("final_scene"), final_scene_path=summary.get("final_scene_path"),
             traj_path=summary["traj_path"], error_code=summary["error_code"], detail=summary["detail"])

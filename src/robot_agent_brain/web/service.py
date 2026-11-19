@@ -126,6 +126,7 @@ class AgentService:
                 asset_root=self.config.asset_library_root, object_library_url=self.ols_url,
                 workspace_root=self.config.execution_workspace_root or str(self.output / "executions"),
                 timeout_seconds=self.config.execution_timeout_seconds,
+                collision_model=self.config.execution_collision_model,
                 # Perception is the same model the Brain plans with: the control
                 # side would otherwise reach for its own, unusable cloud key.
                 vlm_base_url=self.config.base_url, vlm_model=self.config.model)
@@ -425,6 +426,8 @@ class AgentService:
                 result = {"taskID":identifier,"sessionID":request.sessionID,"outcome":"failed", "executed":False,
                     "reply":f"{message}（{code}；诊断 task-{identifier}）",
                     "error":{"code":code,"message":message,"details":{"diagnostic_id":f"task-{identifier}"}}}
+                if code == "robot_segment_intermediate_observation_unsupported":
+                    result.update(failure_class="capability_unsupported", scene_commit_status="unchanged")
         finally:
             if platform is not None:
                 result = {**(result or {}), "recovery_context": {
@@ -501,6 +504,62 @@ class AgentService:
             chain.state = type(chain.state).SUPERSEDED
             session.last_recovery_evidence = None
             return request.command
+        if chain is not None and any(item.confirmed_effects for item in chain.step_ledger):
+            return {"taskID": "pending", "sessionID": request.sessionID,
+                    "outcome": "clarification_required", "executed": False,
+                    "clarification_question": "上一控制段已执行部分命令，不能整段重放。请查看逐命令结果，明确提交未完成部分作为新任务。",
+                    "reply": "上一控制段已执行部分命令，不能整段重放。请查看逐命令结果，明确提交未完成部分作为新任务。",
+                    "error": {"code": "execution_partial_requires_new_task", "message": "partial segment replay blocked"}}
+        from ..scene.initial_robot import recover_initial_robot_name
+        initial_correction = recover_initial_robot_name(
+            session, request.command, getattr(self.app, "robot_assembly", None),
+            getattr(self.config, "conversation_recovery_max_failed_user_turns", 5))
+        if initial_correction is not None:
+            session.last_recovery_evidence = initial_correction
+            chain.latest_question = None
+            return initial_correction["effective_instruction"]
+        # A failed turn must not make the next complete instruction inherit the
+        # failed turn's entities.  Do a side-effect-free normal understanding
+        # pass before invoking the recovery model.  This deliberately happens
+        # after the explicit ``new_task`` escape hatch, and before any lease,
+        # editor or planner work.  Short continuations such as "左边的" are not
+        # accepted by this gate and therefore continue through failure_context.
+        # A previous recovery attempt can itself have become blocked_system
+        # (for example when the recovery model returned an invalid decision).
+        # That must not permanently trap the conversation: a complete new
+        # instruction is still safe to preview and can supersede the stale
+        # chain without touching the scene, lease, or control backend.  The
+        # preview remains strictly side-effect free; only an accepted,
+        # executable payload passes this gate.  Exhausted chains use the same
+        # rule so an explicit new task can recover without a manual reset.
+        if chain is not None and chain.state.value in {
+                "waiting_user", "resolving", "blocked_environment",
+                "blocked_system", "blocked_reconciliation", "exhausted"}:
+            try:
+                preview = self.app.pipeline.understand_turn(
+                    request.command, scene=session.scene, dialogue=session.dialogue)
+                payload = {
+                    "scene_edit": getattr(preview, "scene_edit", None),
+                    "scene_query": getattr(preview, "scene_query", None),
+                    "robot_task": getattr(preview, "task_intent", None),
+                    "session_control": getattr(preview, "session_control", None),
+                }
+                complete = getattr(preview, "status", None) == "accepted" and any(
+                    (key == "scene_edit" and value is not None and bool(getattr(value, "operations", None)))
+                    or (key == "scene_query" and value is not None and getattr(value, "query_type", None))
+                    or (key == "robot_task" and value is not None and bool(getattr(value, "operations", None)))
+                    or (key == "session_control" and value is not None and getattr(value, "action", None))
+                    for key, value in payload.items())
+                if complete:
+                    chain.state = type(chain.state).SUPERSEDED
+                    chain.latest_question = None
+                    session.last_recovery_evidence = None
+                    return request.command
+            except Exception:
+                # Preview is advisory only.  Any provider/schema failure must
+                # leave the durable chain untouched and use the normal recovery
+                # path below, preserving the historical safety behavior.
+                pass
         if chain is not None and chain.state.value in {"blocked_environment", "blocked_system", "blocked_reconciliation"}:
             return {"taskID": "pending", "sessionID": request.sessionID,
                     "outcome": "failed", "executed": False,
@@ -669,10 +728,11 @@ class AgentService:
                 # uncertainty until the existing reconciliation path supplies
                 # authoritative evidence.
                 "scene_effect": "unknown" if effect_unknown else (
-                    "committed" if after != scene_before_digest and outcome == "scene_updated"
+                    "committed" if after != scene_before_digest
                     else "none_confirmed"),
                 "execution_effect": "unknown" if effect_unknown else (
-                    "completed" if result.get("executed") else "not_started"),
+                    "partial_confirmed" if (result.get("execution") or {}).get("effect") == "partial"
+                    else "completed" if result.get("executed") else "not_started"),
                 "execution_environment": "unknown",
                 "holding_state": "unknown",
                 "publication_state": "unknown" if effect_unknown else (
@@ -734,7 +794,7 @@ class AgentService:
                 step_records = (result.get("metrics") or {}).get("steps", []) if isinstance(result.get("metrics"), dict) else []
                 if not step_records:
                     step_records = [{"step": 1, "instruction": request.command,
-                                     "outcome": outcome, "state": "stopped"}]
+                                     "outcome": outcome, "state": "stopped", "execution": result.get("execution")}]
                 chain.step_ledger = [StepLedgerEntry(
                     step_id=f"step-{item.get('step', index + 1)}",
                     original_step_index=int(item.get("step", index + 1)),
@@ -744,10 +804,15 @@ class AgentService:
                             else "clarification" if item.get("outcome") == "clarification_required"
                             else "rejected" if item.get("outcome") == "failed" else "not_run"),
                     request_ids=[str(item["request_id"])] if item.get("request_id") else [],
+                    confirmed_effects=[str(command["command_id"]) for command in
+                        (item.get("execution") or {}).get("steps", []) if command.get("status") == "success"]
+                        if (item.get("execution") or {}).get("effect") == "partial" else [],
                     receipts=list(result.get("commitReceipts") or []))
                     for index, item in enumerate(step_records)]
                 chain.selection_decisions = list(turn.auto_selection_decisions)
-            elif memory.active_failure_chain is not None and memory.active_failure_chain.state not in {FailureChainState.EXHAUSTED, FailureChainState.BLOCKED_RECONCILIATION}:
+            elif memory.active_failure_chain is not None and memory.active_failure_chain.state not in {
+                    FailureChainState.EXHAUSTED, FailureChainState.BLOCKED_RECONCILIATION,
+                    FailureChainState.SUPERSEDED}:
                 memory.active_failure_chain.state = FailureChainState.RESOLVED
                 memory.upsert_turn(turn)
             else:
@@ -821,12 +886,18 @@ class AgentService:
         if request.change_kind != "scene_edit":
             return None
         try:
-            value = session.pipeline.decompose(request.command, scene=session.scene)
+            from ..scene.initial_robot import split_initial_robot
+            initial_robot, command = split_initial_robot(request.command)
+            value = session.pipeline.decompose(command, scene=session.scene)
+            if value is not None and initial_robot:
+                steps = list(value.steps)
+                steps[0] = steps[0].model_copy(update={"instruction": f"使用 {initial_robot} " + steps[0].instruction})
+                value = value.model_copy(update={"steps": steps})
         except Exception:
             return None
         return None if value is None else list(value.steps)
 
-    def _run_step(self, session, platform, request, identifier, instruction):
+    def _run_step(self, session, platform, request, identifier, instruction, *, expected_turn_kind=None):
         """One turn plus every side effect that turn is allowed to have.
 
         A scene edit commits inside ``app.handle``; an exported plan is dispatched
@@ -835,7 +906,8 @@ class AgentService:
         the clips leave only once the lease does, so the caller keeps them.
         """
         from .camera_policy import choose_camera
-        report = self.app.handle(instruction, session_id=request.sessionID, origin="internal_step")
+        report = self.app.handle(instruction, session_id=request.sessionID, origin="internal_step",
+                                 expected_turn_kind=expected_turn_kind)
         camera_reason = None
         # Original derivation remaps the frozen original IDs, not the previous
         # branch's camera ID. Revalidate semantic binding on the confirmed scene.
@@ -861,6 +933,17 @@ class AgentService:
         if self.execution() is not None and "commands" in report.artifacts \
                 and result["outcome"] == "plan_ready":
             trajs = self.dispatch(session, platform, report, identifier, result)
+        # The plan keeps its original CAS version, but the public result's
+        # identity must describe the same confirmed world as its digest.
+        # Execution may have committed another version after app.handle.
+        if session.scene is not None:
+            result.update(scene_id=session.scene.scene_id,
+                          scene_version=session.scene.scene_version,
+                          scene_sub_version=session.scene.scene_sub_version)
+            result.update(robot_asset=session.robot_asset,
+                          gripper_asset=session.gripper_asset,
+                          camera_asset=session.camera_asset,
+                          execution_capability=session.execution_capability)
         result["sceneDigest"] = digest(session.scene) if session.scene else None
         result["commitReceipts"] = list(platform.receipts)
         return report, result, trajs
@@ -876,6 +959,8 @@ class AgentService:
         side effects, not an undo.
         """
         from ..session.conversation_memory import StepLedgerEntry
+        from ..models.task_decomposition import execution_segments
+        steps, segment_sources = execution_segments(steps)
         all_steps = list(steps)
         results, records, trajs = [], [], []
         prior_ledger = []
@@ -929,6 +1014,13 @@ class AgentService:
             ledger.attempts.append({"attempt": attempts, "outcome": record["outcome"],
                                     "executed": record["executed"], "error": result.get("error")})
             ledger.receipts.extend(receipts)
+            execution = result.get("execution") or {}
+            ledger.confirmed_effects = [str(item["command_id"]) for item in
+                execution.get("steps", []) if item.get("status") == "success"]
+            if execution.get("request_id"):
+                ledger.control_run_ids = [str(execution["request_id"])]
+            if execution.get("effect") == "unknown":
+                ledger.status = "unknown"
             self.app._save_session(request.sessionID)
 
         for index, step in enumerate(steps_to_run, start=skip_count + 1):
@@ -938,17 +1030,23 @@ class AgentService:
             self.app._save_session(request.sessionID)
             self.progress[identifier] = f"拆分执行 {index}/{len(all_steps)} · {step.instruction}"
             receipts_before = len(platform.receipts)
-            report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction)
+            expected_kind = "robot_task" if len(segment_sources[index - 1]) > 1 else None
+            report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction,
+                                                       expected_turn_kind=expected_kind)
             attempts = 1
             while (attempts < self.MAX_STEP_ATTEMPTS and len(platform.receipts) == receipts_before
                    and (result.get("error") or {}).get("code") in self.RETRYABLE_EXECUTION_CODES
                    and self._retry_allowed(result)):
                 attempts += 1
                 self.progress[identifier] = f"拆分执行 {index}/{len(all_steps)} · 第 {attempts} 次尝试 · {step.instruction}"
-                report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction)
+                report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction,
+                                                           expected_turn_kind=expected_kind)
             trajs += step_trajs
             results.append(result)
-            record = {"step": index, "kind": step.kind.value, "instruction": step.instruction,
+            record = {"step": index, "segment_id": f"segment-{index}",
+                      "source_instructions": segment_sources[index - 1],
+                      "execution": result.get("execution"),
+                      "kind": step.kind.value, "instruction": step.instruction,
                       "request_id": report.request_id, "outcome": result["outcome"],
                       "attempts": attempts,
                       "executed": bool(result.get("executed")), "verdict": self.verdict(result),
@@ -976,7 +1074,7 @@ class AgentService:
                 break
             execution = result.get("execution") or {}
             if index < len(all_steps) and record["outcome"] == "scene_updated" and result.get("executed") \
-                    and not execution.get("moved_object_ids"):
+                    and execution.get("writeback_status") != "committed":
                 # The next arm run rebuilds its simulator from the browser document, so a
                 # run that reported no executed pose would leave that step acting on a
                 # world the previous run supposedly changed.  Stop rather than chain.
@@ -1033,7 +1131,8 @@ class AgentService:
             # A run that reported no executed pose wrote nothing back, so claiming the
             # scene now shows the object where the arm left it would be a reading of the
             # report's silence rather than of the world.
-            return ("已执行并写回场景" if (result.get("execution") or {}).get("moved_object_ids")
+            execution = result.get("execution") or {}
+            return ("已执行并写回场景" if execution.get("writeback_status") == "committed"
                     else "已执行未报告位姿")
         return {"scene_updated": "场景已更新", "plan_ready": "计划已生成未执行", "answered": "已回答",
                 "robot_configured": "平台已配置", "clarification_required": "需要澄清",
@@ -1084,8 +1183,15 @@ class AgentService:
                 # stopped step quotes it and keeps the code for the diagnostics.
                 detail = failure_detail(error.get("message"), error.get("code"),
                                         stopped["verdict"])
-                parts.append(f"第 {index} 步「{stopped['instruction']}」未完成：{detail}"
-                             f"{retries}，未执行。")
+                execution = stopped.get("execution") or {}
+                completed_commands = any(step.get("status") == "success"
+                                         for step in execution.get("steps", []))
+                partial_text = ("已完成部分命令，禁止整段重放。" if completed_commands else
+                                "没有命令完成；控制端已报告实际状态，不能假定现场未变化或直接重放。")
+                effect_text = (partial_text if execution.get("effect") == "partial"
+                               else "执行状态待核验。" if execution.get("effect") == "unknown"
+                               else "该步未完成。")
+                parts.append(f"第 {index} 步「{stopped['instruction']}」未完成：{detail}{retries}，{effect_text}")
             remaining = len(steps) - index
             if remaining > 0:
                 parts.append(f" 后续 {remaining} 步未执行。")
@@ -1111,16 +1217,11 @@ class AgentService:
     def dispatch(self, session, platform, report, identifier, result):
         """Act out the exported plan, then make the browser's world the executed one.
 
-        Two rules carry the safety.  Success is claimed only when the runner
-        accounted for every command, since a partial row set cannot be reported as
-        a completed plan; and a run that failed writes no poses back, because the
-        simulator may have left an object mid-transit -- its scratch world is
-        rebuilt from the browser document on the next dispatch, so a half-finished
-        grasp is discarded rather than inherited.  A failed clip is still handed
-        back: showing the arm stop short is the only evidence the browser gets of
-        what went wrong, and playback happens after the lease, so it cannot be
-        mistaken for a committed world.  Returning the trajectory is the caller's
-        job: it has to leave after the lease does.
+        Success requires every command to be accounted for. A partial failure
+        may publish verified actual state, but remains a failed task; incomplete
+        evidence leaves the session uncertain instead of reusing its old pose.
+        Trajectory publication is separate from state commit and happens after
+        lease release. A failed clip is diagnostic, not evidence of success.
         """
         from ..contracts.commands import CommandFeedback, ExecutionFeedback, parse_commands
         from ..ports.execution import ExecutionOutcome
@@ -1133,8 +1234,14 @@ class AgentService:
         total = len(commands.commands)
 
         def progress(steps):
-            self.progress[identifier] = f"执行中 {len(steps)}/{total} · {steps[-1].skill_name}"
+            # The upstream JSONL stream can be empty during initialization.
+            # Progress is observation only: it must not interrupt the child or
+            # replace its eventual initialization failure with IndexError.
+            self.progress[identifier] = (f"执行中 {len(steps)}/{total} · {steps[-1].skill_name}"
+                                         if steps else f"控制端初始化中 0/{total}")
 
+        prior_arm_states = session.arm_states.model_copy(deep=True) if session.arm_states is not None else None
+        prior_holding = session.holding_object
         session.mark_dispatched(commands)
         try:
             outcome = self.execution().run(commands, session.scene.raw_document(), progress=progress)
@@ -1146,37 +1253,68 @@ class AgentService:
         reported = {step.command_id for step in outcome.steps}
         success = (outcome.ok and reported == {command.command_id for command in commands.commands}
                    and all(step.status == "success" for step in outcome.steps))
-        candidate = self.executed_scene(session.scene, outcome, commands) if success else None
+        candidate = self.executed_scene(session.scene, outcome, commands) if success or outcome.state_verified else None
         session.apply_execution_feedback(
             ExecutionFeedback(request_id=commands.request_id, status="success" if success else "partial",
+                              holding_object=outcome.holding_object,
                               commands=[CommandFeedback(command_id=step.command_id,
                                                          status="success" if step.status == "success" else "failed")
                                         for step in outcome.steps]),
             confirmed_scene=candidate, feedback_source="external")
-        if candidate is None and digest(platform.read_live(lease_snapshot=False)) == digest(session.scene):
+        if candidate is not None:
+            # Feedback returns only after the platform commit and snapshot
+            # verification. Replace the pre-execution planning report's status;
+            # a verified partial execution can also have committed actual state.
+            result["scene_commit_status"] = "committed"
+        no_effect = (outcome.no_effect_verified and not outcome.ok and not outcome.steps
+                     and not outcome.moved and not outcome.articulated_joints
+                     and outcome.holding_object is None and outcome.traj_path is None)
+        if candidate is None and not any(step.status == "success" for step in outcome.steps) \
+                and not outcome.moved and not outcome.articulated_joints \
+                and no_effect \
+                and digest(platform.read_live(lease_snapshot=False)) == digest(session.scene):
             # Nothing was committed and the browser still shows the planned world, so
             # "synchronized" here is a reading rather than an assumption.
             session.sync_state = "synchronized"
-        # ``retry_safe`` is deliberately narrower than a failed status.  A
-        # complete all-failed report with no movement/holding is explicit
-        # evidence that no effect landed; partial/unknown reports are never
-        # replayed automatically.
-        # The retryable control codes are explicit no-effect refusals in the
-        # current adapter contract (grasp/placement search never committed a
-        # pose).  A report with any successful command is partial/unknown and
-        # blocks replay; an explicit held-object state also blocks it.  The
-        # adapter may still include an uncommitted diagnostic pose on an
-        # all-failed report, which is not a committed effect.
-        all_failed = bool(outcome.steps) and all(step.status == "failed" for step in outcome.steps)
-        retry_safe = (not success and all_failed
+            if no_effect:
+                session.arm_states = prior_arm_states
+                session.holding_object = prior_holding
+        # A failed planning code alone cannot prove no effect: gripper startup
+        # or simulation settling may have happened before the first command.
+        retry_safe = (not success and no_effect
                       and outcome.error_code in self.RETRYABLE_EXECUTION_CODES
-                      and outcome.holding_object is None)
+                      and outcome.holding_object is None and session.sync_state == "synchronized"
+                      and not outcome.moved and not outcome.articulated_joints)
+        operation_commands = {}
+        for item in (result.get("metrics") or {}).get("command_operation_map", []):
+            operation_commands.setdefault(item["operation_id"], []).append(item["command_id"])
+        command_status = {step.command_id: step.status for step in outcome.steps}
+        operation_results = []
+        for operation_id, ids in operation_commands.items():
+            statuses = [command_status.get(cid, "not_run") for cid in ids]
+            operation_results.append({"operation_id": operation_id, "command_ids": ids,
+                "status": ("completed" if all(status == "success" for status in statuses) else
+                           "not_run" if all(status == "not_run" for status in statuses) else "incomplete"),
+                "completed_command_ids": [cid for cid in ids if command_status.get(cid) == "success"]})
         result.update(executed=success, outcome="scene_updated" if success else "failed",
                       execution={**outcome.summary,
+                                 "operation_results": operation_results,
+                                 "request_id": commands.request_id,
+                                 "command_ids": [command.command_id for command in commands.commands],
+                                 "not_run_command_ids": [command.command_id for command in commands.commands
+                                                         if command.command_id not in reported],
+                                 "active_joint_object_ids": list(outcome.active_joint_ids),
+                                 "final_joint_positions_rad": outcome.articulated_joints,
+                                 "effect": "completed" if success else (
+                                     "none" if no_effect else
+                                     "partial" if candidate is not None or any(
+                                         step.status == "success" for step in outcome.steps) else "unknown"),
                                  "retry_safe": retry_safe,
                                  "writeback_status": "committed" if candidate is not None else "none"},
                       reply=(f"已执行 {total} 条命令并写回场景。" if success else
-                             f"执行未完成：{failure_detail(outcome.detail, outcome.error_code)}。"))
+                             f"执行未完成：{failure_detail(outcome.detail, outcome.error_code)}。" +
+                             ("已同步控制端确认的实际状态，未重放已完成动作。" if candidate is not None else
+                              "当前执行状态待核验，不能按旧场景继续操作。" if session.sync_state != "synchronized" else "")))
         if not success:
             result["error"] = {"code": outcome.error_code or "execution_failed",
                                "message": outcome.detail or "控制端未报告成功",
@@ -1199,8 +1337,25 @@ class AgentService:
                    if isinstance(getattr(command.parameters, "target", None), int)}
         objects = {item.object_id_in_scene: item for item in scene.objects}
         operations = []
-        for object_id, pose in sorted(outcome.moved.items()):
-            if object_id not in touched:
+        moved = outcome.moved
+        if outcome.final_scene is not None:
+            if not outcome.state_verified:
+                raise ValueError('execution_final_scene_unverified')
+            # Upstream final Scene already expresses parent-relative transforms.
+            # Do not write world-state poses directly into a parented Scene.
+            moved = {}
+            for item in outcome.final_scene['objects']:
+                object_id = item['object_id_in_scene']
+                obj = objects.get(object_id)
+                if obj is None:
+                    raise ValueError(f'execution_reported_unknown_object: {object_id}')
+                before = next((c.properties for c in obj.components if c.component_type == 'Transform'), None)
+                after = next((c['properties'] for c in item['components'] if c['component_type'] == 'Transform'), None)
+                if before is not None and after is not None and any(
+                        before.get(key) != after.get(key) for key in ('position', 'quaternion_xyzw')):
+                    moved[object_id] = after
+        for object_id, pose in sorted(moved.items()):
+            if object_id not in touched and not outcome.state_verified:
                 continue
             obj = objects.get(object_id)
             if obj is None:
@@ -1214,6 +1369,32 @@ class AgentService:
                 component=SceneComponent(component_type="Transform", properties={
                     **transform.properties, "position": list(pose["position"]),
                     "quaternion_xyzw": list(pose["quaternion_xyzw"])})))
+        # Articulated passive objects (drawers, doors, etc.) report joint state,
+        # not a Transform pose.  Persist only measured state from a successful
+        # control run; never infer it from a planned push/pull command.
+        for object_id, joints in sorted(outcome.articulated_joints.items()):
+            if object_id not in touched and object_id not in outcome.active_joint_ids and not outcome.state_verified:
+                continue
+            obj = objects.get(object_id)
+            if obj is None:
+                raise ValueError(f"execution_reported_unknown_object: {object_id}")
+            driver = next((component for component in obj.components
+                           if component.component_type == "RobotDriver"), None)
+            if driver is None or not driver.properties.get("joint_sequence"):
+                raise ValueError(f"execution_object_without_articulated_driver: {object_id}")
+            expected = set(driver.properties["joint_sequence"])
+            if set(joints) - expected:
+                raise ValueError(f"execution_reported_unknown_joint: {object_id}")
+            import math
+            if set(joints) != expected or not all(isinstance(value, (int, float))
+                    and not isinstance(value, bool) and math.isfinite(value) for value in joints.values()):
+                raise ValueError(f"execution_reported_incomplete_joint_state: {object_id}")
+            operations.append(ScenePatchOperation(
+                action=PatchAction.UPSERT_COMPONENT, object_id_in_scene=object_id,
+                component=SceneComponent(component_type="RobotDriver", properties={
+                    **driver.properties,
+                    "now_joint_positions_rad": {**driver.properties.get("now_joint_positions_rad", {}),
+                                                **{name: float(joints[name]) for name in joints}}})))
         if not operations:
             return None
         return SceneManager(scene).apply_patch(ScenePatch(scene_id=scene.scene_id,
@@ -1422,8 +1603,13 @@ class AgentService:
         detail = {"taskID": identifier, "trajs": [str(path) for path in trajs]}
         try:
             session = self._bind(record["session"])
+            result = record.get("result") or {}
+            expected = {key: result.get(key) for key in
+                        ("scene_id", "scene_version", "scene_sub_version", "sceneDigest")}
+            if any(value is None for value in expected.values()):
+                raise ValueError("trajectory_result_identity_missing")
             reply = session.platform.push_trajs(
-                trajs, request_id=(record.get("result") or {}).get("request_id"))
+                trajs, request_id=result.get("request_id"), expected_identity=expected)
             detail["reply"] = reply
         except (httpx.HTTPError, ValueError, OSError) as exc:
             detail.update(accepted=False, error=f"{type(exc).__name__}: {exc}")

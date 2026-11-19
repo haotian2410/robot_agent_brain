@@ -110,7 +110,7 @@ class OlsRobotAssemblyAdapter:
                 role = "arm"
             elif child:
                 role = "gripper"
-            elif any("camera" in tag for tag in tags) or "camera" in name.casefold():
+            elif any("camera" in tag.casefold() or "相机" in tag for tag in tags) or "camera" in name.casefold():
                 role = "camera"
             else:
                 role = "prop"
@@ -351,17 +351,18 @@ class OlsRobotAssemblyAdapter:
             parent_joint = target_arm.connect_joints[0]
             parent_link = target_arm.connect_links[0]
             driver = self._scene_driver(target_gripper.driver)
-            mount_position = (target_gripper.driver or {}).get("position") or [[0.0, 0.0, 0.0]]
-            mount_quaternion = (target_gripper.driver or {}).get("quaternion_xyzw") or [[0.0, 0.0, 0.0, 1.0]]
-            # OLS gripper metadata does not always carry the already verified
-            # fixed mount transform.  When retaining the same gripper during
-            # an arm switch, preserve that Scene attachment transform rather
-            # than replacing it with an invented zero/identity pose.
+            # The arm owns the parent-link mount tables; the gripper owns only
+            # child_link. Never carry a UR5 mount transform into UR10/Piper.
+            mount_position = (target_arm.driver or {}).get("position")
+            mount_quaternion = (target_arm.driver or {}).get("quaternion_xyzw")
             old_attachment = SceneIndex(scene).component(gid, "RobotAttachment") if gid in objects else None
             old_mount = old_attachment.properties.get("transform") if old_attachment is not None else None
-            if not gripper_changed and isinstance(old_mount, dict):
+            if not arm_changed and not gripper_changed and isinstance(old_mount, dict):
                 mount_position = [old_mount.get("position", [0.0, 0.0, 0.0])]
                 mount_quaternion = [old_mount.get("quaternion_xyzw", [0.0, 0.0, 0.0, 1.0])]
+            if (not isinstance(mount_position, list) or len(mount_position) != 1
+                    or not isinstance(mount_quaternion, list) or len(mount_quaternion) != 1):
+                raise ValueError("robot_assembly_mount_pose_missing")
             position = list(mount_position[0]) if mount_position and isinstance(mount_position[0], list) else [0.0, 0.0, 0.0]
             quaternion = list(mount_quaternion[0]) if mount_quaternion and isinstance(mount_quaternion[0], list) else [0.0, 0.0, 0.0, 1.0]
             gripper_obj = objects[gid] if gid in objects else SceneObject.model_validate({
@@ -438,7 +439,8 @@ class OlsRobotAssemblyAdapter:
         payload["scene_sub_version"] = scene.scene_sub_version + 1
         payload.pop("scene_version", None)
         payload["scene_version"] = scene.scene_version
-        candidate = SceneConfig.model_validate(payload)
+        from .scene_file_codec import SceneFileCodec
+        candidate = SceneFileCodec(self.assets).decode(payload)
         return candidate, {"noop": False, "changed_roles": changed_roles, "robot_asset": target_arm.semantic_name,
                            "gripper_asset": target_gripper.semantic_name if target_gripper else (current["gripper"][0][1].semantic_name if current["gripper"] else None),
                            "camera_asset": target_camera.semantic_name if target_camera else (current["camera"][0][1].semantic_name if current["camera"] else None),

@@ -193,6 +193,30 @@ open/close（后者按 approach→pick→pull/push→retreat 抓把手推拉）�
 Replay 只支持理解回放；`--planner qwen` 会报 `skill_planning_provider_missing`，
 而 recipe/auto 可继续回放。
 
+### Qwen 阶段并发基准
+
+只测模型服务层、但严格复用 Brain 的 `task_understanding`、`vision_grounding` 和
+atomic `skill_planning` 请求格式，可运行：
+
+```bash
+python scripts/qwen_stage_benchmark.py \
+  --model "$QWEN_MODEL" \
+  --stages understanding,vision,atomic \
+  --vision-image /path/to/real-camera-frame.png \
+  --gpu-mode dual \
+  --output-dir var/qwen-benchmark
+```
+
+脚本不会启动或重启 Qwen 服务；单卡/双卡需要先手动设置 `CUDA_VISIBLE_DEVICES` 启动
+`llama-server`。默认并发档位为 `1,3,5,10,20,30,50,70,100`，每档 1 次 warmup、3 次
+正式 wave。报告中的 `http_ttfb_nonstream` 是非流式 HTTP 首字节时间，不等同于首 token
+时间；vision 阶段没有真实图片时会跳过，不使用占位图像。
+
+每次运行会在输出目录生成 `environment.json`、`request_fixtures.json`、`samples.jsonl`、
+`wave_results.jsonl`、`gpu_samples.jsonl`、`summary.json`、`summary.csv` 和
+`summary.md`，并保存运行前后的 server props/slots；所有已发出的请求（包括失败请求）
+都会进入统计。
+
 `result.json.metrics` 记录逐阶段调用数和实际 planner；`--debug` 额外保存
 planner_context、raw_skill_plan、normalized_skill_plan、
 skill_plan_validation。失败不输出本轮 commands、不链接旧 commands、不伪造执行；
@@ -210,6 +234,19 @@ OUTPUT/SESSION/REQUEST/scene_patch.json    # 场景编辑时
 OUTPUT/SESSION/REQUEST/commands.json       # 合法机器人计划时
 OUTPUT/SESSION/REQUEST/query_result.json   # 查询时
 ```
+
+固定 system/catalog、仅变化 understanding instruction 的 slots 压测会在当前三阶段基线完成后
+自动执行：
+
+```bash
+python scripts/qwen_slot_sweep.py \
+  --baseline-pid 3468867 \
+  --slots 4,8,16,32 \
+  --concurrency 1,3,5,10,20,30,50,70,100
+```
+
+它会等待基线进程退出，再使用相同模型参数逐档重启 `llama-server --parallel N`，并把每档结果
+写入 `var/qwen-benchmark-slot-sweep/<run-id>/slot-N/`；确认 OOM 后停止更高档位。
 
 机器人报告明确显示“尚未执行”，`executed=false`。场景和 commands 的 ID/版本匹配。
 `scene_config.json` 是**团队组件 Scene v1 JSON，不是 scene.xml/MJCF**；

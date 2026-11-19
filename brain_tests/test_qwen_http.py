@@ -1,7 +1,7 @@
 import json
 import httpx
 import pytest
-from robot_agent_brain.models.qwen_http import QwenHTTPProvider, QwenProviderError
+from robot_agent_brain.models.qwen_http import QwenHTTPProvider, QwenProviderError, _repair_drawer_push_synonym
 from robot_agent_brain.models.task_understanding import TaskUnderstandingRequest
 from robot_agent_brain.models.failure_context import FailureContextRequest
 
@@ -170,6 +170,36 @@ def test_qwen_valid_open_close_reference_remains_accepted():
     turn = provider.understand_turn(TaskUnderstandingRequest(instruction="open microwave door by handle"))
     assert turn.status.value == "accepted"
     assert turn.task_intent.operations[0].reference == "handle"
+
+
+def test_qwen_drawer_open_without_reference_targets_drawer_object():
+    raw = _task_payload(
+        entities=[{"id": "drawer", "name": "drawer", "category": "articulated_object"}],
+        operations=[{"type": "open", "target": "drawer"}],
+    )
+    provider = QwenHTTPProvider("http://example/v1", "qwen-test",
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))))
+    turn = provider.understand_turn(TaskUnderstandingRequest(instruction="拉开抽屉"))
+    assert turn.status.value == "accepted"
+    assert turn.task_intent.operations[0].target == "drawer"
+    assert turn.task_intent.operations[0].reference is None
+
+
+def test_qwen_drawer_push_back_is_close_without_layer_clarification():
+    value = {
+        "status": "clarification_required",
+        "turn_kind": "robot_task",
+        "clarification_question": "请指定上层或下层抽屉",
+    }
+    repaired = _repair_drawer_push_synonym(value, "推回抽屉")
+    assert repaired["status"] == "accepted"
+    assert repaired["entities"][0]["semantic_name"] == "drawer"
+    assert repaired["operations"] == [{"operation": "close", "target": "drawer"}]
+
+
+def test_qwen_drawer_push_repair_does_not_rewrite_other_objects():
+    value = {"status": "clarification_required", "turn_kind": "robot_task"}
+    assert _repair_drawer_push_synonym(value, "把箱子推回去") is value
 
 
 def test_qwen_explicit_replace_phrase_repairs_omitted_replacement_role():

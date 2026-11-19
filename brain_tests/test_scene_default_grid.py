@@ -137,6 +137,6 @@ def test_web_config_contains_scene_add_defaults():
     assert set(config.default_scene_edit_assets) == {
         "apple", "banana", "baseball", "basket", "pen", "screwdriver", "gum_bottle", "cream",
         "marker", "test_tube_rack", "mug", "rubiks_cube", "school_bell", "tray", "coffee_table",
-        "sugar_box", "test_tube", "doll", "drawer", "cabinet", "table", "microwave", "bottle",
+        "sugar_box", "test_tube", "toy_panda", "drawer", "cabinet", "table", "microwave", "bottle",
         "button", "can",
     }

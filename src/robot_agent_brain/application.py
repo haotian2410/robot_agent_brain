@@ -139,7 +139,9 @@ class BrainApplication:
             field, value = text(amendment.get("field")), amendment.get("value")
             wanted = text(value)
             found = False
-            if field == "color":
+            if field == "initial_robot_asset":
+                found = text(getattr(turn, "initial_robot_asset", None)) == wanted
+            elif field == "color":
                 found = any(text(getattr(item, "color", None)) == wanted for item in entities)
                 found = found or any(text((getattr(op, "properties", {}) or {}).get("color")) == wanted
                                      for op in operations)
@@ -389,15 +391,31 @@ class BrainApplication:
             pass
         return None
 
-    def handle(self, instruction, *, session_id=None, scene_path=None, origin="external"):
+    def handle(self, instruction, *, session_id=None, scene_path=None, origin="external", expected_turn_kind=None):
         session_id = session_id or uuid.uuid4().hex
+        report = None
         try:
             with self.store.lock(session_id):
-                report = self._handle(instruction, session_id=session_id, scene_path=scene_path)
+                report = self._handle(instruction, session_id=session_id, scene_path=scene_path,
+                                      expected_turn_kind=expected_turn_kind)
                 if origin == "external":
                     self._record_cli_turn(session_id, instruction, report)
                 return report
         except Exception as exc:
+            if report is not None:
+                # Conversation persistence happens after _handle may already
+                # have committed/published. Never replace that evidence with a
+                # fresh request reporting an unchanged scene.
+                secret = self.config.api_key.get_secret_value() if self.config.api_key else None
+                issue = self._issue(exc, "conversation_persistence")
+                issue = BrainIssue.model_validate(redact(issue.model_dump(), secret))
+                report.run_status = "failed"
+                report.metrics["conversation_persistence_error"] = issue.model_dump(mode="json")
+                if report.error is None:
+                    report.error = issue
+                    report.reply = "对话记录保存失败；场景提交状态：" + report.scene_commit_status
+                report.assumptions.append("Conversation persistence failed; inspect the original request before retrying commands")
+                return report
             # Lock/restore failures happen before a safe request directory can
             # be published. Still return a complete report, never old artifacts.
             issue = self._issue(exc, "session_restore")
@@ -565,7 +583,7 @@ class BrainApplication:
                                         robot_setup_revision=robot_setup_revision, source=source)
             self._save_session(session_id)
 
-    def _handle(self, instruction, *, session_id, scene_path=None):
+    def _handle(self, instruction, *, session_id, scene_path=None, expected_turn_kind=None):
         request_id = uuid.uuid4().hex
         session = self.get_session(session_id)
         started = time.monotonic()
@@ -622,6 +640,8 @@ class BrainApplication:
                     self._load_scene_object(session_id, pending_import)
                     report.scene_commit_status = "committed"
                 raise
+            if turn.status == "accepted" and expected_turn_kind and turn.turn_kind != expected_turn_kind:
+                raise ValueError("segment_route_mismatch: 连续机器人段必须保持机器人任务语义，本段未下发")
             report.turn_kind, report.turn_status = turn.turn_kind, turn.status
             if turn.status != "accepted":
                 if pending_import is not None:
@@ -657,6 +677,28 @@ class BrainApplication:
                 initial_edit = None
                 initial_profile = None
                 active_bootstrapper = self.bootstrapper
+                if turn.initial_robot_asset is not None:
+                    if self.robot_assembly is None:
+                        raise ValueError("robot_assembly_adapter_unavailable")
+                    requested = self.robot_assembly.resolve(turn.initial_robot_asset, role="arm")
+                    if session.scene is not None:
+                        current = self.robot_assembly.scene_binding(session.scene)
+                        actual = self.robot_assembly.resolve(current["robot_asset"], role="arm")
+                        if requested.asset_key != actual.asset_key:
+                            raise ValueError("robot_initialization_requires_empty_session: 请新建空会话选择其他机械臂")
+                    else:
+                        import copy
+                        from .scene.component_access import SceneIndex
+                        if self.bootstrapper.template_scene is None:
+                            raise ValueError("bootstrap_config_missing")
+                        template, binding = self.robot_assembly.rebind_scene(
+                            self.bootstrapper.template_scene, robot_asset=requested.semantic_name)
+                        active_bootstrapper = copy.copy(self.bootstrapper)
+                        active_bootstrapper.template_scene = template
+                        arm_id = self.robot_assembly.classify_scene(template)["arm"][0][0]
+                        active_bootstrapper.robot_ref = SceneIndex(template).metadata_ref(arm_id)
+                        active_bootstrapper.driver = SceneIndex(template).robot_driver(arm_id)
+                        active_bootstrapper.robot = requested.semantic_name
                 if session.scene is None and turn.turn_kind not in {"scene_query", "session_control"}:
                     stage = "bootstrap"
                     from secrets import randbits
@@ -692,7 +734,7 @@ class BrainApplication:
                         initial = None
                     else:
                         setup_request = turn.robot_setup_request
-                        if setup_request is None and self.config.robot_profiles.default_single is not None:
+                        if setup_request is None and turn.initial_robot_asset is None and self.config.robot_profiles.default_single is not None:
                             setup_request = RobotSetupRequest(mode="single")
                         if setup_request is not None:
                             initial_profile = self.config.robot_profiles.resolve(setup_request)
@@ -750,6 +792,11 @@ class BrainApplication:
                     report.camera_asset = session.camera_asset
                     report.platform_rebind_revision = session.platform_rebind_revision
                 if report.scene_created and result.platform_rebind is None:
+                    if turn.initial_robot_asset is not None:
+                        binding = self.robot_assembly.scene_binding(session.scene)
+                        session.robot_asset = binding.get("robot_asset")
+                        session.gripper_asset = binding.get("gripper_asset")
+                        session.camera_asset = binding.get("camera_asset")
                     session.platform_object_ids = ({o.object_id_in_scene for o in active_bootstrapper.template_scene.objects}
                         if active_bootstrapper.template_scene is not None else {self.defaults.table_object_id, self.defaults.robot_object_id})
                 if result.commands is not None:
@@ -860,6 +907,8 @@ class BrainApplication:
                           "skill_planning_calls":planning_trace.model_calls if planning_trace else 0,
                           "planner_requested":self.config.planner,
                           "planner_used":planning_trace.used_planner if planning_trace else None,
+                          "command_operation_map": ((planning_trace.validation or {}).get("command_operation_map", [])
+                                                    if planning_trace else []),
                           "vision_calls":sum(call.get("stage") == "vision_grounding" for call in current_calls),
                           "elapsed_seconds":time.monotonic()-started,
                           "model_calls":current_calls,

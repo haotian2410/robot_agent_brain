@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from ..contracts.asset_library import BrainAssetView
 from .asset_features import matches_features, tag_overlap_score
 from .colors import ColorResolver
+from ..asset_name_normalization import canonical_name
 
 
 @dataclass
@@ -84,9 +85,9 @@ class AssetResolver:
 
         # Tiebreaker 1: semantic_name match
         if tied > 1 and entity.semantic_name:
-            name = entity.semantic_name.strip().casefold()
-            name = self.aliases.get(name, name)
-            name_matches = [(v, s) for v, s in top_candidates if v.semantic_name.casefold() == name]
+            name = canonical_name(entity.semantic_name, self.aliases)
+            name_matches = [(v, s) for v, s in top_candidates
+                            if canonical_name(v.semantic_name, self.aliases) == name]
             if 0 < len(name_matches) < len(top_candidates):
                 top_candidates = name_matches
                 via = "name"
@@ -95,7 +96,7 @@ class AssetResolver:
         if len(top_candidates) > 1 and allow_default:
             # First try entity.semantic_name
             if entity.semantic_name:
-                name = entity.semantic_name.strip().casefold()
+                name = canonical_name(entity.semantic_name, self.aliases)
                 if name in self.default_refs:
                     default_model = self.catalog.resolve(self.default_refs[name], asset_type="model")
                     default_match = [(v, s) for v, s in top_candidates if v.library_asset_id == default_model.library_asset_id]
@@ -105,8 +106,9 @@ class AssetResolver:
             # Then try matching any candidate's semantic_name against default_refs keys
             if len(top_candidates) > 1:
                 for v, s in top_candidates:
-                    if v.semantic_name.casefold() in self.default_refs:
-                        default_model = self.catalog.resolve(self.default_refs[v.semantic_name.casefold()], asset_type="model")
+                    v_name = canonical_name(v.semantic_name, self.aliases)
+                    if v_name in self.default_refs:
+                        default_model = self.catalog.resolve(self.default_refs[v_name], asset_type="model")
                         if default_model.library_asset_id == v.library_asset_id:
                             top_candidates = [(v, s)]
                             via = "default"
@@ -140,8 +142,7 @@ class AssetResolver:
 
     def _resolve_by_name(self, entity, category, infer_category, allow_default, allow_color_override):
         """Resolve asset by semantic_name (legacy path)."""
-        name = entity.semantic_name.strip().casefold()
-        name = self.aliases.get(name, name)
+        name = canonical_name(entity.semantic_name, self.aliases)
 
         if ((entity.color or entity.tags)
                 and not getattr(self.catalog, "supports_features", False)

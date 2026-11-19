@@ -114,9 +114,11 @@ class AtomicPlanner:
                 commands = self._envelope(request_id, scene, expand_atomic_plan(task, held_object))
                 # The guard is the contract, not a model-output audit, and it is
                 # also what puts a requested side offset onto the export.
-                commands = AtomicPlanValidator().validate(commands, task, scene, held_object=held_object)
+                validator = AtomicPlanValidator()
+                commands = validator.validate(commands, task, scene, held_object=held_object)
+                trace.validation = {"command_operation_map": validator.command_operation_map}
             trace.normalized = commands
-            trace.validation = {"valid": True, "scope": "atomic_assembly"}
+            trace.validation = {**(trace.validation or {}), "valid": True, "scope": "atomic_assembly"}
             return commands
         except Exception as exc:
             trace.validation = {"valid": False, "error": f"{type(exc).__name__}: {exc}"}
@@ -165,7 +167,9 @@ class AtomicPlanner:
         # Run the guard once more for its return value: it pins every ``put``
         # offset onto the landing the task declared, and the document it hands
         # back is the one that ships.
-        return validator.validate(finalize(draft.commands), task, scene, held_object=held_object)
+        commands = validator.validate(finalize(draft.commands), task, scene, held_object=held_object)
+        trace.validation = {"command_operation_map": validator.command_operation_map}
+        return commands
 
     @staticmethod
     def _envelope(request_id, scene, commands):

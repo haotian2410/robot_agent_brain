@@ -27,7 +27,7 @@ class FixtureLibrary:
                 category="tool", **geometry(16).model_dump()),
         ]
 
-    def resolve(self, reference):
+    def resolve(self, reference, asset_type=None):
         return next(model for model in self.models if model.metadata_ref == reference)
 
     def find_by_name(self, name):

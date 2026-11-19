@@ -1,4 +1,5 @@
 """Public explanations; retain the original issue in per-turn diagnostic evidence."""
+from ..asset_name_normalization import canonical_name
 
 
 def _scene_contains_entity(scene, name):
@@ -10,14 +11,14 @@ def _scene_contains_entity(scene, name):
     """
     if scene is None or not name:
         return False
-    needle = name.casefold().replace("-", "_")
+    needle = canonical_name(name)
     for obj in scene.objects:
         values = [obj.object_name_in_scene or ""]
         for component in obj.components:
             if component.component_type == "Semantic":
                 values.append(str(component.properties.get("semantic_name") or ""))
         for value in values:
-            normalized = value.casefold().replace("-", "_")
+            normalized = canonical_name(value)
             if needle == normalized or needle in normalized or normalized in needle:
                 return True
     return False
@@ -31,7 +32,12 @@ def explain_issue(issue, exc, scene, assets):
     code = issue.code
     original = issue.message
     question = None
-    if code == "asset_missing" or (code == "grounding_missing" and original.split(":", 1)[-1].strip().casefold() in {"box", "盒子"}):
+    if code == "robot_asset_unknown":
+        name = original.split(":", 1)[-1].strip()
+        question = (f"当前 OLS 目录中没有找到机械臂型号“{name}”。请核对并提供准确型号。"
+                    "若已开启上下文恢复且当前空会话尚未初始化，可直接补充型号，保留原任务继续处理；"
+                    "系统不会自动猜测或替换型号。")
+    elif code == "asset_missing" or (code == "grounding_missing" and original.split(":", 1)[-1].strip().casefold() in {"box", "盒子"}):
         name = original.split(":", 1)[-1].strip()
         candidates = assets.find_by_category("container") if name.casefold() in {"box", "盒子"} else []
         names = list(dict.fromkeys(m.semantic_name + ("（" + "/".join(m.tags) + "）" if m.tags else "") for m in candidates))

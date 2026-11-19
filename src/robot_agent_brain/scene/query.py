@@ -9,6 +9,7 @@ from ..contracts.task_intent import TaskIntent
 from ..grounding.semantic_entity_selector import SemanticEntitySelector
 from ..contracts.spatial import ResolvedSelectionRelation
 from ..grounding.scene_relation_resolver import SceneRelationResolver
+from ..asset_name_normalization import canonical_name
 from .geometry import world_bounds
 
 class SceneQueryResult(BaseModel):
@@ -78,7 +79,7 @@ class SceneQueryEngine:
                 if (oid == reference_id or index.metadata_type(oid) == "robot"
                         or index.component(oid, "Camera") or index.component(oid, "RobotAttachment")
                         or semantic.category.casefold() in {"robot", "camera", "light", "table", "platform"}
-                        or semantic.semantic_name.casefold() in {"table", "work_table", "robot_pedestal"}):
+                        or canonical_name(semantic.semantic_name) in {"table", "work_table", "robot_pedestal"}):
                     continue
                 if semantic.support == reference_id or support == oid:
                     continue

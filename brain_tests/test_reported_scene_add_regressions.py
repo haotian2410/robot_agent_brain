@@ -1,3 +1,4 @@
+import os
 import unittest
 
 from robot_agent_brain.config import BrainConfig
@@ -64,7 +65,10 @@ class ReportedSceneAddTests(unittest.TestCase):
         self.assertEqual(_normalize_scene_edit_layout_output(value, "在桌子右上角生成苹果，左下角生成香蕉"), value)
 
     def test_local_microwave_is_addable_but_robot_is_not(self):
-        config = BrainConfig.load("config/webeditor_local.json")
+        path = os.environ.get("ROBOT_BRAIN_RUNTIME_CONFIG")
+        if not path:
+            self.skipTest("set ROBOT_BRAIN_RUNTIME_CONFIG for installed OLS verification")
+        config = BrainConfig.load(path)
         # Read authoritative OLS metadata independently of a derived cache.
         config = config.model_copy(update={"asset_geometry_cache": None})
         snapshot = config.load_assets().catalog_snapshot()

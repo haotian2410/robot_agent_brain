@@ -99,11 +99,15 @@ def test_live_qwen_payload_contains_full_current_ols_catalog_and_scenes():
     model_index = json.loads((root / "models" / "model_index.json").read_text())
     robot_index = json.loads((root / "robots" / "robot_index.json").read_text())
     scene_index = json.loads((root / "scenes" / "scene_index.json").read_text())
-    assert len(body["asset_catalog"]["models"]) == len(model_index["by_id"])
-    assert len(body["asset_catalog"]["robots"]) == len(robot_index["by_id"])
+    visible_models = sum(not model_index.get("no_display", {}).get(identifier, False)
+                         for identifier in model_index["by_id"])
+    visible_robots = sum(not robot_index.get("no_display", {}).get(identifier, False)
+                         for identifier in robot_index["by_id"])
+    assert len(body["asset_catalog"]["models"]) == visible_models
+    assert len(body["asset_catalog"]["robots"]) == visible_robots
     assert len(body["asset_catalog"]["scenes"]) == len(index_by_id(scene_index))
-    assert {item["name"] for item in body["asset_catalog"]["scenes"]} >= {"ur5e_table_empty", "piper_table_twist"}
-    assert "scene_name=ur5e_table_empty" in requests[0]["messages"][0]["content"]
+    assert {item["name"] for item in body["asset_catalog"]["scenes"]} >= {"ur5_table_empty", "piper_table_twist"}
+    assert "scene_name=ur5_table_empty" in requests[0]["messages"][0]["content"]
 
 
 def test_asset_prompt_labels_passive_platform_and_tabletop_usage():
@@ -120,7 +124,8 @@ def test_asset_prompt_labels_passive_platform_and_tabletop_usage():
                                         library_ref_prefix=config["library_ref_prefix"])
     from robot_agent_brain.models.prompts import build_asset_catalog_prompt
     prompt, _ = build_asset_catalog_prompt(adapter)
-    assert "model:29" in prompt and "usage=support_surface" in prompt
+    assert "model:29" not in prompt  # OLS marks the built-in table no_display.
+    assert "model:44" in prompt and "usage=ordinary_scene_object" in prompt
     assert "model:25" in prompt and "usage=scene_object_without_joint_control" in prompt
     assert "model:30" in prompt and "availability=passive_scene_model" in prompt
     assert "robot:1" in prompt and "usage=robot_platform_capability_boundary" in prompt
@@ -219,8 +224,12 @@ def test_live_pipeline_http_sends_full_catalog_on_every_turn():
     for body in requests:
         catalog = body["messages"][1]["content"]
         payload = json.loads(catalog)
-        assert len(payload["asset_catalog"]["models"]) == len(model_index["by_id"])
-        assert len(payload["asset_catalog"]["robots"]) == len(robot_index["by_id"])
+        visible_models = sum(not model_index.get("no_display", {}).get(identifier, False)
+                             for identifier in model_index["by_id"])
+        visible_robots = sum(not robot_index.get("no_display", {}).get(identifier, False)
+                             for identifier in robot_index["by_id"])
+        assert len(payload["asset_catalog"]["models"]) == visible_models
+        assert len(payload["asset_catalog"]["robots"]) == visible_robots
         assert len(payload["asset_catalog"]["scenes"]) == len(index_by_id(scene_index))
         assert payload["asset_catalog"]["revision"].startswith("sha256:")
         assert "model:1" in body["messages"][0]["content"]
@@ -433,7 +442,7 @@ def test_catalog_snapshot_keeps_scene_templates_separate_from_addable_models():
                                         library_ref_prefix=catalog["library_ref_prefix"])
     snapshot = adapter.catalog_snapshot()
     assert len(snapshot.scenes) == 7
-    assert any(item.scene_key == "scene:1" and item.name == "ur5e_table_empty" for item in snapshot.scenes)
+    assert any(item.scene_key == "scene:1" and item.name == "ur5_table_empty" for item in snapshot.scenes)
     assert all(not item.scene_key.startswith("model:") for item in snapshot.scenes)
 
 

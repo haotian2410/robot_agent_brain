@@ -107,6 +107,7 @@ class BrainConfig(BaseModel):
     execution_library: str | None = None
     execution_link_root: str | None = None
     execution_workspace_root: str | None = None
+    execution_collision_model: Literal['proxy', 'precise'] | None = None
     # The control repository's skill.md is the source of truth for the atomic
     # planning round.  When omitted, derive it from execution_control_root.
     control_skill_prompt: str | None = None

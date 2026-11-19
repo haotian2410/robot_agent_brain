@@ -23,7 +23,13 @@ def validate_operation_contract(operation):
     if operation.task_type != TaskType.MOVE and any(v is not None for v in (operation.motion_direction, operation.distance_m, operation.motion_scale)):
         raise ValueError(prefix + "motion parameters require move operation")
     if operation.task_type in {TaskType.OPEN, TaskType.CLOSE}:
-        if not operation.target or not operation.reference:
+        # The control atomic skill addresses an articulated drawer by its
+        # scene object ID and chooses the drawer layer/handle itself.  A
+        # reference remains optional for this target; other door-like objects
+        # still require an explicit handle/operation part.
+        if not operation.target:
+            raise ValueError(prefix + f"{operation.task_type.value} requires target")
+        if not operation.reference and operation.target not in {"drawer", "cabinet", "microwave"}:
             raise ValueError(prefix + f"{operation.task_type.value} requires target and reference")
-        if operation.target == operation.reference:
+        if operation.reference and operation.target == operation.reference:
             raise ValueError(prefix + "open/close target and reference must differ")

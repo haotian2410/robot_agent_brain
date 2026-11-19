@@ -167,7 +167,9 @@ class SceneBootstrapper:
                                     category_aliases=self.resolver.category_aliases,
                                     default_refs=self.default_scene_edit_assets).resolve(
                                         entity,
-                                        allow_default=turn.turn_kind == "scene_edit",
+                                        # Bootstrap creates new instances; selecting a configured
+                                        # asset default here never resolves an existing target.
+                                        allow_default=True,
                                         allow_color_override=turn.turn_kind == "scene_edit")
             model = binding.model
             bindings[entity.entity_id] = model.metadata_ref

@@ -13,6 +13,18 @@ from robot_agent_brain.contracts.scene import SceneComponent
 from test_query_scene_continuity import supported_scene
 
 
+def test_machine_callback_selects_browser_profile_even_without_json_body():
+    seen = []
+    def respond(request):
+        seen.append(request)
+        return httpx.Response(200, json={})
+    adapter = GatewayScenePlatformAdapter('http://127.0.0.1:8097', 'browser-a',
+        session_id='session-a', client=httpx.Client(transport=httpx.MockTransport(respond)))
+    adapter._call('POST', '/updateTraj', files={'trajs': ('execution.traj', b'traj')})
+    assert seen[0].headers['X-WebEditor-Browser-ID'] == 'browser-a'
+    assert seen[0].headers['X-Brain-Session'] == 'session-a'
+
+
 class Browser:
     """Explicit test double, NOT the supplied WebEditor release."""
 

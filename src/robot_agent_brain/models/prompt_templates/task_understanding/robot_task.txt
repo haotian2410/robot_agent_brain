@@ -1,1 +1,4 @@
-robot_task 只保留用户明确的 source、destination、target、数量、顺序、抓取/释放关系。放进容器用 placement_target.kind=container_interior；不要把 inside 误写成场景编辑。缺少门/抽屉操作参照物时返回 clarification_required；双臂没有明确对象分配时同样只返回无 payload 的澄清。
+robot_task 只保留用户明确的 source、destination、target、数量、顺序、抓取/释放关系。放进容器用 placement_target.kind=container_interior；不要把 inside 误写成场景编辑。抽屉、柜体和微波炉只需给出唯一场景对象 target，控制端会自行选择默认操作层或操作部件，不能因缺少把手或上下层说明而澄清；“推回抽屉”“推入抽屉”“把抽屉关上”等表达统一为 operation=close、target=drawer；普通门在 target 不能唯一确定时才要求 reference。双臂没有明确对象分配时同样只返回无 payload 的澄清。
+
+空场景首轮“使用 UR10 把苹果放进篮子”仍是 robot_task：initial_robot_asset=ur10，保留完整实体和操作，不拆成 robot_config。未指定型号时 initial_robot_asset=null。型号必须为 OLS 机器人目录规范名；已有场景是否允许使用该型号由 Python 校验。
+连续的机器人动作必须全部按顺序保留在 operations 中，跨动作的“它”保持同一实体，不能只解析第一句。后续对象的实际位置由控制端运行时读取，不把预期位置当作场景事实。

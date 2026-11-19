@@ -443,6 +443,7 @@ class BrainTurn(BaseModel):
     session_control: SessionControlIntent | None = None
     robot_setup_request: RobotSetupRequest | None = None
     robot_asset_switch: RobotAssetSwitchRequest | None = None
+    initial_robot_asset: str | None = None
     # Catalog identity is captured with the understanding result.  Geometry
     # resolution must not silently reinterpret a turn against a later OLS
     # revision.

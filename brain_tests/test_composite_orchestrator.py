@@ -42,6 +42,23 @@ EXECUTABLE = dict(execution_python="/bin/false", execution_control_root="/tmp/co
                   execution_library="/tmp/control/libsim_platform_c.so")
 
 
+@pytest.mark.parametrize("command_status,expected", [
+    ("failed", "没有命令完成"),
+    ("success", "已完成部分命令"),
+])
+def test_partial_state_does_not_claim_completed_commands(command_status, expected):
+    service = object.__new__(AgentService)
+    execution = {"effect": "partial", "state_verified": True,
+                 "steps": [{"command_id": "1", "status": command_status}]}
+    record = {"step": 1, "instruction": "关闭抽屉", "state": "stopped",
+              "outcome": "failed", "verdict": "未完成", "execution": execution}
+    result = service.composite_result([record], [{"outcome": "failed", "executed": False,
+        "error": {"code": "JOINT_CONFIGURATION_SEARCH_FAILED", "message": "路径搜索失败"}}], [object()])
+    assert expected in result["reply"]
+    assert result["outcome"] == "failed"
+    assert result["executed"] is False
+
+
 def place_on_table():
     """A robot turn whose every entity exists in the test world, so planning can succeed."""
     return BrainTurn(status="accepted", turn_kind="robot_task", instruction="把苹果放到桌面上",
@@ -90,7 +107,7 @@ class Runner:
         self.calls.append(commands)
         ok = self.ok if self.succeed_after is None else len(self.calls) > self.succeed_after
         moved = {}
-        if self.moved == "target":
+        if self.moved == "target" and ok:
             for operation in scene_document.get("objects", []):
                 if operation["object_id_in_scene"] == self.moved_target(commands):
                     position = next(component for component in operation["components"]
@@ -98,7 +115,7 @@ class Runner:
                     moved[self.moved_target(commands)] = {
                         "position": [position[0] + .01, position[1], position[2]],
                         "quaternion_xyzw": [0, 0, 0, 1]}
-        elif self.moved:
+        elif self.moved and self.moved != "target":
             moved = self.moved
         return ExecutionOutcome(ok=ok, moved=moved, holding_object=self.holding,
             traj_path="/tmp/composite.traj" if ok else None,
@@ -223,6 +240,8 @@ def test_a_successful_run_leaves_the_next_step_free_to_write(tmp_path):
     assert "②把苹果放到桌面上（已执行并写回场景）" in result["reply"]
     # Step 3 is planned against what step 2 left behind, not against the first document.
     assert walked.service.app.get_session(walked.session_id).scene.scene_version == 3
+    assert result["scene_version"] == 3
+    assert result["sceneDigest"] == digest(walked.session.scene)
 
 
 def test_three_arm_runs_in_one_sentence_chain_the_executed_world(tmp_path):
@@ -238,18 +257,34 @@ def test_three_arm_runs_in_one_sentence_chain_the_executed_world(tmp_path):
     sentence = "把苹果放到篮子里，再把苹果拿出来放到桌面上，然后把苹果向右移动10厘米，" \
                "把香蕉放到篮子里，最后把苹果向左移动10厘米"
     runner = Runner()
-    walked = walk(tmp_path, steps, [place_on_table(), place_on_table(), RIGHT, place_on_table(), LEFT],
+    combined = place_on_table()
+    op = combined.task_intent.operations[0]
+    combined.task_intent.operations.append(op.model_copy(update={"operation_id": "op-2"}))
+    walked = walk(tmp_path, steps, [combined, RIGHT, place_on_table(), LEFT],
                   sentence, runner=runner, execution_enabled=True, **EXECUTABLE)
     result, records = walked.result, steps_of(walked.result)
-    assert states(result) == ["completed"] * 5
+    assert states(result) == ["completed"] * 4
     # One run per arm clause, and the two scene edits committed alongside them.
-    assert len(runner.calls) == 3 and commits(walked.browser) == 5
-    assert len(walked.trajs) == 3
+    assert len(runner.calls) == 2 and commits(walked.browser) == 4
+    assert len(walked.trajs) == 2
+    assert len(records[0]["source_instructions"]) == 2
+    assert len([c for c in runner.calls[0].commands if c.skill_name == "pick"]) == 2
     assert result["outcome"] == "scene_updated" and result["executed"] is True
-    assert "已完成 5 步" in result["reply"] and "⑤" in result["reply"]
+    assert "已完成 4 步" in result["reply"] and "④" in result["reply"]
     # Each run is planned against the version its predecessor left behind, so the three
     # command documents never share a base scene version.
-    assert len({commands.scene_version for commands in runner.calls}) == 3
+    assert len({commands.scene_version for commands in runner.calls}) == 2
+    assert result["scene_version"] == walked.session.scene.scene_version
+    assert result["sceneDigest"] == digest(walked.session.scene)
+
+
+def test_robot_only_result_identity_is_the_written_back_world(tmp_path):
+    walked = walk(tmp_path, [("robot_task", "把苹果放到桌面上")], [place_on_table()],
+                  "把苹果放到桌面上", runner=Runner(), execution_enabled=True, **EXECUTABLE)
+    assert walked.result["executed"] is True
+    assert walked.result["scene_version"] == walked.session.scene.scene_version == 1
+    assert walked.result["plan"]["scene_version"] == 0
+    assert walked.result["sceneDigest"] == digest(walked.session.scene)
 
 
 def test_a_run_that_reports_no_pose_stops_the_chain_before_the_next_grasp(tmp_path):
@@ -281,6 +316,34 @@ def test_a_run_that_ends_holding_stops_the_chain(tmp_path):
     assert walked.trajs == ["/tmp/composite.traj"]
 
 
+def test_partial_segment_checkpoints_confirmed_commands_before_finalization(tmp_path, monkeypatch):
+    from robot_agent_brain.application import BrainApplication
+    checkpoints = []
+    save = BrainApplication._save_session
+
+    def capture(app, session_id):
+        save(app, session_id)
+        state = app.store.load(session_id)
+        if state and len(state.pending_step_ledger) > 1:
+            checkpoints.append(state.pending_step_ledger[1].model_copy(deep=True))
+
+    monkeypatch.setattr(BrainApplication, "_save_session", capture)
+    class PartialRunner(Runner):
+        def run(self, commands, scene_document, *, progress=None):
+            self.calls.append(commands)
+            return ExecutionOutcome(ok=False, error_code="EXECUTION_TIMEOUT", steps=[
+                ExecutionStep(command_id=command.command_id, skill_name=command.skill_name,
+                              status="success" if index == 0 else "failed")
+                for index, command in enumerate(commands.commands[:2])])
+
+    walked = walk(tmp_path, ARM_STEPS, [LEFT, place_on_table(), RIGHT], ARM_SENTENCE,
+                  runner=PartialRunner(), execution_enabled=True, **EXECUTABLE)
+    ledger = next(item for item in checkpoints if item.confirmed_effects)
+    commands = walked.service.execution_port.calls[0]
+    assert ledger.confirmed_effects == [commands.commands[0].command_id]
+    assert ledger.control_run_ids == [commands.request_id]
+    assert len(walked.service.execution_port.calls) == 1
+    assert states(walked.result) == ["completed", "stopped", "not_run"]
 def test_a_run_that_failed_stops_the_walk_and_writes_nothing_back(tmp_path):
     runner = Runner(ok=False)
     walked = walk(tmp_path, ARM_STEPS, [LEFT, place_on_table(), RIGHT], ARM_SENTENCE,
@@ -291,44 +354,34 @@ def test_a_run_that_failed_stops_the_walk_and_writes_nothing_back(tmp_path):
     # A collision refusal is a decision about the plan, not a coin flip, so it is not repeated.
     assert len(runner.calls) == 1 and records[1]["attempts"] == 1
     # A run that came back confirmed is a known world, not a quarantined one.
-    assert not walked.binding["uncertain"] and walked.session.sync_state == "synchronized"
+    assert walked.binding["uncertain"] and walked.session.sync_state == "unknown"
 
 
 @pytest.mark.parametrize("code", ["GRASP_NOT_CONFIRMED", "GRASP_FAILED", "PLACEMENT_HEIGHT_SEARCH_FAILED",
                                   "PATH_CONSTRAINT_INFEASIBLE"])
-def test_an_empty_grip_is_tried_again_and_the_reply_says_which_try_landed(code, tmp_path):
-    """The RGB-D grasp and drop points jitter by about a centimetre between attempts.
-
-    A grip that closed on nothing, a grip that lost the object while travelling, a
-    drop the height search refused, and a retreat the planner refused because *this*
-    attempt's physics left the carried object 0.324 mm inside the container wall all
-    report the same thing: the skill never landed, so nothing was written back.  Each
-    therefore gets another sample, and naming the attempt in the reply is what keeps
-    the retry observable.
-    """
+def test_failed_skill_without_actual_state_is_not_replayed(code, tmp_path):
+    """Failure codes do not prove that a gripper or arm has not moved."""
     runner = Runner(error=code, succeed_after=1)
     walked = walk(tmp_path, ARM_STEPS, [LEFT, place_on_table(), place_on_table(), RIGHT], ARM_SENTENCE,
                   runner=runner, execution_enabled=True, **EXECUTABLE)
     result, records = walked.result, steps_of(walked.result)
-    assert states(result) == ["completed"] * 3 and len(runner.calls) == 2
-    assert records[1]["attempts"] == 2 and result["outcome"] == "scene_updated"
-    assert "②把苹果放到桌面上（已执行并写回场景、第 2 次尝试）" in result["reply"]
-    # The empty grip committed nothing, so the three commits belong to the three steps.
-    assert commits(walked.browser) == 3 and walked.trajs == ["/tmp/composite.traj"]
+    assert states(result) == ["completed", "stopped", "not_run"]
+    assert len(runner.calls) == 1 and records[1]["attempts"] == 1
+    assert result["outcome"] == "failed" and commits(walked.browser) == 1
+    assert walked.binding["uncertain"] and walked.session.sync_state == "unknown"
 
 
-def test_a_grasp_that_never_contacts_stops_after_the_attempts_are_spent(tmp_path):
+def test_unverified_grasp_failure_preserves_reason_without_retry(tmp_path):
     evidence = "16 档抓深均不可行：目标位姿间距不足或碰撞 64 次"
     runner = Runner(error="GRASP_NOT_CONFIRMED", detail=evidence, succeed_after=99)
     walked = walk(tmp_path, ARM_STEPS, [LEFT] + [place_on_table()] * AgentService.MAX_STEP_ATTEMPTS + [RIGHT],
                   ARM_SENTENCE, runner=runner, execution_enabled=True, **EXECUTABLE)
     result, records = walked.result, steps_of(walked.result)
     assert states(result) == ["completed", "stopped", "not_run"]
-    assert len(runner.calls) == AgentService.MAX_STEP_ATTEMPTS
-    assert records[1]["attempts"] == AgentService.MAX_STEP_ATTEMPTS
+    assert len(runner.calls) == 1
+    assert records[1]["attempts"] == 1
     assert result["outcome"] == "failed" and commits(walked.browser) == 1
-    retries = AgentService.MAX_STEP_ATTEMPTS - 1
-    assert f"重试 {retries} 次后仍未成功" in result["reply"] and "后续 1 步未执行" in result["reply"]
+    assert "后续 1 步未执行" in result["reply"]
     # The stopped step quotes what the control measured, not just its enum: a reader of
     # the panel learns which search ran out, while the code stays for the diagnostics.
     assert f"未完成：{evidence}（GRASP_NOT_CONFIRMED）" in result["reply"]

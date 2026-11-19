@@ -33,8 +33,18 @@ class ExecutionOutcome:
     ok: bool
     steps: list[ExecutionStep] = field(default_factory=list)
     moved: dict[int, dict] = field(default_factory=dict)
+    # Measured state for passive/articulated scene objects.  Keys are scene
+    # object ids and values map RobotDriver joint names to final positions.
+    # This is deliberately separate from ``moved``: an articulated drawer's
+    # state is not a Transform edit.
+    articulated_joints: dict[int, dict[str, float]] = field(default_factory=dict)
+    active_joint_ids: list[int] = field(default_factory=list)
+    state_verified: bool = False
+    no_effect_verified: bool = False
     holding_object: int | None = None
     traj_path: str | None = None
+    final_scene: dict | None = None
+    final_scene_path: str | None = None
     error_code: str | None = None
     detail: str | None = None
 
@@ -44,6 +54,9 @@ class ExecutionOutcome:
                 "steps": [{"command_id": step.command_id, "skill_name": step.skill_name,
                            "status": step.status, "error_code": step.error_code} for step in self.steps],
                 "moved_object_ids": sorted(self.moved),
+                "articulated_joint_object_ids": sorted(self.articulated_joints),
+                "state_verified": self.state_verified,
+                "no_effect_verified": self.no_effect_verified,
                 "holding_object": self.holding_object,
                 "trajectory_available": self.traj_path is not None,
                 "error_code": self.error_code}

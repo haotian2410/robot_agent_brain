@@ -967,7 +967,7 @@ class BrainSession:
         self.holding_object = feedback.holding_object
         if self.robot_setup is not None and self.robot_setup.mode == "single":
             from ..contracts.robot_setup import RobotRuntimeState
-            self.arm_states = RobotRuntimeState(arms={"single": {"state_known": feedback.status == "success",
+            self.arm_states = RobotRuntimeState(arms={"single": {"state_known": candidate is not None,
                                                                   "holding_object": feedback.holding_object}})
         self.last_feedback_source = feedback_source
         self.pending_execution_request = None

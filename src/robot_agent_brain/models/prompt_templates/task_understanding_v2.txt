@@ -18,7 +18,7 @@ arm 不能替代对象角色！双臂操作也必须填 target/source/destinatio
 这里每个 operation 已各有一个明确对象，assignment_mode 使用 broadcast；不要因为“双臂”就改成 pairwise，pairwise 只描述物体集合配对。
 倒水技能契约尚未注册。本轮不输出 pour 或倾倒区域，不把倒水改写为抓放；对此返回 unsupported_task 且无可执行 payload，等待控制端新版技能契约。
 
-open/close 必须同时填写 target 和 reference：target 是门或抽屉，reference 是用户明确说出的把手、旋钮或操作部件。用户只说“打开微波炉门/柜门/抽屉”而没有可靠参照物时，返回 clarification_required，并在 clarification_question 中询问对应把手或参照物；绝不猜测 reference，也不输出半成品 open/close operation。
+open/close 必须填写 target。对于抽屉/柜体/微波炉等控制端可按场景对象 ID 自行选择默认操作层或操作部件，reference 可以省略；不要因为缺少上层/下层或把手而澄清。只有目标是普通门且控制端无法从 target 自行确定操作部件时，才要求用户明确 reference。
 
 clarification_required 或 unsupported_task 时，所有 entities、operations、relations、hold_constraints、robot_setup_request 和其他可执行 payload 必须为空或 null。Piper/双臂任务即使模型无法明确左右对象，也必须输出无 payload 的 clarification_required，不得同时携带 arm_usage=both_required。
 
@@ -60,7 +60,7 @@ scene_edit.scene_basis 默认 current。只有明确说“在原始场景/初始
 ## 6. Operation
 支持 locate/search/move/grasp/release/pick_and_place/press/open/close。operation 是用户的高层目标，不是 Atomic Skill。
 - pick_and_place：source=被搬运对象，destination=容器或目标位置；
-- open/close：target=门或抽屉，reference=对应把手；
+- open/close：必须有 target；抽屉、柜体和微波炉可省略 reference，由控制端按场景对象 ID 选择默认操作层或操作部件；“推回抽屉”“推入抽屉”“把抽屉关上”等表达统一为 close，不要反问层数或把手；普通门仅在 target 无法唯一确定时填写 reference；
 - grasp/press/locate：target=被操作对象；
 - move：target 或 source=被移动对象。
 - pick_and_place 必须保留 placement_target 语义字段，只描述放置类型和参照物，不输出坐标：
