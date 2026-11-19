@@ -91,6 +91,8 @@ def validate_recovery_scope(decision: FailureContextDecision, *, root_instructio
         # A recovery amendment must either fill a slot recorded by U or carry
         # explicit user-turn evidence.  Model guesses are never sufficient.
         evidence = amendment.evidence or {}
+        if field == "operation" and evidence.get("source") in {None, "model_guess"}:
+            raise ValueError("failure_context_amendment_without_user_evidence: operation")
         unresolved = set((latest_task_draft or {}).get("unresolved_slots") or [])
         if unresolved and field not in unresolved and evidence.get("source") in {None, "model_guess"}:
             raise ValueError("failure_context_amendment_without_user_evidence: " + field)

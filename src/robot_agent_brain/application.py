@@ -2,6 +2,7 @@
 import time
 import uuid
 import json
+import re
 import traceback
 from pathlib import Path
 from pydantic import ValidationError
@@ -50,6 +51,7 @@ class BrainApplication:
                 timeout=self.config.timeout, structured_output=self.config.structured_output,
                 planner_max_completion_tokens=self.config.planner_max_completion_tokens,
                 skill_planning_response_format=self.config.skill_planning_response_format,
+                understanding_wire_format=self.config.understanding_wire_format,
                 atomic_skill_prompt_path=self.config.control_skill_prompt_path())
         self.provider = provider
         if hasattr(provider, "set_asset_catalog") and getattr(provider, "live_catalog", True):
@@ -126,13 +128,16 @@ class BrainApplication:
             return
         operations = []
         entities = []
+        relations = []
         if getattr(turn, "task_intent", None) is not None:
             operations = list(turn.task_intent.operations)
             entities = list(turn.task_intent.entities)
+            relations = list(turn.task_intent.spatial_relations)
         scene_edit = getattr(turn, "scene_edit", None)
         if scene_edit is not None:
             operations = list(scene_edit.operations)
             entities = list(scene_edit.entities)
+            relations = list(scene_edit.relations)
         def text(value):
             return str(value).strip().lower() if value is not None else ""
         for amendment in amendments:
@@ -146,7 +151,20 @@ class BrainApplication:
                 found = found or any(text((getattr(op, "properties", {}) or {}).get("color")) == wanted
                                      for op in operations)
             elif field == "quantity":
-                found = any(getattr(item, "count", None) == value for item in entities)
+                # R's value is an Any wire field: JSON "2" and 2 denote the
+                # same positive integral quantity, not an arbitrary phrase.
+                count = value if type(value) is int else (
+                    int(value) if isinstance(value, str) and value.isascii()
+                    and value.isdigit() and len(value) < 10 else None)
+                role = text(amendment.get("subject_role"))
+                subjects = {text(getattr(op, role, None)) for op in operations}
+                subjects.discard("")
+                if role not in {"source", "destination", "target", "reference"}:
+                    subjects = {text(e.entity_id) for e in entities
+                                if role in {text(e.entity_id), text(e.semantic_name)}}
+                found = count is not None and count > 0 and any(
+                    text(item.entity_id) in subjects and getattr(item, "count", None) == count
+                    for item in entities)
             elif field == "distance":
                 found = any(getattr(item, "distance_m", None) is not None
                             and abs(float(item.distance_m) - float(value)) <= 1e-9 for item in operations)
@@ -157,6 +175,29 @@ class BrainApplication:
                 if not found and field == "selection":
                     found = any(text(getattr(item, "semantic_name", None)) == wanted
                                 or text(getattr(item, "entity_id", None)) == wanted for item in entities)
+                    # Selection predicates live on spatial relations, not on
+                    # entity names. Match the accepted role AND exact relation;
+                    # a leftmost destination must not prove a leftmost source.
+                    role = text(amendment.get("subject_role"))
+                    subjects = {text(getattr(op, role, None)) for op in operations}
+                    subjects.discard("")
+                    if role not in {"source", "destination", "target", "reference"}:
+                        subjects = {text(e.entity_id) for e in entities
+                                    if role in {text(e.entity_id), text(e.semantic_name)}}
+                    found = found or any(text(getattr(r, "scope", None)) == "selection"
+                        and text(getattr(r, "subject", None)) in subjects
+                        and text(getattr(r, "relation", None)) == wanted for r in relations)
+                    if wanted == "all":
+                        found = found or any(text(e.entity_id) in subjects and (
+                            text(getattr(e, "quantity_mode", None)) == "all"
+                            or getattr(e, "all_available", False) is True) for e in entities)
+                    id_match = re.fullmatch(r"(?:ID\s*)?([0-9]{1,9})", value.strip(), re.IGNORECASE) if isinstance(value, str) else None
+                    explicit_id = value if type(value) is int else (int(id_match.group(1)) if id_match else None)
+                    if explicit_id is not None:
+                        # This verifies that U preserved an explicit ID. Normal
+                        # grounding still verifies existence and admissibility.
+                        found = found or any(text(e.entity_id) in subjects
+                            and getattr(e, "scene_object_ids", []) == [explicit_id] for e in entities)
             elif field == "operation":
                 found = any(text(getattr(op, "task_type", None)) == wanted
                             or text(getattr(op, "operation", None)) == wanted for op in operations)

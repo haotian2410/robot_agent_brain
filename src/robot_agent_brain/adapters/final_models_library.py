@@ -3,6 +3,7 @@ import hashlib
 import json
 import re
 from pathlib import Path
+from ..perf_trace import timed, span
 
 from .ols_index import index_by_id
 from ..contracts.asset_library import AssetGeometry, BrainAssetView, geometry_from_ols_aabb
@@ -95,6 +96,7 @@ class FinalModelsLibraryAdapter:
                 )
                 self._assets[key] = view
 
+    @timed("ols.refresh", component="brain.adapters")
     def refresh_from_source(self) -> bool:
         """Atomically reload the read-only OLS index and metadata.
 
@@ -139,6 +141,7 @@ class FinalModelsLibraryAdapter:
             raise ValueError("asset_geometry_cache_metadata_invalid")
         return {key: value for key, value in raw.items() if key != "__metadata__"}, metadata
 
+    @timed("ols.cache_hash", component="brain.adapters")
     def _validate_cache_metadata(self, metadata, path):
         """Reject a derived cache from another OLS package.
 
@@ -164,12 +167,19 @@ class FinalModelsLibraryAdapter:
             raise ValueError("asset_geometry_cache_version_mismatch")
         digest = hashlib.sha256()
         excluded = {".git", ".hg", ".svn"}
-        for item in sorted(path for path in self.root.rglob("*")
-                           if path.is_file() and not excluded.intersection(path.parts)):
-            relative = item.relative_to(self.root).as_posix().encode("utf-8")
-            digest.update(relative + b"\0")
-            digest.update(item.read_bytes())
-            digest.update(b"\0")
+        with span("ols.cache_hash.files", source="adapters/final_models_library.py:_validate_cache_metadata") as timing:
+            file_count = total_bytes = 0
+            for item in sorted(path for path in self.root.rglob("*")
+                               if path.is_file() and not excluded.intersection(path.parts)):
+                relative = item.relative_to(self.root).as_posix().encode("utf-8")
+                digest.update(relative + b"\0")
+                content = item.read_bytes()
+                digest.update(content)
+                digest.update(b"\0")
+                file_count += 1
+                total_bytes += len(content)
+            if timing is not None:
+                timing.annotate(file_count=file_count, total_bytes=total_bytes)
         if metadata.get("asset_tree_sha256") != digest.hexdigest():
             raise ValueError("asset_geometry_cache_tree_mismatch")
 

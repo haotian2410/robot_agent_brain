@@ -3,6 +3,7 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
+from ..perf_trace import timed
 from jsonschema import Draft202012Validator
 from ..contracts.commands import CommandsFile, canonical_commands
 from ..contracts.scene import SceneConfig
@@ -32,6 +33,7 @@ class ArtifactWriter:
         if readback != value:
             raise ValueError("artifact_readback_mismatch")
 
+    @timed("artifact.publish", component="brain.adapters")
     def publish(self, report, *, scene=None, result=None, request_record=None, debug=None):
         parent = self.root / safe_identifier(report.session_id)
         parent.mkdir(parents=True, exist_ok=True)

@@ -8,6 +8,7 @@ suggestion.  What it does rewrite is the *landing*: where the task, and not the
 answer, is the authority -- see ``_pin_placement`` and ``_surface_carry``.
 """
 from __future__ import annotations
+from ..perf_trace import timed
 
 from ..contracts.commands_atomic import (AtomicCommand, AtomicCommandsFile, AtomicSkillName,
                                          MoveToParameters, ReleaseParameters)
@@ -73,6 +74,7 @@ SURFACE_CARRY_RETRACT_M = 0.10
 
 
 class AtomicPlanValidator:
+    @timed("planning.atomic.validate", component="brain.planning")
     def validate(self, commands: AtomicCommandsFile, task: GroundedTask, scene: SceneConfig | None = None,
                  *, held_object=None) -> AtomicCommandsFile:
         bindings = {entity.entity_id: entity.scene_object_ids for entity in task.entities}

@@ -6,6 +6,10 @@ from .task_intent import TaskIntent, TaskEntity, Direction, MotionScale
 from .spatial import PlacementHint, SpatialRelation, TabletopRegion
 from .robot_setup import RobotSetupRequest, RobotAssetSwitchRequest
 from ..semantics.scene_references import CanonicalReference
+from .scene_edit_rules import (
+    MOTION_ALLOWED, MOTION_FIELDS, SCALE_FIELDS, SCALE_MODES,
+    LAYOUT_OPERATIONS, PROPERTY_OPERATIONS, FRAME_OPERATIONS, DISTANCE_FIELDS, REQUIRED, RELATION_PAIR,
+)
 
 class TurnStatus(StrEnum):
     ACCEPTED = "accepted"
@@ -208,58 +212,49 @@ class SceneEditIntent(BaseModel):
     @model_validator(mode="after")
     def paired_relation(self):
         import math
-        if (self.operation == "orient") != (self.posture is not None):
+        required = REQUIRED.get(self.operation, ())
+        if ("posture" in required) != (self.posture is not None):
             raise ValueError("scene_edit_posture_required_or_forbidden")
-        if (self.operation == "replace") != (self.replacement_entity is not None):
+        if ("replacement_entity" in required) != (self.replacement_entity is not None):
             raise ValueError("scene_replace_entity_required_or_forbidden")
         if self.replacement_entity == self.target:
             raise ValueError("scene_replace_requires_distinct_entities")
-        scale_fields = (self.scale_mode, self.scale_xyz, self.scale_direction, self.scale_amount)
+        scale_fields = tuple(getattr(self, key) for key in SCALE_FIELDS)
         if self.operation == "scale":
-            numeric = self.scale_mode is not None and self.scale_xyz is not None and self.scale_direction is None and self.scale_amount is None
-            fuzzy = self.scale_mode is None and self.scale_xyz is None and self.scale_direction is not None and self.scale_amount is not None
+            numeric, fuzzy = (all((getattr(self, key) is not None) == (key in mode)
+                                 for key in SCALE_FIELDS) for mode in SCALE_MODES)
             if not (numeric or fuzzy):
                 raise ValueError("scene_scale_modes_exclusive")
             if self.scale_xyz is not None and not all(math.isfinite(v) and v > 0 for v in self.scale_xyz):
                 raise ValueError("scene_scale_invalid")
         elif any(v is not None for v in scale_fields):
             raise ValueError("scene_edit_fields_forbidden: scale")
-        if (self.relation is None) != (self.reference is None):
+        if len({getattr(self, key) is None for key in RELATION_PAIR}) != 1:
             raise ValueError("task_semantic_invalid: scene edit relation/reference must be paired")
         if self.operation in {"translate", "move_relative"} and not (self.direction or self.relation):
             raise ValueError("task_semantic_invalid: translation requires direction or relation")
-        if self.operation == "rotate" and (self.axis is None or self.angle_deg is None):
+        if self.operation == "rotate" and any(getattr(self, key) is None for key in required):
             raise ValueError("task_semantic_invalid: rotation requires axis and angle")
-        fields = {
-            "relation": self.relation, "reference": self.reference,
-            "direction": self.direction, "distance_m": self.distance_m,
-            "motion_scale": self.motion_scale, "axis": self.axis, "angle_deg": self.angle_deg,
-        }
-        allowed = {
-            "add": {"relation", "reference"}, "remove": set(), "replace": set(),
-            "translate": {"direction", "distance_m", "motion_scale"},
-            "move_relative": {"relation", "reference"},
-            "rotate": {"axis", "angle_deg"}, "orient": set(), "update_properties": set(), "scale": set(),
-            "update": {"relation", "reference"},  # combined layout/property operation
-        }[self.operation]
+        fields = {key: getattr(self, key) for key in MOTION_FIELDS}
+        allowed = MOTION_ALLOWED[self.operation]
         if any(value is not None and key not in allowed for key, value in fields.items()):
             raise ValueError(f"scene_edit_fields_forbidden: {self.operation}")
         if self.placement_hint is not None or self.placement_region is not None:
-            if self.operation not in {"add", "move_relative", "update"}:
+            if self.operation not in LAYOUT_OPERATIONS:
                 raise ValueError(f"scene_edit_fields_forbidden: {self.operation}")
             if self.placement_region is not None and self.relation != SceneLayoutRelation.ON:
                 raise ValueError("scene_edit_placement_region_requires_on")
-        if self.relation == SceneLayoutRelation.ON and self.operation in {"add", "move_relative", "update"}:
+        if self.relation == SceneLayoutRelation.ON and self.operation in LAYOUT_OPERATIONS:
             # A missing hint means ordinary placement and is intentionally
             # handled as ``any`` by the deterministic Python grid policy.
             pass
         if self.operation == "move_relative" and self.reference is None:
             raise ValueError("scene_edit_relative_reference_missing")
-        if self.operation == "translate" and self.distance_m is not None and self.motion_scale is not None:
+        if self.operation == "translate" and all(getattr(self, key) is not None for key in DISTANCE_FIELDS):
             raise ValueError("scene_edit_distance_modes_exclusive")
-        if self.properties and self.operation not in {"add", "update", "update_properties"}:
+        if self.properties and self.operation not in PROPERTY_OPERATIONS:
             raise ValueError("scene_edit_properties_forbidden")
-        if self.operation not in {"translate", "rotate"} and self.coordinate_frame != "world":
+        if self.operation not in FRAME_OPERATIONS and self.coordinate_frame != "world":
             raise ValueError("scene_edit_coordinate_frame_forbidden")
         if any(dep == self.operation_id for dep in self.depends_on if self.operation_id is not None):
             raise ValueError("scene_edit_dependency_self_reference")

@@ -103,10 +103,14 @@ def test_live_qwen_payload_contains_full_current_ols_catalog_and_scenes():
                          for identifier in model_index["by_id"])
     visible_robots = sum(not robot_index.get("no_display", {}).get(identifier, False)
                          for identifier in robot_index["by_id"])
-    assert len(body["asset_catalog"]["models"]) == visible_models
-    assert len(body["asset_catalog"]["robots"]) == visible_robots
-    assert len(body["asset_catalog"]["scenes"]) == len(index_by_id(scene_index))
-    assert {item["name"] for item in body["asset_catalog"]["scenes"]} >= {"ur5_table_empty", "piper_table_twist"}
+    system = requests[0]["messages"][0]["content"]
+    assert "asset_catalog" not in body and body["catalog_revision"] == snapshot.revision
+    assert system.count("\n- model:") == visible_models
+    assert system.count("\n- robot:") == visible_robots
+    assert system.count("\n- scene:") == len(index_by_id(scene_index))
+    for item in (*snapshot.models, *snapshot.robots):
+        assert f"- {item.asset_key} | semantic_name={item.name}" in system
+    assert "scene_name=piper_table_twist" in system
     assert "scene_name=ur5_table_empty" in requests[0]["messages"][0]["content"]
 
 
@@ -151,8 +155,8 @@ def test_per_turn_catalog_keeps_registered_profiles_in_payload_and_revision():
                                 transport=httpx.MockTransport(handler), asset_catalog=first)
     provider.understand_turn(TaskUnderstandingRequest(instruction="暂停", asset_catalog=second))
     body = json.loads(requests[0]["messages"][1]["content"])
-    assert body["asset_catalog"]["revision"] == second.revision
-    assert body["asset_catalog"]["registered_profiles"] == ["piper"]
+    assert "asset_catalog" not in body and body["catalog_revision"] == second.revision
+    assert "registered_profiles=piper" in requests[0]["messages"][0]["content"]
 
 
 def test_pipeline_refreshes_live_ols_before_each_understanding_turn():
@@ -228,10 +232,12 @@ def test_live_pipeline_http_sends_full_catalog_on_every_turn():
                              for identifier in model_index["by_id"])
         visible_robots = sum(not robot_index.get("no_display", {}).get(identifier, False)
                              for identifier in robot_index["by_id"])
-        assert len(payload["asset_catalog"]["models"]) == visible_models
-        assert len(payload["asset_catalog"]["robots"]) == visible_robots
-        assert len(payload["asset_catalog"]["scenes"]) == len(index_by_id(scene_index))
-        assert payload["asset_catalog"]["revision"].startswith("sha256:")
+        system = body["messages"][0]["content"]
+        assert "asset_catalog" not in payload
+        assert system.count("\n- model:") == visible_models
+        assert system.count("\n- robot:") == visible_robots
+        assert system.count("\n- scene:") == len(index_by_id(scene_index))
+        assert payload["catalog_revision"].startswith("sha256:")
         assert "model:1" in body["messages"][0]["content"]
 
 

@@ -1,5 +1,6 @@
 """Loopback-only persistent Agent service. One worker, no Control dispatch."""
 import asyncio
+from ..perf_trace import timed, trace_scope, current_trace, attached_trace, interval, stamp, span
 import hashlib
 import json
 import threading
@@ -75,6 +76,7 @@ class AgentService:
         self.platform_override = platform_factory
         self.app = BrainApplication(config, provider=provider, platform_factory=self.platform)
         self.queue = asyncio.Queue()
+        self.perf_pending = {}
         self.mutex = asyncio.Lock()
         self.worker = None
         self.execution_port = None
@@ -132,6 +134,7 @@ class AgentService:
                 vlm_base_url=self.config.base_url, vlm_model=self.config.model)
         return self.execution_port
 
+    @timed("web.session.bind", component="brain.web")
     def _bind(self, session_id):
         self.binding = self.tasks.binding(session_id)
         session = self.app.get_session(session_id)
@@ -170,6 +173,7 @@ class AgentService:
                         if expected.metadata_type(identifier) != "robot"} | robot_ids
         return template, manifest
 
+    @timed("web.scene.validate", component="brain.web")
     def validate_scene(self, scene, session=None):
         scene = validate_web_scene(scene, self.joints, self.references)
         if session is not None and session.scene is not None:
@@ -349,6 +353,7 @@ class AgentService:
                 "camera_selection_reason":camera_reason if request.camera_id is None else "explicit_configuration",
                 "session_phase":getattr(session, "session_phase", "setup"),"active":True}
 
+    @timed("web.execute", component="brain.web")
     def execute(self, identifier):
         record = self.tasks.get(identifier)
         request = StartTask.model_validate(record["payload"])
@@ -484,12 +489,32 @@ class AgentService:
         # already playing, so the clips have to go out once the lock is gone.
         return trajs
 
+    @timed("recovery.resolve", component="brain.web")
     def _maybe_recover(self, session, request):
         """Ask the independent R round only for a chained continuation."""
+        platform = getattr(session, "platform", None)
+        if (getattr(session, "sync_state", None) == "unknown"
+                or getattr(platform, "lease_uncertain", False)
+                or getattr(platform, "lease_state", None) == "unknown"):
+            return {"taskID": "pending", "sessionID": request.sessionID,
+                    "outcome": "failed", "executed": False,
+                    "reply": "当前场景或租约状态待核验，不能自动恢复或开始新任务。",
+                    "error": {"code": "session_reconciliation_required", "message": "unknown scene or lease"}}
+        if getattr(session, "pending_execution_request", None):
+            return {"taskID": "pending", "sessionID": request.sessionID,
+                    "outcome": "failed", "executed": False,
+                    "reply": "上一执行请求尚待核验，不能自动重试。",
+                    "error": {"code": "conversation_recovery_pending_ledger", "message": "pending execution request"}}
         if not getattr(self.config, "conversation_recovery_enabled", True):
             return request.command
         memory = getattr(session, "conversation_memory", None)
         chain = memory.active_failure_chain if memory is not None else None
+        # Unknown effects cannot be escaped by a new-task flag or a preview.
+        if chain is not None and chain.state.value == "blocked_reconciliation":
+            return {"taskID": "pending", "sessionID": request.sessionID,
+                    "outcome": "failed", "executed": False,
+                    "reply": "当前失败链仍待现场核验，请先处理恢复状态。",
+                    "error": {"code": "conversation_recovery_blocked", "message": chain.state.value}}
         # A checkpointed composite ledger without a finalized outer turn means
         # the process may have died between a child side effect and its final
         # receipt.  Do not let the next user message invoke R or replay it;
@@ -532,9 +557,10 @@ class AgentService:
         # preview remains strictly side-effect free; only an accepted,
         # executable payload passes this gate.  Exhausted chains use the same
         # rule so an explicit new task can recover without a manual reset.
-        if chain is not None and chain.state.value in {
+        from ..semantics.recovery_routing import continuation_candidate
+        if chain is not None and not continuation_candidate(request.command) and chain.state.value in {
                 "waiting_user", "resolving", "blocked_environment",
-                "blocked_system", "blocked_reconciliation", "exhausted"}:
+                "blocked_system", "exhausted"}:
             try:
                 preview = self.app.pipeline.understand_turn(
                     request.command, scene=session.scene, dialogue=session.dialogue)
@@ -705,6 +731,7 @@ class AgentService:
         }
         return decision.resolved_instruction
 
+    @timed("conversation.finalize", component="brain.web")
     def _record_conversation_turn(self, request, task_id, result, scene_before_digest, uncertain,
                                   *, raw_user_command=None):
         """Persist one outer user turn and update the bounded failure chain.
@@ -897,6 +924,7 @@ class AgentService:
             return None
         return None if value is None else list(value.steps)
 
+    @timed("web.child_step", component="brain.web")
     def _run_step(self, session, platform, request, identifier, instruction, *, expected_turn_kind=None):
         """One turn plus every side effect that turn is allowed to have.
 
@@ -948,6 +976,7 @@ class AgentService:
         result["commitReceipts"] = list(platform.receipts)
         return report, result, trajs
 
+    @timed("web.composite", component="brain.web")
     def _run_steps(self, session, platform, request, identifier, steps):
         """Walk the subtasks in order, keeping whatever already landed.
 
@@ -1031,16 +1060,18 @@ class AgentService:
             self.progress[identifier] = f"拆分执行 {index}/{len(all_steps)} · {step.instruction}"
             receipts_before = len(platform.receipts)
             expected_kind = "robot_task" if len(segment_sources[index - 1]) > 1 else None
-            report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction,
-                                                       expected_turn_kind=expected_kind)
+            with span("web.step_attempt", source="web/service.py:AgentService._run_steps", step_index=index, attempt=1):
+                report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction,
+                                                           expected_turn_kind=expected_kind)
             attempts = 1
             while (attempts < self.MAX_STEP_ATTEMPTS and len(platform.receipts) == receipts_before
                    and (result.get("error") or {}).get("code") in self.RETRYABLE_EXECUTION_CODES
                    and self._retry_allowed(result)):
                 attempts += 1
                 self.progress[identifier] = f"拆分执行 {index}/{len(all_steps)} · 第 {attempts} 次尝试 · {step.instruction}"
-                report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction,
-                                                           expected_turn_kind=expected_kind)
+                with span("web.retry", source="web/service.py:AgentService._run_steps", step_index=index, attempt=attempts):
+                    report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction,
+                                                               expected_turn_kind=expected_kind)
             trajs += step_trajs
             results.append(result)
             record = {"step": index, "segment_id": f"segment-{index}",
@@ -1589,6 +1620,7 @@ class AgentService:
             rows = self.tasks.db.execute("SELECT id FROM tasks WHERE terminal=0").fetchall()
         return [self.tasks.get(row["id"]) for row in rows]
 
+    @timed("web.playback_upload", component="brain.web")
     def play(self, identifier, trajs):
         """Send the recorded clips to the browser, lease already released.
 
@@ -1620,13 +1652,21 @@ class AgentService:
     async def work(self):
         while True:
             identifier = await self.queue.get()
+            diagnostic = self.perf_pending.pop(identifier, None)
+            trace = diagnostic[0] if diagnostic else None
+            if diagnostic:
+                interval(trace, "web.queue.wait", diagnostic[1],
+                         source="web/service.py:AgentService.work", task_id=identifier, wait_kind="queue")
             try:
-                trajs = await asyncio.to_thread(self.execute, identifier)
-                await asyncio.to_thread(self.play, identifier, trajs)
+                with attached_trace(trace):
+                    trajs = await asyncio.to_thread(self.execute, identifier)
+                    await asyncio.to_thread(self.play, identifier, trajs)
             except Exception as exc:
                 self.tasks.update(identifier, "任务失败", {"outcome":"failed","executed":False,
                     "error":{"code":"worker_failed","message":str(exc)}}, uncertain=True)
             finally:
+                if trace is not None:
+                    trace.flush()
                 self.progress.pop(identifier, None)
                 self.queue.task_done()
 
@@ -1665,7 +1705,14 @@ def create_http_app(service):
                                 "executed": False, "terminal": True})
             return web.json_response(payload, status=status)
 
-    app = web.Application(middlewares=[errors], client_max_size=100 * 1024 * 1024)
+    @web.middleware
+    async def performance(request, handler):
+        if request.path != "/startTask":
+            return await handler(request)
+        with trace_scope():
+            return await handler(request)
+
+    app = web.Application(middlewares=[errors, performance], client_max_size=100 * 1024 * 1024)
 
     def task_id(request):
         value = request.query.get("taskID", request.match_info.get("taskID", ""))
@@ -1673,6 +1720,7 @@ def create_http_app(service):
             raise ValueError("invalid_task_id")
         return int(value)
 
+    @timed("web.accept", component="brain.web")
     async def start(request):
         payload = await request.json()
         if not isinstance(payload, dict) or not {"sessionID", "clientRequestID", "browserID", "sceneDigest"} <= payload.keys():
@@ -1703,6 +1751,10 @@ def create_http_app(service):
             record, fresh = service.tasks.submit(value)
             if fresh:
                 service.tasks.update(record["id"], "已进入队列", terminal=False)
+                trace = current_trace()
+                if trace is not None:
+                    trace.deferred = True
+                    service.perf_pending[record["id"]] = (trace, stamp())
                 await service.queue.put(record["id"])
             current = service.tasks.get(record["id"])
             return web.json_response({"taskID":record["id"],"state":current["state"],
@@ -1976,6 +2028,7 @@ def create_http_app(service):
 
 def serve(args):
     config = BrainConfig.load(args.config)
-    service = AgentService(config, gateway_url=args.gateway_url, ols_url=args.ols_url,
-                           joint_inventory=args.joint_inventory, camera_id=args.camera_id)
+    with trace_scope("service-startup"):
+        service = AgentService(config, gateway_url=args.gateway_url, ols_url=args.ols_url,
+                               joint_inventory=args.joint_inventory, camera_id=args.camera_id)
     web.run_app(create_http_app(service), host="127.0.0.1", port=args.port)

@@ -1,5 +1,6 @@
 """Strict, browser-bound ScenePlatformPort. Never falls back to updateWorld."""
 import base64
+from ..perf_trace import timed, span
 import json
 import math
 import os
@@ -68,10 +69,14 @@ class GatewayScenePlatformAdapter:
             kwargs["headers"] = {**kwargs.get("headers", {}), "X-Brain-Lease": self.lease}
         if self.session_id:
             kwargs["headers"] = {**kwargs.get("headers", {}), "X-Brain-Session": self.session_id}
-        response = self.client.request(method, self.base_url + route, **kwargs)
+        with span("gateway.http_wait", component="gateway", source="web/gateway.py:GatewayScenePlatformAdapter._call", requests=1, wait_kind="http") as timing:
+            response = self.client.request(method, self.base_url + route, **kwargs)
+            if timing is not None:
+                timing.annotate(http_status=response.status_code)
         response.raise_for_status()
         return response
 
+    @timed("gateway.acquire", component="brain.web")
     def acquire_lease(self, task_id, scene):
         # A lost lease ACK may have locked the editor. Never silently continue.
         self.lease_uncertain = True
@@ -100,6 +105,7 @@ class GatewayScenePlatformAdapter:
         self.lease_state = "granted"
         self.lease_uncertain = False
 
+    @timed("gateway.release", component="brain.web")
     def release_lease(self, *, uncertain=False):
         if self.lease:
             reply = self._call("POST", "/releaseSceneLease", json={"browserID": self.browser_id,
@@ -134,6 +140,7 @@ class GatewayScenePlatformAdapter:
                        "reply": value})
         return value
 
+    @timed("gateway.capabilities", component="brain.web")
     def capabilities(self):
         try:
             payload = self._call("GET", "/brainCapabilities", params={"browser_id": self.browser_id}).json()
@@ -149,6 +156,7 @@ class GatewayScenePlatformAdapter:
     def validate(self, scene):
         return validate_web_scene(scene, self.joints, self.references)
 
+    @timed("gateway.read_world", component="brain.web")
     def read_live(self, *, lease_snapshot=True):
         params = {"browser_id": self.browser_id}
         if lease_snapshot:
@@ -233,6 +241,7 @@ class GatewayScenePlatformAdapter:
                     "scene_sub_version": previous.scene_sub_version, "sceneDigest": digest(previous)}.items())
                 and digest(self.read_live(lease_snapshot=False)) == digest(previous))
 
+    @timed("gateway.commit", component="brain.web")
     def load_scene(self, scene, *, change_kind="scene_edit"):
         candidate = self.validate(scene)
         self.capabilities()

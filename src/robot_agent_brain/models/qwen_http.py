@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from ..contracts.camera import CameraFrame
 from ..contracts.task_intent import TaskIntent
 from ..errors import BrainError
+from ..perf_trace import timed, span
 from .prompts import TASK_UNDERSTANDING_PROMPT, VISION_GROUNDING_PROMPT, SKILL_PLANNING_PROMPT, prompt_payload, build_asset_catalog_prompt
 from .skill_planning import SkillPlanningRequest, SkillPlanLLMOutput
 from .task_understanding import (TaskUnderstandingRequest, parse_qwen_turn,
@@ -543,6 +544,7 @@ class QwenHTTPProvider:
         transport: httpx.BaseTransport | None = None,
         planner_max_completion_tokens: int = 1024,
         skill_planning_response_format: str = "json_schema",
+        understanding_wire_format: str = "full",
         asset_catalog=None,
         live_catalog: bool | None = None,
         atomic_skill_prompt_path: str | None = None,
@@ -554,6 +556,9 @@ class QwenHTTPProvider:
         self.structured_output = structured_output
         self.planner_max_completion_tokens = planner_max_completion_tokens
         self.skill_planning_response_format = skill_planning_response_format
+        if understanding_wire_format not in {"full", "compact_v1"}:
+            raise ValueError("unknown_understanding_wire_format")
+        self.understanding_wire_format = understanding_wire_format
         if client is not None and transport is not None:
             raise ValueError("supply either client or transport")
         self.client, self.transport = client, transport
@@ -573,9 +578,16 @@ class QwenHTTPProvider:
         self.asset_catalog_snapshot = None
         self.atomic_skill_prompt_path = atomic_skill_prompt_path
         from .prompts import build_atomic_skill_prompt
-        self.atomic_skill_prompt, self.atomic_skill_source_sha256 = build_atomic_skill_prompt(
-            atomic_skill_prompt_path
-        )
+        with span("planning.skill_prompt.load", component="brain.planning",
+                  source="models/qwen_http.py:QwenHTTPProvider.__init__") as timing:
+            self.atomic_skill_prompt, self.atomic_skill_source_sha256 = build_atomic_skill_prompt(
+                atomic_skill_prompt_path
+            )
+            if timing is not None:
+                timing.annotate(skill_prompt_source="control_skill_md" if self.atomic_skill_source_sha256 else "bundled_fallback",
+                                skill_md_sha256=self.atomic_skill_source_sha256,
+                                skill_prompt_chars=len(self.atomic_skill_prompt),
+                                skill_prompt_bytes=len(self.atomic_skill_prompt.encode("utf-8")))
         if asset_catalog is not None:
             self.set_asset_catalog(asset_catalog)
 
@@ -604,11 +616,17 @@ class QwenHTTPProvider:
 
     def build_understanding_request(self, request: TaskUnderstandingRequest) -> QwenStageRequest:
         """Build the canonical task-understanding wire request."""
+        from .understanding_wire import compact_prompt, compact_schema
+        if request.asset_catalog is not None and (
+                self.asset_catalog_snapshot is None or
+                request.asset_catalog.revision != self.asset_catalog_snapshot.revision):
+            self.set_asset_catalog(request.asset_catalog)
+        compact = self.understanding_wire_format == "compact_v1"
         return QwenStageRequest(
             stage="task_understanding",
-            prompt=TASK_UNDERSTANDING_PROMPT + self.asset_catalog_prompt,
+            prompt=(compact_prompt(TASK_UNDERSTANDING_PROMPT) if compact else TASK_UNDERSTANDING_PROMPT) + self.asset_catalog_prompt,
             content=prompt_payload(self._understanding_payload(request)),
-            schema=task_understanding_v3_wire_schema(),
+            schema=compact_schema() if compact else task_understanding_v3_wire_schema(),
             response_format="json_schema" if self.structured_output else "text",
         )
 
@@ -633,6 +651,7 @@ class QwenHTTPProvider:
             response_format="json_schema" if self.structured_output else "text",
         )
 
+    @timed("planning.context_pack", component="brain.models")
     def build_atomic_planning_request(self, context) -> QwenStageRequest:
         """Build the control atomic-skill request used by the live planner."""
         from ..contracts.commands_atomic import AtomicCommandDraft
@@ -655,7 +674,8 @@ class QwenHTTPProvider:
         )
 
     def _call(self, stage: str, prompt: str, content, schema: dict[str, Any], parse=None, *,
-              max_completion_tokens=None, response_format: str | None = None):
+              max_completion_tokens=None, response_format: str | None = None,
+              retry_index=0, retry_reason=None):
         request = QwenStageRequest(
             stage=stage,
             prompt=prompt,
@@ -664,15 +684,17 @@ class QwenHTTPProvider:
             response_format=response_format or ("json_schema" if self.structured_output else "text"),
             max_completion_tokens=max_completion_tokens,
         )
-        return self._call_request(request, parse)
+        return self._call_request(request, parse, retry_index=retry_index, retry_reason=retry_reason)
 
-    def _call_request(self, request: QwenStageRequest, parse=None):
+    @timed("qwen.call", component="brain.models")
+    def _call_request(self, request: QwenStageRequest, parse=None, *, retry_index=0, retry_reason=None):
         """Execute one already-built request and retain historical diagnostics."""
         stage = request.stage
         prompt = request.prompt
         schema = request.schema
         format_kind = request.response_format
-        payload = request.payload(self.model)
+        with span("planning.prompt_pack", component="brain.models", source="models/qwen_http.py:QwenStageRequest.payload", stage=stage):
+            payload = request.payload(self.model)
         headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
         request_id = uuid.uuid4().hex
         headers["X-Request-ID"] = request_id
@@ -693,6 +715,8 @@ class QwenHTTPProvider:
         # endpoint.  The atomic planning round validates locally without pinning
         # a server-side grammar.
         record["response_format"] = format_kind
+        if stage == "task_understanding":
+            record["wire_format"] = self.understanding_wire_format
         if stage == "task_understanding" and self.asset_catalog_sha256:
             record["asset_catalog_sha256"] = self.asset_catalog_sha256
             if self.asset_catalog_snapshot is not None:
@@ -703,13 +727,26 @@ class QwenHTTPProvider:
         started = time.monotonic()
         self.last_raw_text.pop(stage, None)
         self.last_raw_values.pop(stage, None)
+        if stage == "task_understanding":
+            # A failed retry must not retain the previous response's expansion.
+            self.last_raw_text.pop("task_understanding_canonical", None)
+            self.last_raw_values.pop("task_understanding_canonical", None)
         response = None
+        http_timing = None
         try:
-            if self.client is not None:
-                response = self.client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload, timeout=self.timeout)
-            else:
-                with httpx.Client(transport=self.transport) as client:
-                    response = client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload, timeout=self.timeout)
+            with span("qwen.http_wait", component="qwen", source="models/qwen_http.py:QwenHTTPProvider._call_request",
+                      stage=stage, http_request_id=request_id, requests=1, wait_kind="http",
+                      prompt_chars=len(prompt), response_format=format_kind,
+                      retry_index=retry_index, retry_reason=retry_reason,
+                      prompt_tokens=None, completion_tokens=None, total_tokens=None) as http_timing:
+                if http_timing is not None:
+                    http_timing.annotate(request_body_bytes=len(json.dumps(payload, ensure_ascii=False).encode("utf-8")),
+                                         prompt_bytes=len(prompt.encode("utf-8")))
+                if self.client is not None:
+                    response = self.client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload, timeout=self.timeout)
+                else:
+                    with httpx.Client(transport=self.transport) as client:
+                        response = client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload, timeout=self.timeout)
             record["http_status"] = response.status_code
             record["response_request_id"] = response.headers.get("x-request-id")
             self.last_raw_text[stage] = self._redact(response.text)
@@ -718,6 +755,11 @@ class QwenHTTPProvider:
             if not isinstance(body, dict):
                 raise QwenProviderError("response body must be an object")
             usage = body.get("usage")
+            # Only timings returned on this HTTP response are attributable.
+            record["completion_id"] = body.get("id")
+            if isinstance(body.get("timings"), dict):
+                record["server_timings"] = {k: v for k, v in body["timings"].items()
+                                             if isinstance(v, (int, float)) and not isinstance(v, bool)}
             if isinstance(usage, dict):
                 record["usage"] = {k:v for k,v in usage.items() if k in {"prompt_tokens", "completion_tokens", "total_tokens"} and isinstance(v, int)}
                 record.update(record["usage"])
@@ -729,9 +771,11 @@ class QwenHTTPProvider:
             self.last_raw_text[stage] = self._redact(raw)
             if record["finish_reason"] == "length":
                 raise QwenProviderError("model_output_truncated")
-            value = _extract_json(raw)
+            with span("qwen.json_parse", component="brain.models", source="models/qwen_http.py:_extract_json", stage=stage):
+                value = _extract_json(raw)
             self.last_raw_values[stage] = deepcopy(value)
-            result = parse(value) if parse else value
+            with span("qwen.semantic_validate", component="brain.models", source="models/qwen_http.py:QwenHTTPProvider._call_request", stage=stage):
+                result = parse(value) if parse else value
             record["status"] = "succeeded"
             return result
         except BrainError as exc:
@@ -780,6 +824,14 @@ class QwenHTTPProvider:
         finally:
             record["elapsed_seconds"] = time.monotonic() - started
             self.calls.append(record)
+            # Reuse the provider's existing usage record; never estimate tokens
+            # from characters or put raw responses/exception text in PerfTrace.
+            if http_timing is not None:
+                if response is not None:
+                    http_timing.annotate(response_chars=len(response.text))
+                http_timing.annotate(**{key: record[key] for key in (
+                    "prompt_tokens", "completion_tokens", "total_tokens", "finish_reason",
+                    "http_status", "skill_md_sha256", "status") if key in record})
 
     def understand(self, request: TaskUnderstandingRequest) -> TaskIntent:
         """Legacy TaskIntent adapter backed by the same v3 wire contract.
@@ -790,16 +842,18 @@ class QwenHTTPProvider:
         pair.  Non-robot routes are deliberately rejected because this method
         cannot represent their payloads as TaskIntent.
         """
-        if request.asset_catalog is not None and (
-                self.asset_catalog_snapshot is None
-                or request.asset_catalog.revision != self.asset_catalog_snapshot.revision):
-            self.set_asset_catalog(request.asset_catalog)
-        return self._call_request(
-            self.build_understanding_request(request),
-            lambda value: _task_intent_from_v3(value, request.instruction),
-        )
+        turn = self.understand_turn(request)
+        if turn.task_intent is None:
+            raise QwenProviderError("task_semantic_invalid: task understanding did not return robot_task",
+                                    code="semantic_protocol_error")
+        return turn.task_intent
 
+    @timed("qwen.task_understanding", component="brain.models")
     def understand_turn(self, request: TaskUnderstandingRequest):
+        if request.asset_catalog is None and self.asset_catalog_snapshot is not None:
+            # Direct callers use the same immutable snapshot for prompt,
+            # revision and validation, just like BrainPipeline callers.
+            request = request.model_copy(update={"asset_catalog": self.asset_catalog_snapshot})
         if request.asset_catalog is not None and (
                 self.asset_catalog_snapshot is None
                 or request.asset_catalog.revision != self.asset_catalog_snapshot.revision):
@@ -808,6 +862,19 @@ class QwenHTTPProvider:
             # on exactly the same catalog revision.
             self.set_asset_catalog(request.asset_catalog)
         def parse(value):
+            if self.understanding_wire_format == "compact_v1":
+                from .understanding_wire import decode
+                try:
+                    value = decode(value)
+                except (ValueError, KeyError, TypeError) as exc:
+                    raise QwenProviderError(str(exc), code="provider_output_schema_invalid") from exc
+                except Exception as exc:
+                    from jsonschema import ValidationError as SchemaValidationError
+                    if not isinstance(exc, SchemaValidationError):
+                        raise
+                    raise QwenProviderError(str(exc), code="provider_output_schema_invalid") from exc
+                self.last_raw_values["task_understanding_canonical"] = deepcopy(value)
+                self.last_raw_text["task_understanding_canonical"] = json.dumps(value, ensure_ascii=False)
             # Old replay fixtures may opt into the narrow formatting adapter,
             # but live v3.1 requests must be interpreted exactly as emitted.
             # In particular, do not rewrite cup/mug or invent replacement
@@ -851,7 +918,15 @@ class QwenHTTPProvider:
                 "asset_choices 项，entity_id 必须与实体一致，asset_key 必须来自本次 OLS 资产目录。"
                 "不要省略其他必填字段，不要解释文字，只返回 JSON。"
             )
-            return self._call_request(replace(stage_request, prompt=repair_prompt), parse)
+            if self.understanding_wire_format == "compact_v1":
+                repair_prompt = stage_request.prompt + (
+                    "\n上一轮缺少资产选择。只返回同一 u.compact.v1 JSON；"
+                    "se.ch 必须为每个 add/replace 实体提供 id 和 ak，ak 必须来自目录。"
+                    "保留全部必要操作信息，不输出旧协议字段。"
+                )
+            return self._call_request(replace(stage_request, prompt=repair_prompt), parse,
+                                      retry_index=1, retry_reason="asset_choice_missing")
+    @timed("recovery.qwen", component="brain.models")
     def recover_failure(self, request: FailureContextRequest) -> FailureContextDecision:
         """Run the isolated failure-context.v1 round.
 
@@ -871,9 +946,9 @@ class QwenHTTPProvider:
     def _understanding_payload(self, request: TaskUnderstandingRequest) -> dict[str, Any]:
         """Serialize the complete first-stage request, not just user text."""
         catalog = request.asset_catalog or self.asset_catalog_snapshot
-        value = request.model_dump(mode="json", exclude_none=True)
+        value = request.model_dump(mode="json", exclude_none=True, exclude={"asset_catalog"})
         if catalog is not None:
-            value["asset_catalog"] = catalog.model_dump(mode="json")
+            value["catalog_revision"] = catalog.revision
         return value
 
     @staticmethod
@@ -958,6 +1033,7 @@ class QwenHTTPProvider:
             raise QwenProviderError("asset choice has no add/replace operation: " + ",".join(extra),
                                     code="provider_output_schema_invalid")
 
+    @timed("qwen.task_decomposition", component="brain.models")
     def decompose(self, request):
         """Split one utterance into the ordered steps the caller will run in turn.
 
@@ -975,10 +1051,13 @@ class QwenHTTPProvider:
         content = prompt_payload(request.model_dump(mode="json", exclude_none=True))
         schema = task_decomposition_wire_schema()
         prompt = TASK_DECOMPOSITION_PROMPT
+        retry_reason = None
         for attempt in range(2):
             try:
-                return self._call("task_decomposition", prompt, content, schema, parse_decomposition)
+                return self._call("task_decomposition", prompt, content, schema, parse_decomposition,
+                                  retry_index=attempt, retry_reason=retry_reason)
             except QwenProviderError as exc:
+                retry_reason = exc.code
                 if attempt:
                     raise
                 prompt = TASK_DECOMPOSITION_PROMPT + (
@@ -1006,6 +1085,7 @@ class QwenHTTPProvider:
                               SkillPlanLLMOutput.model_json_schema(), SkillPlanLLMOutput.model_validate,
                               max_completion_tokens=retry_budget)
 
+    @timed("qwen.skill_planning", component="brain.models")
     def plan_atomic(self, context, validate=None):
         """Ask for the control atomic-skill command list.
 
@@ -1025,14 +1105,17 @@ class QwenHTTPProvider:
 
         stage_request = self.build_atomic_planning_request(context)
         prompt, tokens = stage_request.prompt, stage_request.max_completion_tokens
+        retry_reason = None
         for attempt in range(2):
             try:
                 return self._call_request(
                     replace(stage_request, prompt=prompt, max_completion_tokens=tokens),
                     parse,
+                    retry_index=attempt, retry_reason=retry_reason,
                 )
             except QwenProviderError as exc:
                 truncated = "model_output_truncated" in str(exc)
+                retry_reason = "model_output_truncated" if truncated else exc.code
                 if attempt or not (truncated or exc.code in ATOMIC_OUTPUT_CODES
                                    or exc.code.startswith("atomic_plan_")):
                     raise

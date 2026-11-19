@@ -1,6 +1,7 @@
 from ..contracts.grounded_task import GroundedEntity, GroundedTask
 from ..contracts.scene import SceneConfig
 from ..contracts.task_intent import QuantityMode, TaskIntent
+from ..perf_trace import timed
 from ..scene.component_access import SceneIndex
 from ..scene.scene_graph import world_transform
 from .scene_relation_resolver import SceneRelationResolver
@@ -27,6 +28,7 @@ class SceneGrounder:
 
     discover_candidates = staticmethod(discover_candidates)
 
+    @timed("grounding.select", component="brain.grounding")
     def ground(self, intent: TaskIntent, scene: SceneConfig, bindings_override=None, *, resolved_relations=None,
                prefer_auto_resolve: bool = False, logical_task_id: str = "", step_id: str = "ground") -> GroundedTask:
         # The decision is part of durable turn evidence, not merely a local

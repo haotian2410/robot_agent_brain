@@ -34,6 +34,13 @@ class CatalogVisibilityTest(unittest.TestCase):
                 self.assertTrue(result['matched'])
                 self.assertEqual(result['counts'], {'model': 1, 'robot': 1, 'scene': 1})
                 self.assertTrue({'/model', '/robot', '/scene'} <= set(calls))
+                self.assertFalse(result['verification']['reusable'])
+                self.assertIsNone(result['verification']['remote_revision'])
+                before = len(calls)
+                repeated = check_ols(client, 'http://127.0.0.1:8000', root)
+                self.assertEqual(len(calls) - before, 6)
+                self.assertEqual(result['verification']['local_metadata_digest'],
+                                 repeated['verification']['local_metadata_digest'])
                 corrupt = True
                 with self.assertRaisesRegex(ValueError, 'ols_metadata_mismatch:model:1'):
                     check_ols(client, 'http://127.0.0.1:8000', root)

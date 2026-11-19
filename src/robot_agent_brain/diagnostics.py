@@ -14,6 +14,7 @@ def configuration_summary(config, assets, defaults):
     from .models.prompts import (TASK_UNDERSTANDING_PROMPT, SKILL_PLANNING_PROMPT, ATOMIC_SKILL_PLANNING_PROMPT,
                                  DUAL_SKILL_PLANNING_PROMPT, build_asset_catalog_prompt)
     from .skills.registry import REGISTRY
+    from .models.understanding_wire import compact_prompt, compact_schema
     url = urlsplit(config.base_url)
     endpoint = urlunsplit((url.scheme, url.netloc.rsplit("@", 1)[-1], url.path, "", ""))
     metadata = getattr(assets, "metadata", None)
@@ -51,6 +52,13 @@ def configuration_summary(config, assets, defaults):
     control_skill_sha = (hashlib.sha256(Path(control_skill_path).read_bytes()).hexdigest()
                          if control_skill_path else None)
     return {"provider":config.provider, "model":config.model, "base_url":endpoint,
+            "understanding_wire_format": config.understanding_wire_format,
+            "understanding_transport_fingerprint": fingerprint({
+                "format": config.understanding_wire_format,
+                "prompt": compact_prompt(TASK_UNDERSTANDING_PROMPT) if config.understanding_wire_format == "compact_v1" else TASK_UNDERSTANDING_PROMPT,
+                "compact_schema": compact_schema() if config.understanding_wire_format == "compact_v1" else None,
+                "catalog_location": "system_only_v1",
+            }),
             "scene_scale_policy": config.scale_policy().model_dump(mode="json"),
             "query_near_distance_m": config.query_near_distance_m,
             "scene_layout_interiors_sha256": fingerprint(layout_registry.configuration_payload()),

@@ -4,6 +4,7 @@ import os
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
+from ..perf_trace import timed
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
@@ -171,6 +172,7 @@ class SessionStore:
         finally:
             os.close(fd)
 
+    @timed("store.load", component="brain.session")
     def load(self, session_id):
         path = self.directory(session_id) / "session_state.json"
         if path.is_symlink():
@@ -184,6 +186,7 @@ class SessionStore:
             OriginalSceneStore(path.parent).load(state.original_scene_manifest)
         return state
 
+    @timed("store.save", component="brain.session")
     def save(self, session_id, session, *, revision, config_fingerprint=None):
         """Caller holds lock across restore, processing, and this checkpoint."""
         state = SessionState(session_id=session_id, revision=revision, config_fingerprint=config_fingerprint, scene=session.scene,

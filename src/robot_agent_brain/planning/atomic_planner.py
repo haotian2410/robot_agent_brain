@@ -5,6 +5,7 @@ module produces the control document directly, either from the deterministic
 assembly graph or from the planning round that answers with it.
 """
 from __future__ import annotations
+from ..perf_trace import timed
 
 from ..contracts.commands_atomic import (ApproachParameters, AtomicCommand, AtomicCommandsFile,
                                          AtomicSkillName, LiftUpParameters,
@@ -95,6 +96,7 @@ class AtomicPlanner:
         self.mode, self.provider = mode, provider
         self.last_trace: PlanningTrace | None = None
 
+    @timed("planning.atomic", component="brain.planning")
     def plan(self, request_id: str, task: GroundedTask, scene: SceneConfig, *,
              held_object=None) -> AtomicCommandsFile:
         trace = self.last_trace = PlanningTrace(self.mode)

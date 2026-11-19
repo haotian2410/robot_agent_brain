@@ -1,5 +1,6 @@
 """Atomic component scene edits; no robot motion or Control execution."""
 import random
+from ..perf_trace import timed
 from dataclasses import dataclass, field
 
 from ..contracts.scene import ScenePatch, ScenePatchOperation, SceneComponent
@@ -53,6 +54,7 @@ class SceneEditor:
     def edit(self, intent, scene, **kwargs):
         return self.edit_result(intent, scene, **kwargs).patch
 
+    @timed("scene.edit", component="brain.scene")
     def edit_result(self, intent, scene, *, dialogue=None, defaults=None, bindings_override=None,
                     seen_scene_object_ids=None, next_scene_object_id=None):
         if not isinstance(intent, SceneEditPlan):

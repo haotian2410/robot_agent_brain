@@ -60,6 +60,7 @@ class BrainConfig(BaseModel):
     model: str | None = None
     timeout: float = Field(default=120, gt=0)
     structured_output: bool = True
+    understanding_wire_format: Literal["full", "compact_v1"] = "full"
     api_key: SecretStr | None = Field(default=None, exclude=True)
     assets: str | None = None
     asset_library_root: str | None = None

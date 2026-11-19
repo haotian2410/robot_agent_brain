@@ -16,6 +16,7 @@ from pathlib import Path
 
 from ..contracts.commands_atomic import AtomicCommandsFile, canonical_atomic_commands
 from ..errors import BrainError
+from ..perf_trace import timed, span
 from ..ports.execution import ExecutionOutcome, ExecutionStep
 
 
@@ -80,6 +81,7 @@ class SubprocessExecutionAdapter:
             env["QWEN_MODEL"] = self.vlm_model
         return env
 
+    @timed("control.dispatch", component="brain.execution")
     def run(self, commands: AtomicCommandsFile, scene_document: dict, *, progress=None) -> ExecutionOutcome:
         error_descriptions, feedback, runner, workspace = _link_modules(self.link_root)
         task = canonical_atomic_commands(commands)
@@ -90,13 +92,15 @@ class SubprocessExecutionAdapter:
                              f"命令文档写 {task['scene_id']}/{task['scene_version']}，"
                              f"场景文档写 {header.get('scene_id')}/{header.get('scene_version')}")
         header = unique_named_document(header)
-        ws, commands_path, _ = workspace.build(
-            self.workspace_root, scene_document=header, task=task, asset_root=self.asset_root,
-            request_id=commands.request_id)
+        with span("control.workspace_build", component="bridge", source="adapters/subprocess_execution.py:SubprocessExecutionAdapter.run"):
+            ws, commands_path, _ = workspace.build(
+                self.workspace_root, scene_document=header, task=task, asset_root=self.asset_root,
+                request_id=commands.request_id)
         # The control's error_messages module owns the wording of a control failure;
         # the Brain reads it from the checkout it was pointed at and copies nothing.
         describe = error_descriptions.describe_for(self.control_root)
-        result = runner.run(ws, commands_path=commands_path, catalog_path=ws.catalog_path,
+        with span("control.child_run", component="control", source="adapters/subprocess_execution.py:SubprocessExecutionAdapter.run", wait_kind="child_process"):
+            result = runner.run(ws, commands_path=commands_path, catalog_path=ws.catalog_path,
                             python=self.python, control_root=self.control_root, library=self.library,
                             object_library_url=self.object_library_url,
                             timeout_seconds=self.timeout_seconds, backend=self.backend,
@@ -110,7 +114,8 @@ class SubprocessExecutionAdapter:
         # The reduction reads poses back by object name, and only the scene
         # document carries those names: ``workspace.build`` returns the stamped
         # task document, which would reduce every moved object to nothing.
-        summary = feedback.summarize(result, header, describe)
+        with span("control.feedback_parse", component="bridge", source="adapters/subprocess_execution.py:SubprocessExecutionAdapter.run"):
+            summary = feedback.summarize(result, header, describe)
         # Only the report for this exact request can certify a pre-execution rejection.
         summary["no_effect_verified"] = (summary.get("no_effect_verified") is True
                                          and result.report.get("request_id") == commands.request_id)

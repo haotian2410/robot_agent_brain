@@ -1,4 +1,5 @@
 from __future__ import annotations
+from ..perf_trace import timed
 import math
 from pydantic import BaseModel, ConfigDict, Field
 from ..contracts.scene import SceneConfig, SceneId
@@ -36,6 +37,7 @@ class SceneQueryEngine:
         self.category_aliases = category_aliases or {}
         self.near_distance_m = near_distance_m
 
+    @timed("scene.query", component="brain.scene")
     def query(self, intent: SceneQueryIntent, scene: SceneConfig, dialogue=None) -> SceneQueryResult:
         if scene is None:
             raise ValueError("scene_required")

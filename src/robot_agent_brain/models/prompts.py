@@ -128,6 +128,22 @@ def build_atomic_skill_reference_tables() -> str:
 TASK_UNDERSTANDING_PROMPT = _load_prompt("task_understanding_clean_v3.txt") + build_spatial_reference_tables()
 VISION_GROUNDING_PROMPT = _load_prompt("vision_grounding_v1.txt")
 SKILL_PLANNING_PROMPT = _load_prompt("skill_planning_v2.txt")
+def build_atomic_draft_output_rules() -> str:
+    """Separate the model's draft envelope from the Control file envelope."""
+    return """
+
+## Brain 规划阶段专用输出格式
+上面的 Control 文档定义技能语义，不要求本次模型生成完整控制请求文件。
+本次只返回 AtomicCommandDraft：一个 JSON 对象，顶层唯一字段是 commands，值为非空命令数组。
+禁止顶层出现 schema_version、request_id、scene_id、scene_version、metadata、explanation 或其他字段。
+文件级身份和版本字段由 Python 在校验后填写；不要从上下文复制这些字段到输出顶层。
+每条命令仍严格遵守上述技能参数表和当前任务要求，保留 command_id、skill_name、parameters 等命令级契约。
+不要输出 Markdown、解释文字或完整请求文件。不要因为省略文件级字段而省略必要动作。
+格式示例：{"commands":[{"command_id":"1","skill_name":"approach","parameters":{"target":17}}]}。
+此例只说明格式，17不是默认目标，也不是完整任务计划；实际目标和完整动作序列必须来自本次任务。
+"""
+
+
 def build_atomic_skill_prompt(source_path: str | Path | None = None) -> tuple[str, str | None]:
     """Load the control skill specification used by the atomic planner.
 
@@ -143,9 +159,9 @@ def build_atomic_skill_prompt(source_path: str | Path | None = None) -> tuple[st
         if not source.strip():
             raise RuntimeError(f"control_skill_prompt_empty: {path}")
         sha = hashlib.sha256(source.encode("utf-8")).hexdigest()
-        return source + "\n" + build_atomic_skill_reference_tables(), sha
+        return source + "\n" + build_atomic_skill_reference_tables() + build_atomic_draft_output_rules(), sha
     fallback = _load_prompt("skill_planning_atomic_v1.txt")
-    return fallback + build_atomic_skill_reference_tables(), None
+    return fallback + build_atomic_skill_reference_tables() + build_atomic_draft_output_rules(), None
 
 
 ATOMIC_SKILL_PLANNING_PROMPT, ATOMIC_SKILL_SOURCE_SHA256 = build_atomic_skill_prompt()
@@ -197,7 +213,7 @@ def build_asset_catalog_prompt(assets, aliases=None, *, snapshot=None, registere
     """Build deterministic path-free OLS vocabulary from one catalog revision."""
     snapshot = snapshot or _snapshot_for_assets(assets, aliases, registered_profiles)
     rows = []
-    for item in (*snapshot.models, *snapshot.robots):
+    for item in sorted((*snapshot.models, *snapshot.robots), key=lambda item: item.asset_key):
         # Keep the complete OLS directory visible to the model while making
         # the safety boundary explicit.  ``category`` is an asset taxonomy,
         # not an instruction about whether the object can be added to a
@@ -226,6 +242,7 @@ def build_asset_catalog_prompt(assets, aliases=None, *, snapshot=None, registere
                      "availability_reason": item.availability_reason,
                      "usage": usage,
                      "can_place": item.can_place})
+        rows[-1].update(scalable=item.scalable, scale_range=item.scale_range)
     lines = ["\n当前 OLS 资产目录（revision=%s）。新建/替换只能选择其中真实存在的 asset_key；不要输出目录外名称、数字实例ID或本地路径：" % snapshot.revision]
     lines.append("tags 是物体语义标签（中文），用于匹配用户指令中的物体描述。从用户指令中提取相关标签填入 entities[].tags 数组。")
     for row in rows:
@@ -235,11 +252,12 @@ def build_asset_catalog_prompt(assets, aliases=None, *, snapshot=None, registere
         chinese = row["display_name_chinese"]
         display = f'{row["display_name"]}/{chinese}' if chinese else row["display_name"]
         can_place = str(row["can_place"]).lower()
-        lines.append(f"- {row['asset_key']} | semantic_name={row['semantic_name']} | display={display} | aliases={aliases_text} | category={row['category']} | tags={tags} | usage={row['usage']} | availability={reason} | add={str(row['selectable_for_add']).lower()} | can_place={can_place} | scope={row['scope']}")
+        lines.append(f"- {row['asset_key']} | semantic_name={row['semantic_name']} | display={display} | aliases={aliases_text} | category={row['category']} | tags={tags} | usage={row['usage']} | availability={reason} | add={str(row['selectable_for_add']).lower()} | can_place={can_place} | scope={row['scope']} | scalable={row['scalable']} | scale_range={row['scale_range']}")
+    lines.append("registered_profiles=" + ",".join(sorted(snapshot.registered_profiles)))
     if snapshot.scenes:
         lines.append("当前 OLS 场景模板（仅用于场景上下文/预设选择，不可作为 scene_edit.add 的物体）：")
-        for item in snapshot.scenes:
-            lines.append(f"- {item.scene_key} | scene_name={item.name} | display={item.display_name or item.name}")
+        for item in sorted(snapshot.scenes, key=lambda item: item.scene_key):
+            lines.append(f"- {item.scene_key} | scene_name={item.name} | display={item.display_name or item.name} | availability={item.availability_reason or 'available'}")
     assembly_catalog = getattr(assets, "robot_assembly_catalog", None)
     if callable(assembly_catalog):
         lines.append("OLS 机器人/配件装配目录（只用于语义选择；是否能规划仍由 RobotProfile 决定）：")
