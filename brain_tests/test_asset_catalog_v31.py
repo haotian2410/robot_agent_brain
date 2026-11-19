@@ -54,7 +54,7 @@ def test_understanding_request_sends_catalog_workspace_and_scene_context():
         return httpx.Response(200, json=_provider_response())
 
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
-                                transport=httpx.MockTransport(handler))
+                                transport=httpx.MockTransport(handler), understanding_wire_format="full")
     provider.understand_turn(TaskUnderstandingRequest(instruction="pause"))
     body = json.loads(requests[0]["messages"][1]["content"])
     assert body["protocol_version"] == "task_understanding.v3.1"
@@ -90,7 +90,7 @@ def test_live_qwen_payload_contains_full_current_ols_catalog_and_scenes():
         return httpx.Response(200, json=_provider_response())
 
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
-                                transport=httpx.MockTransport(handler))
+                                transport=httpx.MockTransport(handler), understanding_wire_format="full")
     snapshot = adapter.catalog_snapshot(aliases={"杯子": "mug", "马克杯": "mug", "cup": "mug"})
     provider.understand_turn(TaskUnderstandingRequest(
         instruction="暂停", asset_catalog=snapshot,
@@ -152,7 +152,7 @@ def test_per_turn_catalog_keeps_registered_profiles_in_payload_and_revision():
         return httpx.Response(200, json=_provider_response())
 
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
-                                transport=httpx.MockTransport(handler), asset_catalog=first)
+                                transport=httpx.MockTransport(handler), asset_catalog=first, understanding_wire_format="full")
     provider.understand_turn(TaskUnderstandingRequest(instruction="暂停", asset_catalog=second))
     body = json.loads(requests[0]["messages"][1]["content"])
     assert "asset_catalog" not in body and body["catalog_revision"] == second.revision
@@ -217,7 +217,7 @@ def test_live_pipeline_http_sends_full_catalog_on_every_turn():
         return httpx.Response(200, json=_provider_response())
 
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
-                                transport=httpx.MockTransport(handler))
+                                transport=httpx.MockTransport(handler), understanding_wire_format="full")
     pipeline = BrainPipeline(provider, adapter)
     pipeline.understand_turn("暂停")
     pipeline.understand_turn("继续")
@@ -278,7 +278,7 @@ def test_live_pipeline_catalog_uses_revision_scoped_alias_data():
     # Live callers omit ``aliases`` deliberately: the adapter's
     # revision-scoped vocabulary is injected into the Qwen prompt.  In this
     # mug-only catalog all language forms are useful evidence for selection.
-    provider = QwenHTTPProvider("http://example/v1", "qwen-test")
+    provider = QwenHTTPProvider("http://example/v1", "qwen-test", understanding_wire_format="full")
     provider.set_asset_catalog(adapter, aliases=None)
     prompt_mug = next(item for item in provider.asset_catalog_snapshot.models if item.name == "mug")
     assert {"cup", "杯子", "马克杯"}.issubset(set(prompt_mug.aliases))

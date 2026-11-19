@@ -21,7 +21,7 @@ class LiveColorRecoveryTests(unittest.TestCase):
             return httpx.Response(200, json={"choices": [{"message": {"content": content},
                                                             "finish_reason": "stop"}]})
         provider = QwenHTTPProvider("http://example/v1", "test-model",
-                                    transport=httpx.MockTransport(handler))
+                                    transport=httpx.MockTransport(handler), understanding_wire_format="full")
         return provider.understand_turn(TaskUnderstandingRequest(
             instruction=instruction, asset_catalog=self.catalog))
 

@@ -19,7 +19,7 @@ assert decode(wire)["scene_query"]["target"] == "apple"
 assert "u.compact.v1" in compact_prompt(TASK_UNDERSTANDING_PROMPT)
 def handler(request):
     return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(wire)}}]})
-provider = QwenHTTPProvider("http://wheel.invalid", "mock", transport=httpx.MockTransport(handler),
-                           understanding_wire_format="compact_v1")
+provider = QwenHTTPProvider("http://wheel.invalid", "mock", transport=httpx.MockTransport(handler))
+assert provider.understanding_wire_format == "compact_v1"
 assert provider.understand_turn(TaskUnderstandingRequest(instruction="有几个苹果")).scene_query.target == "apple"
 print(json.dumps({"wheel_smoke": "passed", "module": str(module), "network": False, "control_called": False}))

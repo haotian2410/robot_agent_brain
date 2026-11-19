@@ -22,6 +22,27 @@ def query():
                 "query_type": "count", "entities": [entity()], "target": "apple", "relations": []}}
 
 
+@pytest.mark.parametrize("mode", [None, "full", "compact_v1"])
+def test_default_compact_and_explicit_full_remain_usable(mode):
+    from robot_agent_brain.config import BrainConfig
+    from robot_agent_brain.models.task_understanding import task_understanding_v3_wire_schema
+    options = {} if mode is None else {"understanding_wire_format": mode}
+    config = BrainConfig(**options)
+    selected = mode or "compact_v1"
+    assert config.understanding_wire_format == selected
+    expected_schema = compact_schema() if selected == "compact_v1" else task_understanding_v3_wire_schema()
+    response = encode(query()) if selected == "compact_v1" else query()
+    def handler(req):
+        payload = json.loads(req.content)
+        assert payload["response_format"]["json_schema"]["schema"] == expected_schema
+        return httpx.Response(200, json={"choices": [{"message": {"content": json.dumps(response)}}]})
+    provider = QwenHTTPProvider("http://test", "test", transport=httpx.MockTransport(handler), **options)
+    assert provider.understanding_wire_format == selected
+    turn = provider.understand_turn(TaskUnderstandingRequest(instruction="有几个苹果"))
+    assert turn.turn_kind.value == "scene_query"
+    assert provider.calls[-1]["wire_format"] == selected
+
+
 @pytest.mark.parametrize("value", [query(),
     {"status": "clarification_required", "turn_kind": "robot_task", "clarification_question": "哪个苹果？"},
     {"status": "accepted", "turn_kind": "robot_task", "initial_robot_asset": "ur10",

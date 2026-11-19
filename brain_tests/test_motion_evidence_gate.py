@@ -39,7 +39,7 @@ def test_qwen_missing_distance_is_blocked_not_delivery_or_network_failure(tmp_pa
               "entities":[{"id":"a", "name":"apple", "category":"fruit"}],
               "operations":[{"type":"move", "target":"a", "motion_direction":"right", "distance_m":.01}]}
     provider = QwenHTTPProvider("http://example/v1", "qwen-test", transport=httpx.MockTransport(
-        lambda _: httpx.Response(200, json={"choices":[{"message":{"content":json.dumps(output)}, "finish_reason":"stop"}]})))
+        lambda _: httpx.Response(200, json={"choices":[{"message":{"content":json.dumps(output)}, "finish_reason":"stop"}]})), understanding_wire_format="full")
     app = BrainApplication(BrainConfig(output_dir=str(tmp_path), model="qwen-test"), provider=provider)
     report = app.handle("用机械臂把苹果向右移动")
     assert report.run_status == "blocked" and report.error.code == "motion_distance_evidence_missing"

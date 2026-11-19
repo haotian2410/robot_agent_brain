@@ -30,7 +30,7 @@ def test_raw_failed_response_only_saved_in_debug_and_redacted(tmp_path):
         provider = QwenHTTPProvider("http://example/v1", "qwen-test", api_key="sensitive-key",
             transport=httpx.MockTransport(lambda _: httpx.Response(200, json={
                 "choices":[{"message":{"content":'{"broken":"sensitive-key"'},"finish_reason":"length"}],
-                "usage":{"total_tokens":20}})))
+                "usage":{"total_tokens":20}})), understanding_wire_format="full")
         app = BrainApplication(BrainConfig(model="qwen-test", output_dir=str(directory), debug=debug, api_key="sensitive-key"), provider=provider)
         report = app.handle("test", session_id="failed")
         assert report.run_status == "failed" and "commands" not in report.artifacts
@@ -62,7 +62,7 @@ def test_raw_model_response_is_scoped_to_the_turn_that_produced_it(tmp_path):
     answers = iter([task] + [clarification] * 8)
     provider = QwenHTTPProvider("http://example/v1", "qwen-test", transport=httpx.MockTransport(
         lambda _: httpx.Response(200, json={"choices": [
-            {"message": {"content": json.dumps(next(answers))}, "finish_reason": "stop"}]})))
+            {"message": {"content": json.dumps(next(answers))}, "finish_reason": "stop"}]})), understanding_wire_format="full")
     app = BrainApplication(BrainConfig(model="qwen-test", output_dir=str(tmp_path), debug=True),
                            provider=provider)
     first = app.handle("把苹果放到桌上", session_id="bleed")

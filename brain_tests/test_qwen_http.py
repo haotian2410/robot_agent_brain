@@ -20,7 +20,7 @@ def test_injected_client_success_and_single_record():
         requests.append(json.loads(request.content))
         return httpx.Response(200, json=response(), headers={"x-request-id":"server-1"})
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-        provider = QwenHTTPProvider("http://example/v1", "qwen-test", client=client)
+        provider = QwenHTTPProvider("http://example/v1", "qwen-test", client=client, understanding_wire_format="full")
         turn = provider.understand_turn(TaskUnderstandingRequest(instruction="pause"))
         assert turn.turn_kind == "session_control"
         assert requests[0]["response_format"]["type"] == "json_schema"
@@ -45,7 +45,7 @@ def test_injected_client_success_and_single_record():
 ])
 def test_every_parse_failure_has_exactly_one_failed_record(body):
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=body)))
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=body)), understanding_wire_format="full")
     with pytest.raises(QwenProviderError):
         provider.understand_turn(TaskUnderstandingRequest(instruction="pause"))
     assert len(provider.calls) == 1 and provider.calls[0]["status"] == "failed"
@@ -65,7 +65,7 @@ def test_transport_and_body_failures_redact_secret(mode):
             return httpx.Response(503, text="secret-token unavailable")
         return httpx.Response(200, text="secret-token not-json")
     provider = QwenHTTPProvider("http://example/v1", "qwen-test", api_key="secret-token",
-                                transport=httpx.MockTransport(handler))
+                                transport=httpx.MockTransport(handler), understanding_wire_format="full")
     with pytest.raises(QwenProviderError) as error:
         provider.understand_turn(TaskUnderstandingRequest(instruction="pause"))
     assert "secret-token" not in str(error.value)
@@ -78,7 +78,7 @@ def test_application_records_only_current_round(tmp_path):
     from robot_agent_brain.application import BrainApplication
     from robot_agent_brain.config import BrainConfig
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response())))
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response())), understanding_wire_format="full")
     app = BrainApplication(BrainConfig(output_dir=str(tmp_path), model="qwen-test"), provider=provider)
     first, second = app.handle("pause"), app.handle("pause")
     assert len(provider.calls) == 2
@@ -96,7 +96,7 @@ def test_failure_context_is_a_separate_read_only_round():
         requests.append(json.loads(request.content))
         return httpx.Response(200, json=response(raw=json.dumps(raw)))
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
-                                transport=httpx.MockTransport(handler))
+                                transport=httpx.MockTransport(handler), understanding_wire_format="full")
     decision = provider.recover_failure(FailureContextRequest(
         current_user_text="在左边", root_failure_turn_id="t1"))
     assert decision.decision == "ask_user"
@@ -124,7 +124,7 @@ def _task_payload(**updates):
 def test_qwen_missing_open_close_reference_becomes_clarification(task_type):
     raw = _task_payload(operations=[{"type": task_type, "target": "door"}])
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))))
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))), understanding_wire_format="full")
     turn = provider.understand_turn(TaskUnderstandingRequest(instruction=f"{task_type} microwave door"))
     assert turn.status.value == "clarification_required"
     assert turn.clarification_question and "参照物" in turn.clarification_question
@@ -139,7 +139,7 @@ def test_qwen_invalid_clarification_payload_is_sanitized():
         clarification_question="请明确双臂分工",
     )
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))))
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))), understanding_wire_format="full")
     turn = provider.understand_turn(TaskUnderstandingRequest(instruction="双臂抓取"))
     assert turn.status.value == "clarification_required"
     assert turn.clarification_question == "请明确双臂分工"
@@ -153,7 +153,7 @@ def test_qwen_unsupported_payload_is_sanitized():
         clarification_question="当前技能未注册",
     )
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))))
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))), understanding_wire_format="full")
     turn = provider.understand_turn(TaskUnderstandingRequest(instruction="倒水"))
     assert turn.status.value == "unsupported_task"
     assert turn.turn_kind.value == "unsupported_task"
@@ -166,7 +166,7 @@ def test_qwen_valid_open_close_reference_remains_accepted():
                         entities=[{"id": "door", "name": "microwave_door", "category": "door"},
                                   {"id": "handle", "name": "handle", "category": "handle"}])
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))))
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))), understanding_wire_format="full")
     turn = provider.understand_turn(TaskUnderstandingRequest(instruction="open microwave door by handle"))
     assert turn.status.value == "accepted"
     assert turn.task_intent.operations[0].reference == "handle"
@@ -178,7 +178,7 @@ def test_qwen_drawer_open_without_reference_targets_drawer_object():
         operations=[{"type": "open", "target": "drawer"}],
     )
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))))
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))), understanding_wire_format="full")
     turn = provider.understand_turn(TaskUnderstandingRequest(instruction="拉开抽屉"))
     assert turn.status.value == "accepted"
     assert turn.task_intent.operations[0].target == "drawer"
@@ -236,7 +236,7 @@ def test_qwen_explicit_replace_phrase_repairs_omitted_replacement_role():
         transport=httpx.MockTransport(
             lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))
         ),
-    )
+     understanding_wire_format="full")
     turn = provider.understand_turn(
         TaskUnderstandingRequest(instruction="把苹果替换成香蕉")
     )
@@ -261,7 +261,7 @@ def test_qwen_explicit_farthest_colour_clarification_is_recovered():
         transport=httpx.MockTransport(
             lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))
         ),
-    )
+     understanding_wire_format="full")
     turn = provider.understand_turn(
         TaskUnderstandingRequest(instruction="把离篮子最远的香蕉改成蓝色")
     )
@@ -301,7 +301,7 @@ def test_qwen_multi_replace_without_roles_is_not_broadcast_repaired():
         transport=httpx.MockTransport(
             lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))
         ),
-    )
+     understanding_wire_format="full")
     with pytest.raises(QwenProviderError):
         provider.understand_turn(
             TaskUnderstandingRequest(instruction="把苹果替换成香蕉，把篮子替换成托盘")
@@ -311,7 +311,7 @@ def test_qwen_multi_replace_without_roles_is_not_broadcast_repaired():
 def test_qwen_unrelated_accepted_invalid_output_stays_provider_error():
     raw = _task_payload(operations=[{"type": "grasp"}])
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))))
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))), understanding_wire_format="full")
     with pytest.raises(QwenProviderError) as error:
         provider.understand_turn(TaskUnderstandingRequest(instruction="grasp"))
     assert error.value.code == "provider_error"
@@ -330,7 +330,7 @@ def test_application_reports_clarification_without_scene_or_commands(tmp_path):
         clarification_question="请明确双臂分工",
     )
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))))
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=json.dumps(raw)))), understanding_wire_format="full")
     from robot_agent_brain.application import BrainApplication
     from robot_agent_brain.config import BrainConfig
     report = BrainApplication(BrainConfig(output_dir=str(tmp_path), model="qwen-test"), provider=provider).handle("双臂抓取")
@@ -349,7 +349,7 @@ def test_vision_invalid_bbox_is_classified_as_output_schema_error():
     # transport/provider outage.
     raw = json.dumps({"detections": [{"entity": "door", "bbox": [550, 480, 520, 520]}]})
     provider = QwenHTTPProvider("http://example/v1", "qwen-test",
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=raw))))
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, json=response(raw=raw))), understanding_wire_format="full")
     frame = CameraFrame(scene_id=1, scene_version=1, scene_sub_version=0,
                         camera_id="5", width=1, height=1,
                         rgb=b"png")

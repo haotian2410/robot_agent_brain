@@ -54,16 +54,17 @@ collision-free landing point. `semantics.spatial_phrases` is the single
 Chinese-phrase table behind both paths, so an omitted region is filled from the
 instruction only when the phrase is anchored on the support surface.
 
-## Optional compact U transport (`u.compact.v1`)
+## Default compact U transport (`u.compact.v1`)
 
-`BrainConfig.understanding_wire_format` selects `full` (compatibility default)
-or `compact_v1`. This changes only the Qwen task-understanding boundary, not
-BrainTurn, Scene, Gateway, Control, or the D/S/R formats. Do not change the
-default until the real-model correctness and latency gate passes.
+`BrainConfig.understanding_wire_format` defaults to `compact_v1` as authorized
+on 2026-11-19. Explicit `full` preserves the old complete-field output protocol.
+This changes only the Qwen task-understanding boundary, not BrainTurn, Scene,
+Gateway, Control, or the D/S/R formats. Existing explicit `full` configurations
+are respected; omitted settings use compact after restarting the process.
 
-### Testing the experimental branch
+### Configuration and rollback
 
-Use branch `test/u-compact-strict-20261119` without merging into `main`.
+The tested compact implementation is promoted from `test/u-compact-strict-20261119` to `main`.
 Keep the existing machine-specific configuration, credentials and asset paths.
 In a separate copy of the Brain JSON configuration, set the top-level field:
 
@@ -88,7 +89,7 @@ these are not advertised as positive edit passes. The corresponding isolated
 unobstructed add/move/rotate follow-up passed six turns. Local evidence under
 `var/perf/` is intentionally not shipped in Git.
 
-Validation note (2026-11-19): compact_v1 remains experimental and opt-in.
+Validation note (2026-11-19): compact_v1 is the default; full remains selectable.
 The original empty-bootstrap regression (`add` carrying `ax/ad`) is now guarded
 by closed operation-specific schemas generated from `contracts/scene_edit_rules.py`.
 That module is shared with the canonical validator; full-mode legacy acceptance
@@ -105,9 +106,9 @@ both empty-bootstrap and post-add rotation against the real model.
 
 The final isolated C5 run passed five empty sessions with add followed by rotate
 (10/10 real-browser turns, one U call each, no Control); evidence is in
-`var/perf/u-strict-20261119/web/c5-final/audit-wire.json`. This does not by itself
-authorize switching the production default: full functional and timing gates
-must also be reviewed. Historical compact responses containing invalid fields
+`var/perf/u-strict-20261119/web/c5-final/audit-wire.json`. The default promotion
+does not erase the geometry refusals and cache-comparison limitations recorded
+above. Historical compact responses containing invalid fields
 are not silently grandfathered into current live parsing.
 
 Both modes send the OLS catalog once, in the stable System prefix. User data

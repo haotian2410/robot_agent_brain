@@ -94,7 +94,7 @@ def test_qwen_trace_reuses_usage_and_does_not_change_payload(tmp_path, monkeypat
         monkeypatch.setenv("ROBOT_BRAIN_PERF_TRACE", enabled)
         with trace_scope(output_dir=tmp_path) as trace:
             provider = QwenHTTPProvider("http://mock/v1", "test", api_key="private-key",
-                transport=httpx.MockTransport(handler), atomic_skill_prompt_path=str(tmp_path / "missing"))
+                transport=httpx.MockTransport(handler), atomic_skill_prompt_path=str(tmp_path / "missing"), understanding_wire_format="full")
             result = provider.understand_turn(TaskUnderstandingRequest(instruction="pause"))
             assert result.turn_kind == "session_control"
             assert len(provider.calls) == 1

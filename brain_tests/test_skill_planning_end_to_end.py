@@ -57,7 +57,7 @@ def app_with_responses(tmp_path, bodies, *, mode="qwen", debug=True, **config_kw
         if callable(body):
             body = body(payload_content(payload))
         return httpx.Response(200, json=response(raw=json.dumps(body)))
-    provider = QwenHTTPProvider("http://example/v1", "test-model", transport=httpx.MockTransport(handler))
+    provider = QwenHTTPProvider("http://example/v1", "test-model", transport=httpx.MockTransport(handler), understanding_wire_format="full")
     app = BrainApplication(BrainConfig(model="test-model", planner=mode, output_dir=str(tmp_path), debug=debug,
                                       **config_kwargs), provider=provider)
     return app, provider, requests
@@ -325,7 +325,7 @@ def test_second_call_timeout_keeps_failure_record_and_no_false_scene(tmp_path):
         if count == 1:
             return httpx.Response(200, json=response(raw=json.dumps(UNDERSTANDING)))
         raise httpx.ReadTimeout("planner timed out", request=request)
-    provider = QwenHTTPProvider("http://example/v1", "test", transport=httpx.MockTransport(handler))
+    provider = QwenHTTPProvider("http://example/v1", "test", transport=httpx.MockTransport(handler), understanding_wire_format="full")
     app = BrainApplication(BrainConfig(planner="qwen", debug=True, output_dir=str(tmp_path)), provider=provider)
     report = app.handle("把苹果放进篮子")
     assert report.error.stage == "skill_planning" and report.error.code == "skill_planning_failed"

@@ -44,7 +44,7 @@ def test_live_missing_asset_choice_gets_one_bounded_repair_call():
             "choices": [{"message": {"content": json.dumps(responses.pop(0))}, "finish_reason": "stop"}],
         })
 
-    provider = QwenHTTPProvider("http://example/v1", "qwen-test", transport=httpx.MockTransport(handler))
+    provider = QwenHTTPProvider("http://example/v1", "qwen-test", transport=httpx.MockTransport(handler), understanding_wire_format="full")
     turn = provider.understand_turn(TaskUnderstandingRequest(
         instruction="增加一个苹果", asset_catalog=snapshot))
     assert turn.scene_edit is not None
@@ -63,7 +63,7 @@ def test_live_missing_asset_choice_stops_after_one_repair_attempt():
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json={
             "choices": [{"message": {"content": json.dumps(raw)}, "finish_reason": "stop"}],
         })),
-    )
+     understanding_wire_format="full")
     import pytest
     with pytest.raises(QwenProviderError) as exc:
         provider.understand_turn(TaskUnderstandingRequest(

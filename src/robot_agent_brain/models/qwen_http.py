@@ -544,7 +544,7 @@ class QwenHTTPProvider:
         transport: httpx.BaseTransport | None = None,
         planner_max_completion_tokens: int = 1024,
         skill_planning_response_format: str = "json_schema",
-        understanding_wire_format: str = "full",
+        understanding_wire_format: str = "compact_v1",
         asset_catalog=None,
         live_catalog: bool | None = None,
         atomic_skill_prompt_path: str | None = None,
