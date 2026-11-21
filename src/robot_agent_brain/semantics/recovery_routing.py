@@ -6,7 +6,7 @@ Unknown phrases retain the existing preview path.
 import re
 
 
-def continuation_candidate(text: str) -> bool:
+def continuation_candidate(text: str, *, asset_names=()) -> bool:
     text = text.strip().rstrip("。！？!?，, ")
     if text in {
         "左边的", "左边那个", "右边的", "右边那个",
@@ -23,6 +23,15 @@ def continuation_candidate(text: str) -> bool:
     # must not supersede the pending pick/place task before R sees it.
     selector = r"(?:最)?(?:左|右|前|后)(?:边|面|侧)?(?:的|那个|那只)?(?:苹果|香蕉|篮子|托盘|物体|对象)?"
     if re.fullmatch(selector, text):
+        return True
+    # Catalog names only extend the noun slot; arbitrary actions or query
+    # phrases cannot match this fully anchored selector grammar.
+    names = sorted({str(name) for name in asset_names if name}, key=len, reverse=True)
+    if names:
+        noun = "(?:" + "|".join(re.escape(name) for name in names) + ")"
+        if re.fullmatch(r"(?:最)?(?:左|右|前|后)(?:边|面|侧)?(?:的|那个|那只)?" + noun, text):
+            return True
+    if re.fullmatch(r"(?:object_?id|对象编号)\s*[:=]?\s*\d+", text, re.IGNORECASE):
         return True
     if re.fullmatch(r"(?:不对[，,]?|不是[，,]?)?(?:改成|换成)" + selector, text):
         return True

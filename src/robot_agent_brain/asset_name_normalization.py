@@ -10,6 +10,7 @@ import re
 
 DEFAULT_ALIASES = {
     "熊猫": "toy_panda", "玩偶熊猫": "toy_panda", "熊猫玩偶": "toy_panda",
+    "熊猫玩具": "toy_panda", "玩具熊猫": "toy_panda",
     "toy panda": "toy_panda", "toy-panda": "toy_panda", "toypanda": "toy_panda",
     "杯子": "mug", "马克杯": "mug", "cup": "mug", "coffee cup": "mug",
 }

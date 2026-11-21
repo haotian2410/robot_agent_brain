@@ -6,6 +6,7 @@ from ..scene.component_access import SceneIndex
 from ..scene.scene_graph import world_transform
 from .scene_relation_resolver import SceneRelationResolver
 from ..asset_name_normalization import canonical_name
+import re
 
 from .semantic_entity_selector import SemanticEntitySelector, discover_candidates
 
@@ -40,6 +41,31 @@ class SceneGrounder:
                                          table_metadata_ref=self.table_metadata_ref)
         def bind(entity_id):
             entity = next(e for e in intent.entities if e.entity_id == entity_id)
+            # A narrowly explicit complement is a set operation, not a distance
+            # extremum. Resolve the destination first; never use model-generated
+            # exclusion IDs (which can accidentally exclude the entire set).
+            complement = re.fullmatch(r"\s*(?:请)?把(?:其他|其余)(?:的)?([^，。]+?)(?:放到|放在|放进)(.+?)[。！]?\s*", intent.instruction)
+            operations = [op for op in intent.operations if op.source == entity_id]
+            if (complement and len(intent.operations) == 1 and len(operations) == 1
+                    and canonical_name(complement.group(1), self.aliases) == canonical_name(entity.semantic_name, self.aliases)):
+                destination_id = operations[0].destination
+                destination = next((e for e in intent.entities if e.entity_id == destination_id), None)
+                if (destination is not None and destination_id != entity_id
+                        and canonical_name(destination.semantic_name, self.aliases) == canonical_name(entity.semantic_name, self.aliases)):
+                    target_members = bind(destination_id)
+                    if len(target_members) != 1:
+                        raise GroundingAmbiguous(destination, target_members)
+                    target_id = target_members[0].object_id_in_scene
+                    source = entity.model_copy(update={"scene_object_ids": [], "exclude_scene_object_ids": [target_id],
+                        "quantity_mode": QuantityMode.ALL, "all_available": True, "select_count_from_candidates": False})
+                    members = selector.select(entity_id,
+                        [source if e.entity_id == entity_id else e for e in intent.entities],
+                        [r for r in intent.spatial_relations if r.subject != entity_id], scene,
+                        bindings_override={k: v for k, v in (bindings_override or {}).items() if k != entity_id},
+                        allow_description_fallback=False)
+                    if not members:
+                        raise ValueError("grounding_missing: " + entity_id)
+                    return members
             # An action has to land on something, so a colour nobody declared may
             # relax to the pinned-down instance.  ``SceneQueryEngine`` deliberately
             # leaves this off: counting 「有几个红苹果」 as every apple would answer

@@ -11,7 +11,8 @@ from robot_agent_brain.web.service import create_http_app
 
 @pytest.mark.parametrize('verified', [False, True])
 @pytest.mark.parametrize('resolution', ['resume', 'new_session'])
-def test_brain_only_uncertain_requires_gateway_proof(tmp_path, monkeypatch, verified, resolution):
+@pytest.mark.parametrize('cold_restore', [False, True])
+def test_brain_only_uncertain_requires_gateway_proof(tmp_path, monkeypatch, verified, resolution, cold_restore):
     service, browser = configured(tmp_path)
     sid = service.activate(SessionRequest(browserID='b'))['sessionID']
     session = service._bind(sid)
@@ -22,6 +23,9 @@ def test_brain_only_uncertain_requires_gateway_proof(tmp_path, monkeypatch, veri
         'recovery_context':{'lease_state':'unknown','write_attempted':False}}, uncertain=True, terminal=True)
     session.sync_state = 'unknown'
     service.app._save_session(sid)
+    if cold_restore:
+        service.app.sessions.clear()
+        service.binding = None
     calls = []
     def respond(request):
         import json
@@ -34,8 +38,11 @@ def test_brain_only_uncertain_requires_gateway_proof(tmp_path, monkeypatch, veri
             'retired': resolution == 'new_session',
             'reason':'recovery_write_evidence_missing'})
     factory = httpx.Client
+    def recovery_client(**kwargs):
+        kwargs.setdefault('transport', httpx.MockTransport(respond))
+        return factory(**kwargs)
     monkeypatch.setattr('robot_agent_brain.web.service.httpx.Client',
-        lambda **kwargs: factory(transport=httpx.MockTransport(respond), **kwargs))
+        recovery_client)
     async def scenario():
         async with TestClient(TestServer(create_http_app(service))) as client:
             response = await client.post('/resolveUncertain', json={'sessionID':sid,'browserID':'b',

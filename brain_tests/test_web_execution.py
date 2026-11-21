@@ -273,6 +273,36 @@ def test_verified_partial_execution_commits_actual_state_but_remains_failed(tmp_
     assert pose(session.scene, APPLE)["position"] == MOVED[APPLE]["position"]
 
 
+@pytest.mark.parametrize('verified', [False, True])
+def test_failed_simulation_discard_keeps_scene_and_allows_next_dispatch(tmp_path, verified):
+    service, browser, session, commands, record, _ = world(tmp_path, ExecutionOutcome(
+        ok=False, steps=stopped_at(3), moved=MOVED, state_verified=verified,
+        holding_object=APPLE, error_code='GRASP_FAILED', detail='lost grip', traj_path='/tmp/diagnostic.traj'))
+    service.config.execution_failure_policy = 'discard_simulation'
+    service.execution_port.backend = 'mujoco'
+    before = digest(session.scene)
+    result, trajectories = dispatch(service, tmp_path, session, commands, record['id'])
+    assert result['outcome'] == 'failed'
+    assert result['scene_commit_status'] == 'unchanged'
+    assert result['execution']['simulation_discarded']
+    assert trajectories == ['/tmp/diagnostic.traj']
+    assert digest(session.scene) == before
+    assert session.sync_state == 'synchronized'
+    assert session.holding_object is None
+    assert session.pending_execution_request is None
+    next_commands = commands.model_copy(update={'request_id': 'next-independent-task'})
+    session.exported_commands[next_commands.request_id] = canonical_commands(next_commands)
+    session.mark_dispatched(next_commands)
+
+
+def test_discard_failure_policy_rejects_non_simulation_backend(tmp_path):
+    service, browser, session, commands, record, _ = world(tmp_path, None)
+    service.config.execution_failure_policy = 'discard_simulation'
+    service.execution_port.backend = 'physical'
+    with pytest.raises(ValueError, match='requires_mujoco'):
+        dispatch(service, tmp_path, session, commands, record['id'])
+
+
 def test_active_robot_joint_state_does_not_require_command_target(tmp_path):
     from robot_agent_brain.contracts.scene import SceneObject, SceneComponent
     service, browser, session, commands, record, _ = world(tmp_path, None)

@@ -209,11 +209,10 @@ def test_robot_config_and_initial_edit_extension():
     value = {"status": "accepted", "turn_kind": "robot_config", "robot_asset_switch": {"robot_asset": "ur10"}}
     expanded = decode(encode(value))
     assert expanded == {"protocol_version": "task_understanding.v3.1", **value}
-    # Runtime robot switching is already rejected by the canonical parser;
-    # a compact transport must not silently add that capability.
+    # Parsing a valid configuration request must not masquerade as a provider
+    # error. Session release policy remains responsible for capability refusal.
     for payload in (expanded, {"protocol_version": "task_understanding.v3.1", **value}):
-        with pytest.raises(ValueError):
-            parse_qwen_turn(payload, "切换UR10")
+        assert parse_qwen_turn(payload, "切换UR10").robot_asset_switch.robot_asset == "ur10"
     value = {"status": "accepted", "turn_kind": "scene_edit", "initial_robot_asset": "ur10", "scene_edit": {
         "entities": [entity()], "operations": [{"operation": "add", "target": "apple"}]}}
     assert parse_qwen_turn(decode(encode(value)), "使用UR10并增加苹果").initial_robot_asset == "ur10"

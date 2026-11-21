@@ -33,6 +33,11 @@ Strict response contract:
 - cancel_chain requires resolved_instruction=null, question=null, amendments=[].
 - Each amendment has subject_role, field, value, evidence. Evidence must cite
   actual user text; never invent an object ID or claim model guesses as evidence.
+  subject_role uses the operation's protocol field, not the colloquial word
+  "target": for pick_and_place the manipulated object is source and the
+  placement/reference object is destination. For example, choosing the leftmost
+  dropper in "move apple next to dropper" amends destination, not target.
+  Use target for an operation that actually has a target field (e.g. scene edit).
   Preserve the original operation and destination unless the user explicitly
   changes them. Object uniqueness is checked later by Python, not assumed here.
 - Do not replay already completed steps or turn planning output into observed state.

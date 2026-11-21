@@ -9,14 +9,30 @@ from .layout_geometry import ContainerInteriorGeometry
 @dataclass(frozen=True)
 class SceneLayoutPolicy:
     """World-space initial layout only; never robot execution placement."""
-    clearance_m: float = .02
+    clearance_m: float | None = None  # explicit legacy policy only; default is dimension-relative
     grid_size: int = 5
+    clearance_ratio: float = .1
 
     def __post_init__(self):
-        if not math.isfinite(self.clearance_m) or self.clearance_m < 0:
+        if self.clearance_m is not None and (not math.isfinite(self.clearance_m) or self.clearance_m < 0):
             raise ValueError("scene_layout_clearance_invalid")
+        if not math.isfinite(self.clearance_ratio) or not 0 <= self.clearance_ratio <= 1:
+            raise ValueError("scene_layout_clearance_ratio_invalid")
         if self.grid_size < 3 or self.grid_size > 9:
             raise ValueError("scene_layout_grid_size_invalid")
+
+    def adaptive_clearance(self, model, transform, reference_model=None, reference_transform=None):
+        boxes = [world_bounds(model, as_world(transform))]
+        if reference_model is not None:
+            boxes.append(world_bounds(reference_model, as_world(reference_transform)))
+        return self.clearance_for_bounds(*boxes)
+
+    def clearance_for_bounds(self, *boxes):
+        if self.clearance_m is not None:
+            return self.clearance_m
+        sizes = [high[i] - low[i] for low, high in boxes for i in (0, 1)]
+        positive = [size for size in sizes if size > 0]
+        return min(positive, default=0.) * self.clearance_ratio
 
     def relative_transform(self, relation, reference, reference_model, object_model, object_transform=None):
         """Return the canonical first transform for a relative relation.
@@ -41,6 +57,7 @@ class SceneLayoutPolicy:
             (0, 0, 0), ((1., 0., 0.), (0., 1., 0.), (0., 0., 1.)))
         ref_min, ref_max = world_bounds(reference_model, reference)
         obj_min, obj_max = world_bounds(object_model, WorldTransform((0, 0, 0), world.linear))
+        gap = self.adaptive_clearance(object_model, world, reference_model, reference)
         # Align bounding-box centers on the other axes, not model origins.
         centered = [(ref_min[i] + ref_max[i] - obj_min[i] - obj_max[i]) / 2 for i in range(3)]
         axes = {"left_of": (0, -1), "right_of": (0, 1), "front_of": (1, 1),
@@ -51,8 +68,8 @@ class SceneLayoutPolicy:
             candidates = []
             for axis, sign in ((0, 1), (0, -1), (1, 1), (1, -1)):
                 position = list(centered)
-                position[axis] = (ref_max[axis] - obj_min[axis] + self.clearance_m
-                                  if sign > 0 else ref_min[axis] - obj_max[axis] - self.clearance_m)
+                position[axis] = (ref_max[axis] - obj_min[axis] + gap
+                                  if sign > 0 else ref_min[axis] - obj_max[axis] - gap)
                 position[2] = world.position[2]
                 candidates.append(WorldTransform(tuple(position), world.linear))
             return candidates
@@ -60,8 +77,8 @@ class SceneLayoutPolicy:
             raise ValueError("unsupported_scene_layout_relation: " + str(relation))
         axis, sign = axes[relation]
         position = list(centered)
-        position[axis] = (ref_max[axis] - obj_min[axis] + self.clearance_m if sign > 0
-                          else ref_min[axis] - obj_max[axis] - self.clearance_m)
+        position[axis] = (ref_max[axis] - obj_min[axis] + gap if sign > 0
+                          else ref_min[axis] - obj_max[axis] - gap)
         if planar:
             position[2] = world.position[2]
         return [WorldTransform(tuple(position), world.linear)]
@@ -152,10 +169,11 @@ class SceneLayoutPolicy:
     def near_candidates(self, reference, reference_model, object_model, object_transform=None):
         """Perimeter anchors followed by a local 2-D grid around each anchor."""
         base = self.relative_candidates("near", reference, reference_model, object_model, object_transform)
+        gap = self.adaptive_clearance(object_model, object_transform, reference_model, reference)
         result = []
         for candidate in base:
             result.append(candidate)
-            for dx, dy in ((self.clearance_m, 0), (-self.clearance_m, 0), (0, self.clearance_m), (0, -self.clearance_m)):
+            for dx, dy in ((gap, 0), (-gap, 0), (0, gap), (0, -gap)):
                 # Keep the candidate's original world height.  Near placement
                 # searches only in the horizontal plane; dropping Z here
                 # creates a malformed 2-D Transform and used to surface as a

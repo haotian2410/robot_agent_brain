@@ -91,7 +91,11 @@ def discover_candidates(entity, scene: SceneConfig, category_aliases=None, *, al
         # Only a name that can be painted enters the evidence check, so 彩色 never
         # turns into a mismatch against the apples that did declare a colour.
         colors = [] if ignore_colour else [value for value in requested if paintable(value)]
-        other_tags = [tag for tag in entity.tags if color_name(tag) not in PALETTE]
+        # A canonical object-name synonym is not a material/style constraint.
+        # Keep genuine features strict (e.g. woven/red), while avoiding a second
+        # exact tag match that rejects ToyPanda for the noun "熊猫玩具".
+        other_tags = [tag for tag in entity.tags if color_name(tag) not in PALETTE
+                      and canonicalize_name(tag) != canonicalize_name(entity.semantic_name)]
         evidence = ColorEvidenceResolver(assets)
         kept = []
         saw_color_evidence = saw_tag_evidence = False

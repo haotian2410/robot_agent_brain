@@ -70,7 +70,7 @@ class BrainApplication:
         category_aliases = getattr(getattr(self.assets, "metadata", None), "category_aliases", {})
         scene_reference_catalog = self.config.load_scene_reference_catalog()
         layout_interiors = SceneLayoutGeometryRegistry.from_path(self.config.scene_layout_interiors)
-        editor = SceneEditor(self.assets, SceneLayoutPolicy(clearance_m=self.config.scene_layout_near_clearance_m,
+        editor = SceneEditor(self.assets, SceneLayoutPolicy(clearance_ratio=self.config.scene_layout_clearance_ratio,
                                                             grid_size=self.config.scene_layout_grid_size), seed=self.config.seed,
                              aliases=aliases, category_aliases=category_aliases,
                              default_scene_edit_assets=self.config.default_scene_edit_assets,
@@ -94,6 +94,7 @@ class BrainApplication:
                                       catalog_for_provider=getattr(provider, "live_catalog", True))
         bootstrap = self.config.bootstrap_settings()
         self.bootstrapper = SceneBootstrapper(self.assets, self.defaults, robot=self.config.robot, seed=self.config.seed,
+            layout_policy=editor.layout,
             table_metadata_ref=bootstrap.get("default_table_metadata_ref"),
             robot_metadata_ref=bootstrap.get("default_robot_metadata_ref"),
             robot_driver=bootstrap.get("default_robot_driver"),
@@ -194,7 +195,7 @@ class BrainApplication:
                         found = found or any(text(e.entity_id) in subjects and (
                             text(getattr(e, "quantity_mode", None)) == "all"
                             or getattr(e, "all_available", False) is True) for e in entities)
-                    id_match = re.fullmatch(r"(?:ID\s*)?([0-9]{1,9})", value.strip(), re.IGNORECASE) if isinstance(value, str) else None
+                    id_match = re.fullmatch(r"(?:(?:object_?id|instance_?id|ID|对象编号)\s*[:=]?\s*)?([0-9]{1,9})", value.strip(), re.IGNORECASE) if isinstance(value, str) else None
                     explicit_id = value if type(value) is int else (int(id_match.group(1)) if id_match else None)
                     if explicit_id is not None:
                         # This verifies that U preserved an explicit ID. Normal

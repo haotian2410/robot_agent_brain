@@ -97,7 +97,9 @@ class BrainConfig(BaseModel):
     scene_scale_large: float = Field(default=2., gt=1)
     query_near_distance_m: float = Field(default=.2, gt=0, le=2)
     scene_layout_grid_size: int = Field(default=5, ge=3, le=9)
+    # Legacy config accepted for checkpoint compatibility, not used by current scene editor.
     scene_layout_near_clearance_m: float = Field(default=.02, ge=0, le=1)
+    scene_layout_clearance_ratio: float = Field(default=.1, ge=0, le=1)
     # Execution runs the control repository as a child process, so it needs an
     # interpreter of its own (the control pins numpy/mujoco versions the Brain's
     # service environment cannot), the repository, the collision library it
@@ -109,6 +111,7 @@ class BrainConfig(BaseModel):
     execution_link_root: str | None = None
     execution_workspace_root: str | None = None
     execution_collision_model: Literal['proxy', 'precise'] | None = None
+    execution_failure_policy: Literal['verify_actual_state', 'discard_simulation'] = 'verify_actual_state'
     # The control repository's skill.md is the source of truth for the atomic
     # planning round.  When omitted, derive it from execution_control_root.
     control_skill_prompt: str | None = None

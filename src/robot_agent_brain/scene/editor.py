@@ -683,6 +683,9 @@ class SceneEditor:
                 relation_candidates = self.layout.inside_candidates(reference_world, model, world,
                                                                     self._layout_entry(reference, scene))
         origin_low, origin_high = world_bounds(model, WorldTransform((0, 0, 0), world.linear))
+        layout_gap = self.layout.adaptive_clearance(model, world,
+            reference_model if reference is not None else None,
+            reference_world if reference is not None else None)
         rng = random.Random(f"{self.seed}:{identifier}")
         limit = defaults.max_attempts if defaults else max(2 * len(scene.objects) + 5, len(relation_candidates or ()))
         entry = None
@@ -709,7 +712,7 @@ class SceneEditor:
                 # candidate grids instead of this single-axis fallback.
                 if attempt >= len(relation_candidates) and relation in {"left_of", "right_of", "front_of", "behind"}:
                     axis = 0 if relation in {"front_of", "behind"} else 1
-                    spacing = origin_high[axis] - origin_low[axis] + self.layout.clearance_m
+                    spacing = origin_high[axis] - origin_low[axis] + layout_gap
                     ring = (attempt // len(relation_candidates) + 1)
                     sign = 1 if ring % 2 else -1
                     values = list(position)
@@ -736,7 +739,9 @@ class SceneEditor:
                                                       world_transform(scene, reference.object_id_in_scene), interior):
                     continue
             ignored = {reference.object_id_in_scene} if relation in {"on", "inside"} and reference is not None else set()
-            overlap_clearance = 0 if relation == "on" else (defaults.clearance_m if defaults else self.layout.clearance_m)
+            # Relative candidates are generated using this same policy gap.
+            # Bootstrap's default packing gap must not veto every candidate.
+            overlap_clearance = 0 if relation == "on" else layout_gap
             if not self._overlaps(obj, candidate, clearance=overlap_clearance, ignore_ids=ignored):
                 return position
         # A valid geometric candidate existed before the editing envelope was
@@ -769,7 +774,7 @@ class SceneEditor:
                             and not facts.footprint_contains(probe, reference, probe_scene):
                         continue
                     ignored = {reference.object_id_in_scene} if relation == "on" and reference is not None else set()
-                    clearance = 0 if relation == "on" else (defaults.clearance_m if defaults else self.layout.clearance_m)
+                    clearance = 0 if relation == "on" else layout_gap
                     if not self._overlaps(probe, probe_scene, clearance=clearance, ignore_ids=ignored):
                         raise ValueError("scene_edit_workspace_exceeded")
         raise ValueError("scene_edit_layout_collision")
@@ -783,6 +788,7 @@ class SceneEditor:
             low, high = world_bounds(facts.asset(obj, scene), world_transform(scene, obj.object_id_in_scene))
         except (ValueError, LookupError):
             return False  # Unknown resource geometry is not asserted as contact evidence.
+        support_id = facts.infer_support(obj, scene)
         for other in scene.objects:
             if other.object_id_in_scene == obj.object_id_in_scene or other.object_id_in_scene in ignore_ids:
                 continue
@@ -792,7 +798,11 @@ class SceneEditor:
                 olow, ohigh = world_bounds(facts.asset(other, scene), world_transform(scene, other.object_id_in_scene))
             except (ValueError, LookupError):
                 continue
-            if all(low[i] < ohigh[i] + (clearance if i < 2 else -1e-9)
-                   and olow[i] < high[i] + (clearance if i < 2 else -1e-9) for i in range(3)):
+            # Use the same contact evidence as support inference. Only the
+            # unique, footprint-containing support is exempt, never obstacles.
+            if other.object_id_in_scene == support_id and abs(low[2] - ohigh[2]) <= facts.tolerance:
+                continue
+            if all(low[i] < ohigh[i] + (clearance if i < 2 else 0) - 1e-9
+                   and olow[i] < high[i] + (clearance if i < 2 else 0) - 1e-9 for i in range(3)):
                 return True
         return False

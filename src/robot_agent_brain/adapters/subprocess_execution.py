@@ -10,6 +10,7 @@ upstream file is ever modified.
 from __future__ import annotations
 
 import copy
+import json
 import sys
 from collections import Counter
 from pathlib import Path
@@ -42,13 +43,21 @@ def unique_named_document(document: dict) -> dict:
     """
     objects = document.get("objects") or []
     counts = Counter(item.get("object_name_in_scene") for item in objects)
-    if not any(count > 1 for count in counts.values()):
+    def safe(name):
+        return isinstance(name, str) and bool(name) and all(
+            ch in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for ch in name)
+    if all(count == 1 and safe(name) for name, count in counts.items()):
         return document
     renamed = copy.deepcopy(document)
+    reserved = {name for name, count in counts.items() if count == 1 and safe(name)}
     for item in renamed["objects"]:
         name = item.get("object_name_in_scene")
-        if counts.get(name, 0) > 1:
-            item["object_name_in_scene"] = f"{name}-{item['object_id_in_scene']}"
+        if counts.get(name, 0) > 1 or not safe(name):
+            candidate = f"{name}-{item['object_id_in_scene']}" if safe(name) else f"object_{item['object_id_in_scene']}"
+            while candidate in reserved:
+                candidate += "_"
+            reserved.add(candidate)
+            item["object_name_in_scene"] = candidate
     return renamed
 
 
@@ -91,11 +100,18 @@ class SubprocessExecutionAdapter:
             raise BrainError("execution_scene_identity_mismatch", "execution",
                              f"命令文档写 {task['scene_id']}/{task['scene_version']}，"
                              f"场景文档写 {header.get('scene_id')}/{header.get('scene_version')}")
+        source_header = header
         header = unique_named_document(header)
         with span("control.workspace_build", component="bridge", source="adapters/subprocess_execution.py:SubprocessExecutionAdapter.run"):
             ws, commands_path, _ = workspace.build(
                 self.workspace_root, scene_document=header, task=task, asset_root=self.asset_root,
                 request_id=commands.request_id)
+            name_mapping = [{"object_id": original["object_id_in_scene"],
+                             "original_name": original["object_name_in_scene"],
+                             "transport_name": transported["object_name_in_scene"]}
+                            for original, transported in zip(source_header["objects"], header["objects"])]
+            (ws.root / "object_name_mapping.json").write_text(
+                json.dumps(name_mapping, ensure_ascii=False, indent=2), encoding="utf-8")
         # The control's error_messages module owns the wording of a control failure;
         # the Brain reads it from the checkout it was pointed at and copies nothing.
         describe = error_descriptions.describe_for(self.control_root)
@@ -116,6 +132,11 @@ class SubprocessExecutionAdapter:
         # task document, which would reduce every moved object to nothing.
         with span("control.feedback_parse", component="bridge", source="adapters/subprocess_execution.py:SubprocessExecutionAdapter.run"):
             summary = feedback.summarize(result, header, describe)
+        if summary.get("final_scene") is not None:
+            original_names = {item["object_id_in_scene"]: item["object_name_in_scene"]
+                              for item in source_header["objects"]}
+            for item in summary["final_scene"]["objects"]:
+                item["object_name_in_scene"] = original_names[item["object_id_in_scene"]]
         # Only the report for this exact request can certify a pre-execution rejection.
         summary["no_effect_verified"] = (summary.get("no_effect_verified") is True
                                          and result.report.get("request_id") == commands.request_id)

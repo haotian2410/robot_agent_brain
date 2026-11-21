@@ -429,6 +429,7 @@ class AgentService:
                 result, trajs = self._run_steps(session, platform, request, identifier, steps)
             uncertain = session.sync_state == "unknown"
         except Exception as exc:
+            failure_details = {"diagnostic_id": f"task-{identifier}"}
             uncertain = (session is not None and session.sync_state == "unknown") or (platform is not None and platform.lease_uncertain)
             if isinstance(exc, _RecoveryReply):
                 result = exc.result
@@ -436,16 +437,30 @@ class AgentService:
             else:
                 message, code = str(exc), str(exc).split(":", 1)[0]
             if isinstance(exc, httpx.HTTPError):
+                if isinstance(exc, httpx.HTTPStatusError):
+                    failure_details["http_status"] = exc.response.status_code
+                    try:
+                        upstream = exc.response.json()
+                        upstream_code = upstream.get("error") if isinstance(upstream, dict) else None
+                        if isinstance(upstream_code, dict):
+                            upstream_code = upstream_code.get("code")
+                        if isinstance(upstream_code, str) and len(upstream_code) < 128 and all(
+                                ch.isascii() and (ch.isalnum() or ch == "_") for ch in upstream_code):
+                            failure_details["gateway_error_code"] = upstream_code
+                    except ValueError:
+                        pass
                 if platform is not None and platform.lease_state == "not_granted":
-                    code, message = "gateway_lease_not_granted", "浏览器未连接或未就绪，场景租约明确未授予；场景未修改。重新打开浏览器后可以重试。"
+                    code, message = "gateway_lease_not_granted", "场景服务明确未授予租约，本轮未执行；请检查浏览器连接及会话场景同步状态。"
                 else:
                     code, message = "gateway_transport_error", "与场景服务通信失败；请检查连接。若会话显示待恢复，请先核验恢复证据。"
                 durable_json(self.output / request.sessionID / "web_failures" / f"{identifier}.json",
-                             {"error": str(exc), "taskID": identifier})
-            elif not isinstance(exc, _RecoveryReply):
+                             {"error": str(exc), "taskID": identifier,
+                              "http_status": exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None,
+                              "response_body": exc.response.text[:8192] if isinstance(exc, httpx.HTTPStatusError) else None})
+            if not isinstance(exc, _RecoveryReply):
                 result = {"taskID":identifier,"sessionID":request.sessionID,"outcome":"failed", "executed":False,
                     "reply":f"{message}（{code}；诊断 task-{identifier}）",
-                    "error":{"code":code,"message":message,"details":{"diagnostic_id":f"task-{identifier}"}}}
+                    "error":{"code":code,"message":message,"details":failure_details}}
                 if code == "robot_segment_intermediate_observation_unsupported":
                     result.update(failure_class="capability_unsupported", scene_commit_status="unchanged")
         finally:
@@ -573,7 +588,16 @@ class AgentService:
         # executable payload passes this gate.  Exhausted chains use the same
         # rule so an explicit new task can recover without a manual reset.
         from ..semantics.recovery_routing import continuation_candidate
-        if chain is not None and not continuation_candidate(request.command) and chain.state.value in {
+        catalog = getattr(getattr(self.app, "pipeline", None), "asset_catalog", None)
+        recovery_names = [name for item in getattr(catalog, "models", ())
+                          for name in (item.name, getattr(item, "display_name", None),
+                                       getattr(item, "display_name_chinese", None), *item.aliases) if name]
+        for obj in getattr(getattr(session, "scene", None), "objects", ()):
+            recovery_names.append(obj.object_name_in_scene)
+            for component in obj.components:
+                if component.component_type == "Semantic":
+                    recovery_names.append(component.properties.get("semantic_name"))
+        if chain is not None and not continuation_candidate(request.command, asset_names=recovery_names) and chain.state.value in {
                 "waiting_user", "resolving", "blocked_environment",
                 "blocked_system", "exhausted"}:
             try:
@@ -832,7 +856,14 @@ class AgentService:
             # failed execution. It must not create an R chain or authorize
             # later replay. Unknown external effects still require recovery.
             failed = outcome in {"failed", "clarification_required"} or effect_unknown
-            if failed and memory.active_failure_chain is not None and memory.active_failure_chain.state in {
+            if (result.get('execution') or {}).get('simulation_discarded') and not effect_unknown:
+                # Failed simulation is diagnostic history, not a resumable
+                # partially executed physical task. Next input starts normally.
+                memory.upsert_turn(turn)
+                if memory.active_failure_chain is not None:
+                    memory.active_failure_chain.state = FailureChainState.CANCELLED
+                    memory.active_failure_chain.latest_question = None
+            elif failed and memory.active_failure_chain is not None and memory.active_failure_chain.state in {
                     FailureChainState.EXHAUSTED, FailureChainState.CANCELLED,
                     FailureChainState.BLOCKED_RECONCILIATION,
                     FailureChainState.BLOCKED_ENVIRONMENT, FailureChainState.BLOCKED_SYSTEM}:
@@ -1308,6 +1339,9 @@ class AgentService:
 
         prior_arm_states = session.arm_states.model_copy(deep=True) if session.arm_states is not None else None
         prior_holding = session.holding_object
+        discard_simulation = self.config.execution_failure_policy == 'discard_simulation'
+        if discard_simulation and getattr(self.execution(), 'backend', None) != 'mujoco':
+            raise ValueError('discard_execution_failure_requires_mujoco')
         session.mark_dispatched(commands)
         try:
             outcome = self.execution().run(commands, session.scene.raw_document(), progress=progress)
@@ -1319,7 +1353,8 @@ class AgentService:
         reported = {step.command_id for step in outcome.steps}
         success = (outcome.ok and reported == {command.command_id for command in commands.commands}
                    and all(step.status == "success" for step in outcome.steps))
-        candidate = self.executed_scene(session.scene, outcome, commands) if success or outcome.state_verified else None
+        discarded = discard_simulation and not success
+        candidate = self.executed_scene(session.scene, outcome, commands) if success or (outcome.state_verified and not discarded) else None
         session.apply_execution_feedback(
             ExecutionFeedback(request_id=commands.request_id, status="success" if success else "partial",
                               holding_object=outcome.holding_object,
@@ -1327,6 +1362,15 @@ class AgentService:
                                                          status="success" if step.status == "success" else "failed")
                                         for step in outcome.steps]),
             confirmed_scene=candidate, feedback_source="external")
+        if discarded:
+            # Each MuJoCo request is an isolated subprocess. Discard its result,
+            # not a physical robot's state; no Gateway write has occurred here.
+            # Still fail closed if the committed browser scene changed externally.
+            if digest(platform.read_live(lease_snapshot=False)) == digest(session.scene):
+                session.sync_state = 'synchronized'
+                session.arm_states = prior_arm_states
+                session.holding_object = prior_holding
+            result['scene_commit_status'] = 'unchanged'
         if candidate is not None:
             # Feedback returns only after the platform commit and snapshot
             # verification. Replace the pre-execution planning report's status;
@@ -1376,15 +1420,20 @@ class AgentService:
                                      "partial" if candidate is not None or any(
                                          step.status == "success" for step in outcome.steps) else "unknown"),
                                  "retry_safe": retry_safe,
+                                 "simulation_discarded": discarded,
                                  "writeback_status": "committed" if candidate is not None else "none"},
                       reply=(f"已执行 {total} 条命令并写回场景。" if success else
                              f"执行未完成：{failure_detail(outcome.detail, outcome.error_code)}。" +
-                             ("已同步控制端确认的实际状态，未重放已完成动作。" if candidate is not None else
+                             ("本次失败仿真结果未提交，保留执行前场景，可开始下一轮任务。" if discarded and session.sync_state == 'synchronized' else
+                              "已同步控制端确认的实际状态，未重放已完成动作。" if candidate is not None else
                               "当前执行状态待核验，不能按旧场景继续操作。" if session.sync_state != "synchronized" else "")))
         if not success:
             result["error"] = {"code": outcome.error_code or "execution_failed",
                                "message": outcome.detail or "控制端未报告成功",
                                "details": {"diagnostic_id": report.request_id}}
+        # A discarded simulation must not commit its final Scene, but its
+        # recorded trajectory remains useful diagnostic playback. Playback is
+        # an identity-checked render overlay, not a Scene writeback.
         return [outcome.traj_path] if outcome.traj_path else []
 
     @staticmethod
@@ -1661,8 +1710,9 @@ class AgentService:
 
         Playback is not task evidence.  A browser that is closed by then, or a
         gateway that rejects the body, is written to the run directory and
-        otherwise ignored: the executed poses were committed before this call and
-        the task's terminal state is already stored.
+        otherwise ignored. The task's terminal state is already stored; failed
+        simulations may retain their pre-execution Scene and still publish a
+        diagnostic clip without committing its final pose.
         """
         if not trajs:
             return
@@ -1984,12 +2034,18 @@ def create_http_app(service):
         if resolution not in {"resume", "new_session"}:
             raise ValueError("resolution_invalid")
         binding = service.tasks.binding(session_id)
-        session = service.app.get_session(session_id)
         if binding["browser"] != browser_id or not binding["uncertain"]:
             return web.json_response({"state":"kept_locked","sessionID":session_id,
                                       "transactionID":transaction_id,
                                       "resolution":resolution,
                                       "reason":"uncertain_evidence_missing"})
+        # A restarted service has no in-memory platform binding yet. Restore
+        # this verified session before asking the Gateway for recovery evidence.
+        previous_binding = service.binding
+        try:
+            session = service._bind(session_id)
+        finally:
+            service.binding = previous_binding
         rows = service.tasks.db.execute("SELECT id,terminal FROM tasks WHERE session=? ORDER BY id DESC", (session_id,)).fetchall()
         if not rows or any(not row["terminal"] for row in rows):
             return web.json_response({"state":"kept_locked","sessionID":session_id,

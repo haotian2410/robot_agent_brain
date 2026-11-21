@@ -257,6 +257,8 @@ def _repair_live_scene_edit_quantity(value, instruction, catalog):
         return value
     by_id = {entity.get("entity_id"): entity for entity in entities}
     changed = stripped_ids
+    operations = [dict(operation) for operation in operations]
+    compound = len(operations) > 1
     all_words = re.compile(r"(?:所有|全部|每个|\ball\b|\bevery\b)")
     count_pattern = re.compile(
         r"(\d+|[零〇一二两三四五六七八九十]+)\s*(?:个|只|件|颗|枚|支|台)?\s*$"
@@ -284,14 +286,42 @@ def _repair_live_scene_edit_quantity(value, instruction, catalog):
                   if item.name.casefold() == semantic
                   or semantic in {alias.casefold() for alias in item.aliases}
                   for label in (item.name, *item.aliases) if label}
-        mentions = [(folded.find(label), label) for label in labels if folded.find(label) >= 0]
+        scoped = folded
+        if compound:
+            # Never borrow a quantity from another action mentioning the same
+            # noun. Only explicit, uniquely aligned remove clauses are repaired.
+            verbs = {"remove": r"删除|移除|去除|删掉|remove|delete"}
+            pattern = verbs.get(operation.get("operation"))
+            if pattern is None:
+                continue
+            clauses = re.split(r"(?:然后|接着|随后|并且|并|再|，|,|；|;|\band\b)", folded)
+            matches = [clause for clause in clauses if re.search(pattern, clause)
+                       and any(label in clause for label in labels)]
+            if len(matches) != 1:
+                raise ValueError("scene_edit_quantity_scope_ambiguous")
+            scoped = matches[0]
+            if sum(op.get("target") == operation.get("target") for op in operations) > 1:
+                if any(r.get("subject") == entity["entity_id"] or r.get("reference") == entity["entity_id"]
+                       for r in edit.get("relations") or []):
+                    raise ValueError("scene_edit_quantity_scope_ambiguous")
+                original_id = entity["entity_id"]
+                new_id = original_id + "_remove_scope"
+                if new_id in by_id:
+                    raise ValueError("scene_edit_quantity_scope_ambiguous")
+                entity = {**entity, "entity_id": new_id}
+                entities.append(entity)
+                by_id[new_id] = entity
+                operation["target"] = new_id
+                changed = True
+        mentions = [(match.start(), label) for label in labels
+                    for match in re.finditer(re.escape(label), scoped)]
         if not mentions:
             continue
         # Use the closest noun mention to the operation's local wording.
         positions = sorted({position for position, _ in mentions})
         candidates = []
         for position in positions:
-            nearby = folded[max(0, position - 24):position]
+            nearby = scoped[max(0, position - 24):position]
             nearby = re.split(r"(?:,|，|;|；|然后|接着|再|\band\b|和)", nearby)[-1].strip()
             if all_words.search(nearby):
                 if not re.search(r"(?:not|no|不是|并非)\s*(?:all|所有|全部)", nearby):
@@ -342,7 +372,7 @@ def _repair_live_scene_edit_quantity(value, instruction, catalog):
                         relations.append({"scope": "selection", "subject": entity["entity_id"], "relation": kind})
                     edit = {**edit, "relations": relations}
         changed = True
-    return {**value, "scene_edit": {**edit, "entities": entities}} if changed else value
+    return {**value, "scene_edit": {**edit, "entities": entities, "operations": operations}} if changed else value
 
 
 def _normalize_recovery_comparative_selection(value, instruction):

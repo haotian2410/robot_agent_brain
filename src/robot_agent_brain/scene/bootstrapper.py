@@ -35,7 +35,9 @@ def make_object(identifier, name, reference, position, *, category=None, support
 class SceneBootstrapper:
     def __init__(self, assets, defaults, *, robot="ur5e", seed=0, table_metadata_ref=None,
                  robot_metadata_ref=None, robot_driver=None, template_scene=None, aliases=None, category_aliases=None,
-                 default_scene_edit_assets=None, scene_reference_catalog=None):
+                 default_scene_edit_assets=None, scene_reference_catalog=None, layout_policy=None):
+        from .scene_layout import SceneLayoutPolicy
+        self.layout_policy = layout_policy or SceneLayoutPolicy()
         self.assets, self.defaults, self.robot, self.seed = assets, defaults, robot, seed
         self.table_ref, self.robot_ref = table_metadata_ref, robot_metadata_ref
         self.driver = robot_driver
@@ -59,7 +61,8 @@ class SceneBootstrapper:
             robot=profile.v2_robot or profile.setup.profile_id, seed=self.seed,
             table_metadata_ref=index.metadata_ref(table_id), robot_metadata_ref=index.metadata_ref(robot_id),
             robot_driver=index.robot_driver(robot_id), template_scene=template,
-            aliases=self.resolver.aliases, category_aliases=self.resolver.category_aliases)
+            aliases=self.resolver.aliases, category_aliases=self.resolver.category_aliases,
+            layout_policy=self.layout_policy)
         bootstrap.default_scene_edit_assets = dict(self.default_scene_edit_assets)
         bootstrap.scene_reference_catalog = self.scene_reference_catalog
         bootstrap.robot_profile = profile
@@ -209,9 +212,9 @@ class SceneBootstrapper:
                     raise ValueError("bootstrap_layout_failed: object exceeds workspace")
                 position = (rng.uniform(*limits[0]), rng.uniform(*limits[1]), table_high[2] - low[2])
                 box = world_bounds(model, WorldTransform(position, IDENTITY))
-                gap = self.defaults.clearance_m
-                if any(all(box[0][i] < other[1][i] + gap and other[0][i] < box[1][i] + gap
-                           for i in (0, 1)) for other in bounds):
+                if any(all(box[0][i] < other[1][i] + gap - 1e-9 and other[0][i] < box[1][i] + gap - 1e-9
+                           for i in (0, 1)) for other in bounds
+                       for gap in [self.layout_policy.clearance_for_bounds(box, other)]):
                     break
                 placed.append(make_object(identifier, model.semantic_name, model.metadata_ref,
                                           position, category=category, support=table_id,

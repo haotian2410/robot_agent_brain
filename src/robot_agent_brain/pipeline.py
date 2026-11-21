@@ -96,6 +96,33 @@ def _canonicalize_query_route(turn: BrainTurn, instruction: str) -> BrainTurn:
                                    "session_control": None,
                                    "robot_setup_request": None})
 
+def _action_route_hint(instruction):
+    """Only resolve unambiguous product defaults; do not parse mixed tasks."""
+    import re
+    if any(marker in instruction for marker in _QUERY_MARKERS):
+        return None
+    if re.search(r"然后|接着|随后|并且|并把|再把|增加|新增|添加|生成|创建|查询|几个|是否", instruction):
+        return None
+    if re.search(r"编辑场景|修改场景|直接修改", instruction):
+        return "scene_edit"
+    if re.search(r"机械臂|机器人|放到|放进|放入", instruction):
+        return "robot_task"
+    if re.search(r"移动|挪到|移到", instruction):
+        return "scene_edit"
+    return None
+
+
+def _check_action_route(turn, instruction, route_hint):
+    if (getattr(turn, "protocol_version", None) == "task_understanding.v3.1"
+            and route_hint and turn.status == "accepted"
+            and turn.turn_kind in {"scene_edit", "robot_task"} and turn.turn_kind != route_hint):
+        action = "机器人搬运" if route_hint == "robot_task" else "场景编辑"
+        return BrainTurn(status="clarification_required", turn_kind=route_hint,
+                         instruction=instruction,
+                         clarification_question=f"这条指令要求{action}，但模型解析成了另一种操作，本轮未执行。请明确操作方式。")
+    return turn
+
+
 class BrainResult(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     status: TurnStatus = TurnStatus.ACCEPTED
@@ -356,6 +383,11 @@ class BrainPipeline:
     def understand_turn(self, instruction: str, *, scene: SceneConfig | None = None,
                         dialogue=None) -> BrainTurn:
         """Call understanding once; keep injected context out of the user text."""
+        import re
+        if re.search(r"(?:交换|互换).*(?:位置|坐标)|(?:位置|坐标).*互换", instruction):
+            return BrainTurn(status="unsupported_task", turn_kind="unsupported_task",
+                             instruction=instruction,
+                             clarification_question="当前不支持物体位置交换。请分别指定需要移动的对象和目标位置；本轮未修改场景或执行机器人任务。")
         from .scene.initial_robot import split_initial_robot
         initial_robot, task_instruction = split_initial_robot(instruction)
         if initial_robot is not None:
@@ -393,10 +425,14 @@ class BrainPipeline:
             deferred_reference_error = exc
             provider_instruction = instruction
         scene_context = self._understanding_scene_context(scene)
+        # Resolve only the product's unambiguous action default, before U.
+        # This is context for parsing, never a conversion of an edit payload
+        # into executable robot commands. Mixed requests remain with U/D.
+        route_hint = _action_route_hint(instruction)
         request = TaskUnderstandingRequest(instruction=provider_instruction,
                                            asset_catalog=self.asset_catalog if self.catalog_for_provider else None,
                                            workspace=self.workspace_context,
-                                           scene_context=scene_context)
+                                           scene_context=scene_context, route_hint=route_hint)
         if hasattr(self.understanding, "understand_turn"):
             turn = self.understanding.understand_turn(request)
         else:
@@ -406,6 +442,11 @@ class BrainPipeline:
         # route even if a provider emits an accepted scene_edit envelope.  A
         # query must never acquire, resolve or commit an edit lease.
         turn = _canonicalize_query_route(turn, instruction)
+        # Legacy understand() providers encode direct scene moves inside a
+        # TaskIntent and the downstream compatibility adapter handles them.
+        # Enforce the envelope contract only for typed understand_turn().
+        if hasattr(self.understanding, "understand_turn"):
+            turn = _check_action_route(turn, instruction, route_hint)
         # Bind the canonical turn to the exact catalog used in its provider
         # request.  This is checked again immediately before scene editing so
         # an OLS update between understanding and execution cannot retarget a

@@ -93,6 +93,8 @@ def configuration_summary(config, assets, defaults):
             "scene_layout_clearance_m": getattr(defaults, "clearance_m", None),
             "scene_layout_grid_size": config.scene_layout_grid_size,
             "scene_layout_near_clearance_m": config.scene_layout_near_clearance_m,
+            "scene_layout_clearance_ratio": config.scene_layout_clearance_ratio,
+            "scene_layout_gap_policy": "world_aabb_min_horizontal_extent_ratio_v1",
             "workspace_policy": workspace_policy,
             "robot_driver_sha256":fingerprint(config.default_robot_driver.model_dump(mode="json")
                                                if config.default_robot_driver is not None else None),

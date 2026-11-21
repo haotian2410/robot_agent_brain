@@ -52,6 +52,7 @@ class Link:
 
         def build(root, *, scene_document, task, asset_root, request_id=None):
             self.seen["built"] = (scene_document, task)
+            Path(root).mkdir(parents=True, exist_ok=True)
             workspace = SimpleNamespace(root=Path(root), catalog_path=Path(root) / "catalog.json")
             return workspace, Path(root) / "commands.json", dict(task, request_id=request_id)
 
@@ -88,6 +89,21 @@ def test_the_reduction_reads_the_world_the_browser_is_showing(tmp_path, monkeypa
     # Failures are explained with the control's own vocabulary, from the checkout
     # this deployment pointed at -- not a copy of it kept in the Brain.
     assert link.seen["describe_root"] == "/tmp/control"
+
+
+def test_transport_name_is_restored_in_verified_final_scene(tmp_path, monkeypatch):
+    import copy
+    source = copy.deepcopy(SCENE)
+    source['objects'][0]['object_name_in_scene'] = '苹果'
+    final = subprocess_execution.unique_named_document(source)
+    summary = dict(ok=True, steps=[], moved={}, holding_object=None, state_verified=True,
+                   final_scene=final, traj_path=None, error_code=None, detail=None)
+    link = Link(summary)
+    outcome = adapter(tmp_path, link, monkeypatch).run(commands(), source)
+    assert link.seen['built'][0]['objects'][0]['object_name_in_scene'] == 'object_7'
+    assert outcome.final_scene['objects'][0]['object_name_in_scene'] == '苹果'
+    assert source['objects'][0]['object_name_in_scene'] == '苹果'
+    assert (tmp_path/'workspaces/object_name_mapping.json').is_file()
 
 
 @pytest.mark.parametrize("overrides", [{"scene_id": 4}, {"scene_version": 8}])

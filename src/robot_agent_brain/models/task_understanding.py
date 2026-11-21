@@ -77,6 +77,7 @@ class TaskUnderstandingRequest(BaseModel):
     asset_catalog: AssetCatalogSnapshot | None = None
     workspace: WorkspaceSemanticPolicy = Field(default_factory=WorkspaceSemanticPolicy)
     scene_context: dict[str, Any] = Field(default_factory=dict)
+    route_hint: Literal["robot_task", "scene_edit"] | None = None
 
 
 class TaskUnderstandingProvider(Protocol):
@@ -628,7 +629,13 @@ def apply_tabletop_placement_region(task: TaskIntent) -> TaskIntent:
         return task
     placement = placements[0].placement_target
     text = task.instruction.casefold()
-    match = spatial_phrases.match_tabletop_region(text)
+    # Only the destination clause can supply a placement region. A source
+    # adjective ("最左边的魔方") must never move "桌面中间" to the left.
+    import re
+    destination = re.search(r"(?:放到|放在|放置到|放置在|移到|移动到|挪到|搬到)(.+)$", text)
+    if destination is None:
+        return task
+    match = spatial_phrases.match_tabletop_region(destination.group(1))
     if placement.region is not None or match is None or match[1]:
         return task
     # ``香蕉右边`` is an object-relative landing, not a tabletop half; only a
@@ -1090,7 +1097,12 @@ def parse_qwen_turn(value, instruction: str) -> BrainTurn:
         TurnStatus.CLARIFICATION_REQUIRED.value, TurnStatus.UNSUPPORTED_TASK.value,
     }:
         status = TurnStatus(value["status"])
-        turn_kind = TurnKind.UNSUPPORTED_TASK if status == TurnStatus.UNSUPPORTED_TASK else TurnKind.ROBOT_TASK
+        # A non-executable clarification still belongs to its original route.
+        # Reclassifying every clarification as robot_task pollutes recovery of
+        # scene edits and queries. Missing route retains historical default;
+        # an explicitly invalid route must still fail validation.
+        turn_kind = (TurnKind.UNSUPPORTED_TASK if status == TurnStatus.UNSUPPORTED_TASK
+                     else TurnKind(value.get("turn_kind", TurnKind.ROBOT_TASK.value)))
         question = value.get("clarification_question")
         if not isinstance(question, str) or not question.strip():
             question = ("当前 Piper 双臂任务需要明确两只机械臂的对象分配和执行能力。"
@@ -1176,6 +1188,8 @@ def parse_qwen_turn(value, instruction: str) -> BrainTurn:
     if isinstance(value, dict) and value.get("status", TurnStatus.ACCEPTED.value) == TurnStatus.ACCEPTED.value \
             and value.get("turn_kind") == TurnKind.SCENE_QUERY.value:
         return _parse_scene_query_wire(value, instruction)
+    if isinstance(value, dict) and value.get("turn_kind") == TurnKind.ROBOT_CONFIG.value:
+        return TaskParseWireOutput.model_validate(value).to_brain_turn(instruction)
     try:
         parsed = TaskParseOutput.model_validate(value)
         return parsed.to_brain_turn(instruction)
