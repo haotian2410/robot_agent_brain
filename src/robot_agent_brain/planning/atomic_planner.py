@@ -162,7 +162,31 @@ class AtomicPlanner:
         # Count the attempt that is about to happen, so a timeout still reports
         # the call it made instead of pretending the stage never ran.
         trace.model_calls = 1
-        draft = self.provider.plan_atomic(trace.context, validate=validate)
+        try:
+            draft = self.provider.plan_atomic(trace.context, validate=validate)
+        except QwenProviderError as exc:
+            # Qwen occasionally emits a structurally inconsistent graph for a
+            # multi-object pick/place (most commonly a second retreat for the
+            # source object after the destination put).  Do not edit that
+            # model output in place.  For this narrowly defined graph error,
+            # rebuild the already-grounded operations through the deterministic
+            # recipe, then run the same validator before exporting.  This keeps
+            # object bindings and placement semantics owned by Brain and makes
+            # the fallback auditable in the planning trace.
+            if not (exc.code == "atomic_plan_retreat_without_interaction"
+                    or "atomic_plan_retreat_without_interaction" in str(exc)):
+                raise
+            trace.used_planner = "qwen+recipe_fallback"
+            commands = self._envelope(request_id, scene, expand_atomic_plan(task, held_object))
+            commands = validator.validate(commands, task, scene, held_object=held_object)
+            trace.validation = {
+                "valid": True,
+                "scope": "atomic_assembly",
+                "fallback": "recipe_after_atomic_plan_retreat_without_interaction",
+                "fallback_reason": str(exc),
+                "command_operation_map": validator.command_operation_map,
+            }
+            return commands
         trace.model_calls = max(len(calls) - before, 1)
         trace.raw_output = getattr(self.provider, "last_raw_values", {}).get(
             "skill_planning", draft.model_dump(mode="json"))

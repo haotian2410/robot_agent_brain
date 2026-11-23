@@ -469,6 +469,21 @@ class AgentService:
                     "lease_state": getattr(platform, "lease_state", "unknown"),
                     "write_attempted": getattr(platform, "write_attempted", None),
                     "transactionID": getattr(platform, "last_transaction", None)}}
+                # A controller startup/dispatch failure can leave the planner without
+                # an execution envelope, but it cannot make the browser scene
+                # uncertain when no scene write was attempted.  In that case the
+                # lease is an ordinary task lease and must be released normally;
+                # quarantining it makes the next, independent session impossible.
+                # Keep the reconciliation fence for any attempted/unknown write.
+                if (uncertain
+                        and getattr(platform, "write_attempted", None) is False
+                        and getattr(platform, "last_transaction", None) is None
+                        and getattr(platform, "lease_state", None) == "granted"
+                        and isinstance(result, dict)
+                        and result.get("outcome") == "failed"):
+                    uncertain = False
+                    if session is not None and session.sync_state == "unknown":
+                        session.sync_state = "synchronized"
             if platform is not None:
                 try:
                     platform.release_lease(uncertain=uncertain)
@@ -559,12 +574,6 @@ class AgentService:
             chain.state = type(chain.state).SUPERSEDED
             session.last_recovery_evidence = None
             return request.command
-        if chain is not None and any(item.confirmed_effects for item in chain.step_ledger):
-            return {"taskID": "pending", "sessionID": request.sessionID,
-                    "outcome": "clarification_required", "executed": False,
-                    "clarification_question": "上一控制段已执行部分命令，不能整段重放。请查看逐命令结果，明确提交未完成部分作为新任务。",
-                    "reply": "上一控制段已执行部分命令，不能整段重放。请查看逐命令结果，明确提交未完成部分作为新任务。",
-                    "error": {"code": "execution_partial_requires_new_task", "message": "partial segment replay blocked"}}
         from ..scene.initial_robot import recover_initial_robot_name
         initial_correction = recover_initial_robot_name(
             session, request.command, getattr(self.app, "robot_assembly", None),
@@ -625,6 +634,18 @@ class AgentService:
                 # leave the durable chain untouched and use the normal recovery
                 # path below, preserving the historical safety behavior.
                 pass
+        # Only a short continuation is allowed to reach the recovery model
+        # after a segment may have had side effects.  A complete instruction
+        # accepted by the side-effect-free preview above is a new task and has
+        # already superseded the old chain.  Keep the replay guard for short
+        # supplements, because they do not contain enough information to
+        # safely construct a non-repeating remainder.
+        if chain is not None and any(item.confirmed_effects for item in chain.step_ledger):
+            return {"taskID": "pending", "sessionID": request.sessionID,
+                    "outcome": "clarification_required", "executed": False,
+                    "clarification_question": "上一控制段已执行部分命令，不能整段重放。请查看逐命令结果，明确提交未完成部分作为新任务。",
+                    "reply": "上一控制段已执行部分命令，不能整段重放。请查看逐命令结果，明确提交未完成部分作为新任务。",
+                    "error": {"code": "execution_partial_requires_new_task", "message": "partial segment replay blocked"}}
         if chain is not None and chain.state.value in {"blocked_environment", "blocked_system", "blocked_reconciliation"}:
             return {"taskID": "pending", "sessionID": request.sessionID,
                     "outcome": "failed", "executed": False,
@@ -1314,9 +1335,9 @@ class AgentService:
     def dispatch(self, session, platform, report, identifier, result):
         """Act out the exported plan, then make the browser's world the executed one.
 
-        Success requires every command to be accounted for. A partial failure
-        may publish verified actual state, but remains a failed task; incomplete
-        evidence leaves the session uncertain instead of reusing its old pose.
+        Success requires every command to be accounted for. Any failed task is
+        diagnostic-only: observed partial state is never published into the
+        next task's Scene or robot pose; the pre-dispatch state is restored.
         Trajectory publication is separate from state commit and happens after
         lease release. A failed clip is diagnostic, not evidence of success.
         """
@@ -1339,12 +1360,21 @@ class AgentService:
 
         prior_arm_states = session.arm_states.model_copy(deep=True) if session.arm_states is not None else None
         prior_holding = session.holding_object
-        discard_simulation = self.config.execution_failure_policy == 'discard_simulation'
-        if discard_simulation and getattr(self.execution(), 'backend', None) != 'mujoco':
-            raise ValueError('discard_execution_failure_requires_mujoco')
+        # A failed control task is diagnostic evidence only.  It must never
+        # publish a partial/verified final scene: a timeout or failed grasp may
+        # have changed an intermediate simulator state, but it did not establish
+        # a successful user-visible world.
+        discard_failures = True
         session.mark_dispatched(commands)
         try:
-            outcome = self.execution().run(commands, session.scene.raw_document(), progress=progress)
+            # Ensure an OLS-specific RobotModelRef (including approved
+            # collision decomposition hints) is present even for sessions
+            # imported before this normalization was introduced.
+            execution_scene, _ = self.app.robot_assembly.ensure_scene_robot_config(session.scene)
+            outcome = self.execution().run(commands, execution_scene.raw_document(), progress=progress)
+            if outcome is None:
+                outcome = ExecutionOutcome(ok=False, error_code="execution_dispatch_failed",
+                                           detail="控制端未返回执行结果")
         except Exception as exc:
             # A runner that never started still owes the session a feedback row, or
             # the dispatch would stay pending for every later task.
@@ -1353,23 +1383,29 @@ class AgentService:
         reported = {step.command_id for step in outcome.steps}
         success = (outcome.ok and reported == {command.command_id for command in commands.commands}
                    and all(step.status == "success" for step in outcome.steps))
-        discarded = discard_simulation and not success
-        candidate = self.executed_scene(session.scene, outcome, commands) if success or (outcome.state_verified and not discarded) else None
+        discarded = discard_failures and not success
+        simulation_discarded = discarded and getattr(self.execution(), 'backend', None) == 'mujoco'
+        observed_effect = (
+            "completed" if success else
+            "partial" if (outcome.state_verified or any(step.status == "success" for step in outcome.steps)
+                          or outcome.moved or outcome.articulated_joints) else
+            "unknown")
+        # Only a fully successful run can create a candidate Scene.  Measured
+        # partial state remains in diagnostics, never in the next task's world.
+        candidate = self.executed_scene(session.scene, outcome, commands) if success else None
         session.apply_execution_feedback(
             ExecutionFeedback(request_id=commands.request_id, status="success" if success else "partial",
-                              holding_object=outcome.holding_object,
+                              holding_object=outcome.holding_object if success else prior_holding,
                               commands=[CommandFeedback(command_id=step.command_id,
                                                          status="success" if step.status == "success" else "failed")
                                         for step in outcome.steps]),
             confirmed_scene=candidate, feedback_source="external")
         if discarded:
-            # Each MuJoCo request is an isolated subprocess. Discard its result,
-            # not a physical robot's state; no Gateway write has occurred here.
-            # Still fail closed if the committed browser scene changed externally.
-            if digest(platform.read_live(lease_snapshot=False)) == digest(session.scene):
-                session.sync_state = 'synchronized'
-                session.arm_states = prior_arm_states
-                session.holding_object = prior_holding
+            # Clear the execution transaction, then restore the exact
+            # pre-dispatch Brain state. No Gateway write has occurred here.
+            session.sync_state = 'synchronized'
+            session.arm_states = prior_arm_states
+            session.holding_object = prior_holding
             result['scene_commit_status'] = 'unchanged'
         if candidate is not None:
             # Feedback returns only after the platform commit and snapshot
@@ -1415,18 +1451,19 @@ class AgentService:
                                                          if command.command_id not in reported],
                                  "active_joint_object_ids": list(outcome.active_joint_ids),
                                  "final_joint_positions_rad": outcome.articulated_joints,
-                                 "effect": "completed" if success else (
-                                     "none" if no_effect else
-                                     "partial" if candidate is not None or any(
-                                         step.status == "success" for step in outcome.steps) else "unknown"),
+                                 # ``effect`` describes the committed Brain
+                                 # effect. Physical observations from a failed
+                                 # run are reported separately and discarded.
+                                 "effect": "completed" if success else "none",
+                                 "observed_effect": observed_effect,
                                  "retry_safe": retry_safe,
-                                 "simulation_discarded": discarded,
-                                 "writeback_status": "committed" if candidate is not None else "none"},
+                                 "simulation_discarded": simulation_discarded,
+                                 "failure_scene_discarded": discarded,
+                                 "writeback_status": "committed" if candidate is not None else (
+                                     "discarded" if discarded else "none")},
                       reply=(f"已执行 {total} 条命令并写回场景。" if success else
                              f"执行未完成：{failure_detail(outcome.detail, outcome.error_code)}。" +
-                             ("本次失败仿真结果未提交，保留执行前场景，可开始下一轮任务。" if discarded and session.sync_state == 'synchronized' else
-                              "已同步控制端确认的实际状态，未重放已完成动作。" if candidate is not None else
-                              "当前执行状态待核验，不能按旧场景继续操作。" if session.sync_state != "synchronized" else "")))
+                             ("本次失败结果未提交，保留执行前场景，可开始下一轮任务。" if discarded else "")))
         if not success:
             result["error"] = {"code": outcome.error_code or "execution_failed",
                                "message": outcome.detail or "控制端未报告成功",

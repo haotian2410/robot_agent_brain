@@ -1,0 +1,27 @@
+请基于当前 robot_agent_brain 实现“失败触发上下文 + 二值歧义策略”。
+
+先完整阅读：
+docs/failure-context-v2/01_implementation_plan.md
+docs/failure-context-v2/02_acceptance_cases.md
+docs/failure-context-v2/04_source_review.md
+
+审查基线：3c568c23752418d9c15321fbd321b3696c8eaef5。
+若本地已有后续修复，先对照并复用，不回退同事代码；不要直接执行旧context v1任务。
+
+核心范围：
+1. 每个外层用户轮次留档；正常原Qwen输入/Prompt不追加历史。
+2. 首次未完成时记录root_failure_turn_id；最多5个同链失败用户轮次，包含首轮。
+3. 在用户下一轮补充时新增独立failure_context.v1 Qwen调用R，整理完整意图，再走原U及全部接地/编辑/查询/规划/执行校验。
+4. R只读，无执行工具；普通请求无R，首失败后不自动循环R。
+5. 首失败之前已完成步骤不得重放。当前代码已有decomposition、_run_steps和Control dispatch，用户轮次必须在Web外层最终结果形成后终结；app.handle的plan_ready不是执行成功。
+6. 五轮用户失败与MAX_STEP_ATTEMPTS=5分开。root保持不变，内部重试、子request、HTTP幂等重发不重复计轮。
+7. 增加prefer_auto_resolve布尔值，默认false。true仅对通过现有接地规则的可替代source/actor做可复现随机选择；保留原有无可靠颜色标签时的颜色描述回退（见计划§9.3），持久选择并在重试中复用。
+8. 多个destination/参照物、明确ID、可验证颜色冲突、平台、破坏性操作、查询集合、缺少参数仍不得被auto绕过。**颜色特例**：可靠颜色标签／覆盖证据优先按颜色匹配；若贴图颜色无法判断且无可靠颜色证据，则允许按原有回退机制在颜色未知的候选中auto随机，并提示颜色未验证；不得选择已知颜色相反的对象。不要直接random.choice未经筛选的候选池。
+9. 已确定字段存SemanticDraft，不生成半成品Commands。续接保留raw_user_text/effective_instruction/RecoveryEvidence，防止方向、距离、数量、目标、original基线漂移。
+10. unknown事务、物理部分执行/持物、回执与租约未知必须先按现有机制恢复，不能让R自行判断“可以再试”。独立仿真重试需可信无副作用/已丢弃scratch证据，不只看错误码。
+11. 保持原子技能Commands、RSI/Gateway必填字段、发布策略和现有功能；不擅自开关Control或更换生产平台。
+12. 按M0～M7分别提交本地改动，先写失败回归。FR01～FR69是待执行规格，不是现有batch矩阵输入，不可将not_run改成passed而不跑。
+
+每阶段报告：修改文件、当前业务链变化、测试命令与结果、模型调用和token、剩余问题。
+最终分别列出Mock测试、真实Qwen、隔离仿真、物理Control、Python3.11/3.12、wheel结果。
+不自动推送，不修改生产OLS，不删除未跟踪文件；任何真实Control/物理机器人操作需用户另外明确授权。

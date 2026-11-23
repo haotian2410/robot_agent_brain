@@ -54,6 +54,44 @@ def test_plan_ready_unexecuted_is_not_a_failure_chain(tmp_path):
     assert digest(session.scene)==before
 
 
+def test_initial_browser_bootstrap_ignores_stale_robot_idle_fields(tmp_path):
+    """A fresh session may import its first scene after a failed reconnect.
+
+    There is no established scene/platform binding yet, so stale in-memory
+    carrying/unknown-arm fields cannot safely describe the browser snapshot
+    and must not block bootstrap.  The same gate remains active after import.
+    """
+    from types import SimpleNamespace
+    from robot_agent_brain.contracts.scene import SceneSnapshot
+    from robot_agent_brain.session.brain_session import BrainSession
+    from test_query_scene_continuity import supported_scene
+
+    class Platform:
+        next_object_id = 3
+        def load_scene(self, scene, *, change_kind="scene_edit"):
+            return SceneSnapshot(scene_id=scene.scene_id, scene_version=scene.scene_version,
+                                 scene_sub_version=scene.scene_sub_version)
+        adopt = load_scene
+
+    scene = supported_scene()
+    session = BrainSession(None, SimpleNamespace(), Platform())
+    session.holding_object = 99
+    assert session.accept_browser_scene(
+        scene, platform_object_ids={o.object_id_in_scene for o in scene.objects}
+    ) is True
+    assert session.scene is not None
+    session.holding_object = 99
+    # Re-sending the authoritative scene unchanged is not an overwrite and
+    # must remain allowed so a failed execution does not block the next task.
+    assert session.accept_browser_scene(
+        session.scene, platform_object_ids={o.object_id_in_scene for o in session.scene.objects}
+    ) is False
+    candidate = session.scene.model_copy(deep=True)
+    candidate.scene_version += 1
+    with pytest.raises(ValueError, match="browser_sync_robot_not_idle"):
+        session.accept_browser_scene(candidate, platform_object_ids={o.object_id_in_scene for o in candidate.objects})
+
+
 def test_http_lifecycle_results_and_artifact_whitelist(tmp_path):
     async def scenario():
         service,browser=configured(tmp_path)

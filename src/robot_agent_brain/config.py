@@ -78,6 +78,11 @@ class BrainConfig(BaseModel):
     defaults: str | None = None
     robot: str = "ur5e"
     robot_profiles: RobotProfileRegistry = Field(default_factory=RobotProfileRegistry)
+    # Optional, validated per-robot collision decomposition hints.  These are
+    # scene assembly data, not planning policy: the control runtime still
+    # performs the actual FCL checks.  Keys may be an OLS asset key
+    # (``robot:9``), metadata id, or canonical semantic name.
+    robot_collision_profiles: dict[str, dict] = Field(default_factory=dict)
     release_policy: ReleasePolicy = Field(default_factory=ReleasePolicy)
     component_reference_rules: dict[str, dict] = Field(default_factory=dict)
     scene_robot_profile: str | None = None
@@ -111,6 +116,10 @@ class BrainConfig(BaseModel):
     execution_link_root: str | None = None
     execution_workspace_root: str | None = None
     execution_collision_model: Literal['proxy', 'precise'] | None = None
+    # Kept for checkpoint/config compatibility.  Brain now always discards a
+    # failed execution's Scene writeback; observed partial state remains only
+    # in diagnostics, regardless of whether the runner is simulation or
+    # physical.  Successful executions retain the normal writeback path.
     execution_failure_policy: Literal['verify_actual_state', 'discard_simulation'] = 'verify_actual_state'
     # The control repository's skill.md is the source of truth for the atomic
     # planning round.  When omitted, derive it from execution_control_root.

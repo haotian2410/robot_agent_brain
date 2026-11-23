@@ -37,7 +37,7 @@ class BrainApplication:
         if self.config.robot == "ur5e":
             self.registered_profile_ids.add("ur5e")
         self.assets = self.config.load_assets()
-        self.robot_assembly = OlsRobotAssemblyAdapter(self.assets)
+        self.robot_assembly = OlsRobotAssemblyAdapter(self.assets, self.config.robot_collision_profiles)
         self.defaults = self.config.load_defaults()
         aliases = (self.config.load_semantic_aliases() if self.config.semantic_aliases is not None
                    else getattr(getattr(self.assets, "metadata", None), "aliases", {}))
@@ -241,7 +241,7 @@ class BrainApplication:
         changed = changed or current_catalog_revision != previous_catalog_revision
         if not changed:
             return False
-        self.robot_assembly = OlsRobotAssemblyAdapter(self.assets)
+        self.robot_assembly = OlsRobotAssemblyAdapter(self.assets, self.config.robot_collision_profiles)
         self.config_summary = configuration_summary(self.config, self.assets, self.defaults)
         self.config_fingerprint = fingerprint(self.config_summary)
         self.pipeline.assets = self.assets
@@ -328,6 +328,10 @@ class BrainApplication:
             raise ValueError("execution_pending")
         if session.scene is not None and not self._is_uninitialized_empty_scene(session):
             raise ValueError("capability_unsupported: scene import is only allowed before session initialization; use a new session for another platform")
+        # Normalize the imported platform before it becomes the session
+        # baseline.  In particular this carries a robot-specific
+        # RobotModelRef/collision profile to the control bridge.
+        scene, _ = self.robot_assembly.ensure_scene_robot_config(scene)
         profile = None
         if self.config.scene_robot_profile is not None:
             profile = self.config.robot_profiles.profiles[self.config.scene_robot_profile]
@@ -375,6 +379,12 @@ class BrainApplication:
             session = self.get_session(session_id)
             candidate = self.codec.decode(scene.raw_document() if hasattr(scene, "raw_document")
                                           else (scene.model_dump(mode="json") if hasattr(scene, "model_dump") else scene))
+            # Keep the browser document byte-for-byte authoritative here.  The
+            # collision profile is an execution-only adapter concern; injecting
+            # an opaque RobotModelRef into the candidate before ``platform.adopt``
+            # changes its digest and makes a scene that exactly matches Gateway
+            # look like a browser/Gateway conflict.  Execution gets the enriched
+            # copy in WebService.execute, after the live scene has been adopted.
             manifest = platform_object_ids if platform_object_ids is not None else self.config.scene_platform_object_ids
             if manifest is None:
                 raise ValueError("browser_platform_manifest_required")

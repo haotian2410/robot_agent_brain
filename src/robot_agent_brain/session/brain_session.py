@@ -138,14 +138,23 @@ class BrainSession:
             raise ValueError("browser_sync_execution_state_blocked")
         if platform_rebind and self.session_phase != "setup":
             raise ValueError("browser_platform_rebind_task_busy")
-        if self.holding_object is not None or (self.arm_states and any(
-                not a.state_known or a.holding_object is not None for a in self.arm_states.arms.values())):
-            raise ValueError("browser_sync_robot_not_idle")
         self.reference_registry.validate_scene(candidate)
         manager = self._candidate_manager(candidate)
         known = {o.object_id_in_scene for o in candidate.objects}
         current = self.scene
-        changed = current is None or digest(current) != digest(candidate)
+        changed = (current is None or digest(current) != digest(candidate)
+                   or (current is not None and (candidate.scene_id, candidate.scene_version,
+                                                candidate.scene_sub_version) !=
+                       (current.scene_id, current.scene_version, current.scene_sub_version)))
+        # A first browser bootstrap has no established robot/platform binding.
+        # Stale in-memory execution fields must not prevent importing the
+        # initial scene (this can happen after a failed process recovery or a
+        # browser reconnect).  Once a scene is established, keep the safety
+        # gate: an active/unknown carrying state must never be overwritten by
+        # a browser snapshot.
+        if changed and current is not None and (self.holding_object is not None or (self.arm_states and any(
+                not a.state_known or a.holding_object is not None for a in self.arm_states.arms.values()))):
+            raise ValueError("browser_sync_robot_not_idle")
         manifest_ids = set(platform_object_ids)
         if platform_rebind and self.robot_assembly_adapter is not None:
             # The browser's manifest can still contain a pedestal that the

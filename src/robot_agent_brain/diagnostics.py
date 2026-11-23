@@ -76,6 +76,7 @@ def configuration_summary(config, assets, defaults):
             "timeout":config.timeout, "structured_output":config.structured_output,
             "robot":config.robot, "seed":config.seed, "vision":config.vision,
             "robot_profiles_sha256": fingerprint(config.robot_profiles.model_dump(mode="json")),
+            "robot_collision_profiles_sha256": fingerprint(config.robot_collision_profiles),
             "release_policy": config.release_policy.model_dump(mode="json"),
             "component_reference_rules_sha256": fingerprint(config.component_reference_rules),
             "scene_robot_profile": config.scene_robot_profile,

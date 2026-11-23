@@ -1,0 +1,191 @@
+{
+  "notice": "仅为拟议契约示例；不代表当前仓库已有字段；示例ID为合成值。",
+  "baseline": "3c568c23752418d9c15321fbd321b3696c8eaef5",
+  "config": {
+    "conversation_recovery": {
+      "enabled": true,
+      "max_failed_user_turns": 5,
+      "recent_turns_retained": 5,
+      "max_context_input_tokens": 6000,
+      "max_recovery_output_tokens": 1500,
+      "semantic_repair_retries": 0
+    },
+    "ambiguity_policy": {
+      "prefer_auto_resolve": false
+    }
+  },
+  "failure_chain_example": {
+    "chain_id": "fc_demo_01",
+    "root_failure_turn_id": "turn_0007",
+    "state": "waiting_user",
+    "failed_user_turn_ids": [
+      "turn_0007"
+    ],
+    "root_instruction": "增加两个苹果；增加一个托盘；把苹果放到托盘里；查询苹果位置。",
+    "current_failed_step_id": "step-003",
+    "remaining_step_ids": [
+      "step-003",
+      "step-004"
+    ],
+    "step_ledger": [
+      {
+        "step_id": "step-001",
+        "instruction": "增加两个苹果",
+        "status": "committed"
+      },
+      {
+        "step_id": "step-002",
+        "instruction": "增加一个托盘",
+        "status": "committed"
+      },
+      {
+        "step_id": "step-003",
+        "instruction": "把苹果放到托盘里",
+        "status": "clarification"
+      },
+      {
+        "step_id": "step-004",
+        "instruction": "查询苹果位置",
+        "status": "not_run"
+      }
+    ],
+    "policy_snapshot": {
+      "prefer_auto_resolve": false
+    },
+    "latest_question": "有两个苹果，请明确要操作哪一个。"
+  },
+  "draft_example": {
+    "validity": "validated_turn",
+    "source_request_id": "req_failed_step_3",
+    "execution_authority": "none",
+    "known_fields": {
+      "route": "robot_task",
+      "action": "pick_and_place",
+      "source_semantic": "apple",
+      "destination_semantic": "tray",
+      "placement": "inside"
+    },
+    "unresolved_slots": [
+      {
+        "role": "source",
+        "kind": "scene_instance_ambiguity",
+        "candidate_object_ids": [
+          17,
+          18
+        ]
+      }
+    ],
+    "confirmed_bindings": [
+      {
+        "entity_role": "destination",
+        "object_ids": [
+          19
+        ],
+        "source": "grounding",
+        "requires_revalidation": true
+      }
+    ]
+  },
+  "recovery_request_example": {
+    "protocol_version": "failure_context.v1",
+    "current_user_text": "左边的，但不要放托盘里，放旁边。",
+    "root_failure_turn_id": "turn_0007",
+    "history": [
+      {
+        "turn_id": "turn_0007",
+        "user": "增加两个苹果；增加一个托盘；把苹果放到托盘里；查询苹果位置。",
+        "assistant": "前两步完成，第三步有两个苹果，请明确哪一个。",
+        "outcome": "clarification_required",
+        "executed": false,
+        "scene_effect": "committed_prefix"
+      }
+    ],
+    "unresolved_slots": [
+      {
+        "subject_role": "source",
+        "kind": "scene_instance_ambiguity",
+        "candidate_count": 2
+      }
+    ],
+    "allowed_recovery_actions": [
+      "continue_task",
+      "revise_task",
+      "new_task",
+      "ask_user",
+      "cancel_chain"
+    ]
+  },
+  "recovery_decision_example": {
+    "protocol_version": "failure_context.v1",
+    "decision": "revise_task",
+    "source_turn_id": "turn_0007",
+    "scope": "failed_step",
+    "target_step_id": "step-003",
+    "resolved_instruction": "把左侧的苹果放到托盘旁边。",
+    "amendments": [
+      {
+        "subject_role": "source",
+        "field": "selection",
+        "value": {
+          "relation": "left"
+        },
+        "evidence": {
+          "turn_id": "current",
+          "text": "左边的"
+        }
+      },
+      {
+        "subject_role": "destination",
+        "field": "placement_relation",
+        "value": "near",
+        "evidence": {
+          "turn_id": "current",
+          "text": "不要放托盘里，放旁边"
+        }
+      }
+    ],
+    "question": null
+  },
+  "selection_decision_example": {
+    "decision_id": "sd_demo_01",
+    "logical_task_id": "turn_demo_auto",
+    "step_id": "step-001",
+    "entity_role": "source",
+    "candidate_object_ids": [
+      17,
+      18
+    ],
+    "chosen_object_ids": [
+      17
+    ],
+    "policy": "seeded_random_eligible_actor",
+    "constraint_revision": 1,
+    "hard_constraints_verified": true,
+    "dropped_constraints": [],
+    "reused_on_retry": true
+  },
+  "public_response_example": {
+    "outcome": "clarification_required",
+    "reply": "有两个符合条件的苹果，请明确一个。",
+    "executed": false,
+    "conversation": {
+      "turn_id": "turn_0007",
+      "root_failure_turn_id": "turn_0007",
+      "chain_state": "waiting_user",
+      "failed_user_turns": 1,
+      "max_failed_user_turns": 5,
+      "continuation_available": true,
+      "prefer_auto_resolve": false
+    },
+    "partial_completion": {
+      "completed_steps": [
+        "step-001",
+        "step-002"
+      ],
+      "remaining_steps": [
+        "step-003",
+        "step-004"
+      ]
+    }
+  }
+}

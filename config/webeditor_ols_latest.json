@@ -43,6 +43,12 @@
   "scene_layout_grid_size": 5,
   "scene_layout_near_clearance_m": 0.02,
   "robot": "ur5e",
+  "robot_collision_profiles": {
+    "robot:9": {"collision_geometry": {"link_overrides": {"link5": {
+      "max_convex_hulls": 32, "max_vertices": 256,
+      "max_input_faces": 6000, "threshold": 0.03
+    }}}}
+  },
   "scene_platform_object_ids": [
     0,
     1,

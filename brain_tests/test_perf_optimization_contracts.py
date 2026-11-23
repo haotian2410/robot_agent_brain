@@ -146,6 +146,19 @@ def test_partial_execution_never_enters_preview_or_r():
     assert calls==[]
 
 
+def test_partial_execution_allows_complete_new_task_after_side_effect_free_preview():
+    """A full new instruction must not be trapped by the old partial chain."""
+    from robot_agent_brain.session.conversation_memory import StepLedgerEntry
+    service, session, request, calls = recovery_service_fixture("桌面有几个香蕉")
+    session.conversation_memory.active_failure_chain.step_ledger = [StepLedgerEntry(
+        step_id="already-executed", original_step_index=1,
+        instruction="抓取苹果", status="executed_confirmed",
+        confirmed_effects=["pick confirmed"])]
+    assert service._maybe_recover(session, request) == request.command
+    assert calls == ["U"]
+    assert session.conversation_memory.active_failure_chain.state.value == "superseded"
+
+
 def test_invalid_r_instruction_is_rejected_without_followup_u():
     from robot_agent_brain.models.failure_context import FailureContextDecision
     service,session,request,calls=recovery_service_fixture()

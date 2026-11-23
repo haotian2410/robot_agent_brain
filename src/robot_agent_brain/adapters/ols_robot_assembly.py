@@ -57,15 +57,17 @@ class RobotAssemblyAsset:
     aabb: tuple[float, ...] | None = None
     local_aabb_min_m: tuple[float, float, float] | None = None
     local_aabb_max_m: tuple[float, float, float] | None = None
+    collision_geometry: dict | None = None
 
 
 class OlsRobotAssemblyAdapter:
     """Read OLS assembly metadata and build an atomic platform candidate."""
 
-    def __init__(self, assets):
+    def __init__(self, assets, collision_profiles=None):
         self.assets = assets
         self.root = Path(getattr(assets, "root", "")).resolve() if getattr(assets, "root", None) else None
         self.revision = self._revision()
+        self.collision_profiles = dict(collision_profiles or {})
         self._items: dict[str, RobotAssemblyAsset] = {}
         self._load()
 
@@ -128,7 +130,72 @@ class OlsRobotAssemblyAdapter:
                 scene_one_arm=(data.get("scene_one_arm") or [None])[0],
                 aabb=tuple(float(v) for v in aabb) if isinstance(aabb, list) and len(aabb) == 6 else None,
                 local_aabb_min_m=getattr(geometry, "local_aabb_min_m", None),
-                local_aabb_max_m=getattr(geometry, "local_aabb_max_m", None))
+                local_aabb_max_m=getattr(geometry, "local_aabb_max_m", None),
+                collision_geometry=(data.get("collision_geometry")
+                                    or (data.get("robot_model_ref") or {}).get("collision_geometry")))
+
+    def collision_profile(self, asset: RobotAssemblyAsset) -> dict | None:
+        """Return the approved collision hint for an OLS robot, if present.
+
+        Identity is resolved from the most specific key first.  No geometry is
+        invented here; absent profiles deliberately preserve the control
+        runtime's normal OLS/default path.
+        """
+        candidates = (asset.asset_key, asset.metadata_ref,
+                      asset.metadata_ref.rsplit("/", 1)[-1], asset.semantic_name)
+        for key in candidates:
+            value = self.collision_profiles.get(key)
+            if isinstance(value, dict):
+                value = value.get("collision_geometry", value)
+                return value if isinstance(value, dict) else None
+        return asset.collision_geometry if isinstance(asset.collision_geometry, dict) else None
+
+    @staticmethod
+    def _robot_model_ref_component(obj):
+        return next((component for component in obj.components
+                     if component.component_type == "RobotModelRef"), None)
+
+    def ensure_scene_robot_config(self, scene: SceneConfig) -> tuple[SceneConfig, dict]:
+        """Carry the scene's concrete robot identity/config into execution.
+
+        WebEditor scenes can contain only MetadataRef/RobotDriver.  The
+        control assembler then has to fall back to generic decomposition.  If
+        OLS or the approved registry provides a robot collision profile, add
+        the opaque RobotModelRef component before the scene reaches the
+        control bridge.  Unknown fields are preserved and scene identity is
+        unchanged.
+        """
+        classified = self.classify_scene(scene)
+        if len(classified["arm"]) != 1:
+            return scene.model_copy(deep=True), {"changed": False, "reason": "arm_not_unique"}
+        arm_id, arm = classified["arm"][0]
+        profile = self.collision_profile(arm)
+        if profile is None:
+            return scene.model_copy(deep=True), {"changed": False, "robot_asset": arm.semantic_name}
+        objects = {obj.object_id_in_scene: obj.model_copy(deep=True) for obj in scene.objects}
+        target = objects[arm_id]
+        current = self._robot_model_ref_component(target)
+        properties = dict(current.properties) if current is not None else {}
+        if properties.get("collision_geometry") == profile:
+            return scene.model_copy(deep=True), {"changed": False, "robot_asset": arm.semantic_name}
+        properties["collision_geometry"] = json.loads(json.dumps(profile))
+        components = []
+        replaced = False
+        for component in target.components:
+            if component.component_type == "RobotModelRef" and not replaced:
+                components.append(SceneComponent(component_type="RobotModelRef", properties=properties))
+                replaced = True
+            else:
+                components.append(component.model_copy(deep=True))
+        if not replaced:
+            components.append(SceneComponent(component_type="RobotModelRef", properties=properties))
+        objects[arm_id] = target.model_copy(update={"components": components})
+        payload = scene.raw_document()
+        payload["objects"] = [obj.model_dump(mode="json") for obj in objects.values()]
+        from .scene_file_codec import SceneFileCodec
+        candidate = SceneFileCodec(self.assets).decode(payload)
+        return candidate, {"changed": True, "robot_asset": arm.semantic_name,
+                           "collision_profile": True, "asset_revision": self.revision}
 
     def catalog(self, registered_profiles=()) -> list[dict]:
         profiles = {str(value).casefold() for value in (registered_profiles or ())}
@@ -336,6 +403,22 @@ class OlsRobotAssemblyAdapter:
                     driver=driver,
                     semantic={**(old_semantic.model_dump(mode="json") if old_semantic else {}),
                               "semantic_name": target_arm.semantic_name, "category": "robot"})
+                profile = self.collision_profile(target_arm)
+                if profile is not None:
+                    current_ref = self._robot_model_ref_component(arm_obj)
+                    ref_properties = dict(current_ref.properties) if current_ref is not None else {}
+                    ref_properties["collision_geometry"] = json.loads(json.dumps(profile))
+                    components = []
+                    replaced_ref = False
+                    for component in arm_obj.components:
+                        if component.component_type == "RobotModelRef" and not replaced_ref:
+                            components.append(SceneComponent(component_type="RobotModelRef", properties=ref_properties))
+                            replaced_ref = True
+                        else:
+                            components.append(component.model_copy(deep=True))
+                    if not replaced_ref:
+                        components.append(SceneComponent(component_type="RobotModelRef", properties=ref_properties))
+                    arm_obj = arm_obj.model_copy(update={"components": components})
                 objects[identifier] = arm_obj
         if arm_changed or gripper_changed:
             grippers = current["gripper"]
@@ -434,6 +517,9 @@ class OlsRobotAssemblyAdapter:
                 raise ValueError("robot_assembly_camera_ambiguous")
             for cid, _ in cameras:
                 objects[cid] = self._replace(objects[cid], metadata={"path": target_camera.metadata_ref, "type": "robot"})
+        # A rebind must carry the target robot's approved collision profile as
+        # well.  The control side remains responsible for generating and
+        # checking FCL geometry.
         payload = scene.raw_document()
         payload["objects"] = [obj.model_dump(mode="json") for obj in objects.values()]
         payload["scene_sub_version"] = scene.scene_sub_version + 1
@@ -441,7 +527,9 @@ class OlsRobotAssemblyAdapter:
         payload["scene_version"] = scene.scene_version
         from .scene_file_codec import SceneFileCodec
         candidate = SceneFileCodec(self.assets).decode(payload)
+        candidate, _ = self.ensure_scene_robot_config(candidate)
         return candidate, {"noop": False, "changed_roles": changed_roles, "robot_asset": target_arm.semantic_name,
                            "gripper_asset": target_gripper.semantic_name if target_gripper else (current["gripper"][0][1].semantic_name if current["gripper"] else None),
                            "camera_asset": target_camera.semantic_name if target_camera else (current["camera"][0][1].semantic_name if current["camera"] else None),
+                           "collision_profile": self.collision_profile(target_arm) is not None,
                            "asset_revision": self.revision}

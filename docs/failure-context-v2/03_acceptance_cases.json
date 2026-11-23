@@ -1,0 +1,1126 @@
+{
+  "schema_version": "failure-context-acceptance.v1",
+  "baseline": "3c568c23752418d9c15321fbd321b3696c8eaef5",
+  "note": "设计用例，不是现有batch矩阵直接输入；全部待执行",
+  "total": 69,
+  "cases": [
+    {
+      "id": "FR01",
+      "area": "记忆与最终事实",
+      "title": "无失败链的正常请求保持旧模型输入",
+      "preconditions": "固定Qwen/Scene/目录快照，关闭自动选择",
+      "user_inputs": [
+        "增加一个苹果"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "原U的Prompt/schema/payload与基线一致；无R调用",
+        "只新增一条用户轮次，原业务结果保持"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR02",
+      "area": "记忆与最终事实",
+      "title": "每轮保存用户与系统双向记录",
+      "preconditions": "空会话",
+      "user_inputs": [
+        "增加苹果",
+        "有几个苹果"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "分别保存raw_user_text和最终assistant_text",
+        "不得只记录用户输入或中间Qwen回复"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR03",
+      "area": "记忆与最终事实",
+      "title": "五轮缓存与完整审计分离",
+      "preconditions": "连续六个独立查询",
+      "user_inputs": [
+        "查询1",
+        "查询2",
+        "查询3",
+        "查询4",
+        "查询5",
+        "查询6"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "最近视图只保留后五轮",
+        "已有请求产物不因缓存淘汰删除，当前输入未重复计入history"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR04",
+      "area": "记忆与最终事实",
+      "title": "三个子步骤仍为一轮",
+      "preconditions": "Mock拆分输出三步且全部完成",
+      "user_inputs": [
+        "增加苹果；改成蓝色；查询颜色"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "child_request_ids有三项，但用户轮次只有一条",
+        "final_outcome来自外层汇总"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR05",
+      "area": "记忆与最终事实",
+      "title": "先plan_ready后Control失败",
+      "preconditions": "execution_enabled，Mock Control安全失败",
+      "user_inputs": [
+        "把苹果放托盘"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "不能在app返回plan_ready时清除失败链",
+        "最终记录为执行未完成且关联对应child request"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR06",
+      "area": "记忆与最终事实",
+      "title": "执行成功后截图失败",
+      "preconditions": "Mock提交已确认，渲染失败",
+      "user_inputs": [
+        "移动苹果"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "scene_effect=committed保留",
+        "后续补截图不重新编辑或执行"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR07",
+      "area": "记忆与最终事实",
+      "title": "旧checkpoint兼容",
+      "preconditions": "旧SessionState没有conversation_memory",
+      "user_inputs": [],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "加载为空memory且原Scene/Dialogue/Commands不变",
+        "保存再恢复字段一致"
+      ],
+      "validation_layer": "unit",
+      "status": "not_run"
+    },
+    {
+      "id": "FR08",
+      "area": "记忆与最终事实",
+      "title": "晚到回执只修订事实",
+      "preconditions": "同turn先unknown后权威回执到达",
+      "user_inputs": [],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "同turn_id upsert事实revision",
+        "不新增用户轮次、不再计一次失败"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR09",
+      "area": "失败链与轮数",
+      "title": "首失败轮创建固定根",
+      "preconditions": "两个候选苹果、唯一托盘",
+      "user_inputs": [
+        "把苹果放到托盘里"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "root_failure_turn_id等于外层turn_id",
+        "failed_user_turns=1，无任务副作用"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR10",
+      "area": "失败链与轮数",
+      "title": "二三轮失败不移动根",
+      "preconditions": "已有失败链",
+      "user_inputs": [
+        "那个",
+        "还是那个"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "根ID和原始意图不变",
+        "失败计数依次2、3；当前问题可更新"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR11",
+      "area": "失败链与轮数",
+      "title": "第五次失败耗尽",
+      "preconditions": "相同未完成任务且始终无唯一目标",
+      "user_inputs": [
+        "把苹果放托盘",
+        "那个",
+        "就那个",
+        "之前那个",
+        "你看着办"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "首轮包含在总五轮内，第五轮关闭active chain为exhausted",
+        "不自动发起第六轮或内部R循环"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR12",
+      "area": "失败链与轮数",
+      "title": "第五轮成功允许完成",
+      "preconditions": "前四轮失败，第五轮明确对象",
+      "user_inputs": [
+        "把苹果放托盘",
+        "那个",
+        "前面那个",
+        "还是那个",
+        "ID 17 的苹果"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "第五轮可成功，不在收到第五句前直接拒绝",
+        "完成后resolved，保留5轮内证据"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR13",
+      "area": "失败链与轮数",
+      "title": "内部Control五次不等于五轮",
+      "preconditions": "隔离仿真且每次重试有安全证据",
+      "user_inputs": [
+        "抓取苹果"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "MAX_STEP_ATTEMPTS不改变用户轮次计数",
+        "本轮全失败后failed_user_turns只加1"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR14",
+      "area": "失败链与轮数",
+      "title": "HTTP幂等重发不计轮",
+      "preconditions": "同session/clientRequestID重复POST",
+      "user_inputs": [
+        "左边的",
+        "左边的（相同clientRequestID重发）"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "返回相同Task/turn",
+        "无新R/U调用、无新副作用、无新计数"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR15",
+      "area": "失败链与轮数",
+      "title": "局部推进后下一步失败不重置",
+      "preconditions": "根轮step3歧义，第二轮step3完成但step4失败",
+      "user_inputs": [
+        "左边的"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "root保持原值",
+        "本轮整体未完成失败计数加1；step3标completed"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR16",
+      "area": "失败链与轮数",
+      "title": "取消不关闭Session",
+      "preconditions": "存在waiting_user链",
+      "user_inputs": [
+        "算了"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "链cancelled，未执行后缀取消",
+        "Session可继续新任务，已完成场景不回滚"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR17",
+      "area": "失败链与轮数",
+      "title": "新任务不错误续接",
+      "preconditions": "苹果任务未完成",
+      "user_inputs": [
+        "先不管苹果，新增一个香蕉"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "R识别new_task，旧链superseded",
+        "只处理新增香蕉；若新任务失败则以本轮建新根"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR18",
+      "area": "失败链与轮数",
+      "title": "耗尽后裸补充不得暗开新链",
+      "preconditions": "上链已exhausted",
+      "user_inputs": [
+        "左边的"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "不自动恢复已耗尽任务",
+        "提示重新提交完整任务；无执行"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR19",
+      "area": "R理解与语义证据",
+      "title": "左边的补齐完整抓放",
+      "preconditions": "苹果17/18，托盘19；首轮选苹果歧义",
+      "user_inputs": [
+        "把苹果放托盘",
+        "左边的"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "R→U生成完整原任务；由Python按实际场景选对象",
+        "目的地/关系/数量保持；并非只有left筛选片段"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR20",
+      "area": "R理解与语义证据",
+      "title": "左右修饰与运动方向区分",
+      "preconditions": "两个苹果，原任务向右5cm被澄清",
+      "user_inputs": [
+        "把苹果向右移动5厘米",
+        "左边的苹果"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "source selection增加left，运动仍right/0.05m",
+        "U/运动证据校验不只读取最新短句"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR21",
+      "area": "R理解与语义证据",
+      "title": "距离修订优先于旧值",
+      "preconditions": "原任务向右5cm失败且未提交",
+      "user_inputs": [
+        "改成2厘米"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "仅distance改0.02m",
+        "原5cm标superseded，不与新值同时参与校验"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR22",
+      "area": "R理解与语义证据",
+      "title": "明确修改目标容器",
+      "preconditions": "原托盘任务被澄清",
+      "user_inputs": [
+        "左边的，但放进篮子"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "允许revise目标，但重验篮子唯一和几何",
+        "不改其余未授权操作"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR23",
+      "area": "R理解与语义证据",
+      "title": "用户明确改变任务类型",
+      "preconditions": "旧robot_task未完成",
+      "user_inputs": [
+        "不要机械臂搬了，直接编辑场景放过去"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "只在明确route修改证据后接受",
+        "仍走新route的全套验证"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR24",
+      "area": "R理解与语义证据",
+      "title": "第一轮模型澄清无合法Turn",
+      "preconditions": "MockU返回clarification/null",
+      "user_inputs": [
+        "移动一下",
+        "把左边苹果向右移动2厘米"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "draft.validity=unparsed或partial，不伪造accepted",
+        "第二轮重新通过U输出完整合法任务"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR25",
+      "area": "R理解与语义证据",
+      "title": "R非法JSON或超时",
+      "preconditions": "已有waiting_user链",
+      "user_inputs": [
+        "左边的"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "没有调用业务U/Control",
+        "保存本轮错误，不覆盖原草稿、不进入自循环"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR26",
+      "area": "R理解与语义证据",
+      "title": "R幻觉改变目标",
+      "preconditions": "原basket，用户只说左边的，MockR改tray",
+      "user_inputs": [
+        "左边的"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "guard拒绝无来源的destination修改",
+        "零业务写入"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR27",
+      "area": "R理解与语义证据",
+      "title": "U丢失R已接受的条件",
+      "preconditions": "R明确保留红色，MockU漏color",
+      "user_inputs": [
+        "左边那个红的"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "R→U差异验证阻断",
+        "不能仅因U schema合法即提交"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR28",
+      "area": "R理解与语义证据",
+      "title": "原始场景授权不得漂移",
+      "preconditions": "根任务current，MockR输出original",
+      "user_inputs": [
+        "左边的"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "无用户明确原始场景请求则阻断",
+        "不衍生新场景或重置平台"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR29",
+      "area": "R理解与语义证据",
+      "title": "历史提示注入不改变权限",
+      "preconditions": "历史错误详情带忽略校验文字",
+      "user_inputs": [
+        "继续"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "历史作为数据；policy计数/exec权限不可被模型改写",
+        "R输出禁止字段触发schema错误"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR30",
+      "area": "R理解与语义证据",
+      "title": "预算超限不截断关键条件",
+      "preconditions": "根指令超过上下文预算且含尾部否定",
+      "user_inputs": [
+        "补充细节"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "明确context_budget_exceeded或要求简化",
+        "不截掉否定／单位后执行"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR31",
+      "area": "自动选择",
+      "title": "询问优先不随机",
+      "preconditions": "两个严格匹配苹果，一个托盘",
+      "user_inputs": [
+        "把一个苹果放进托盘"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "询问苹果身份，建立root",
+        "没有自动实例选择、没有执行"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR32",
+      "area": "自动选择",
+      "title": "自动选择一个合法source",
+      "preconditions": "苹果17/18满足全部条件，托盘唯一",
+      "user_inputs": [
+        "把一个苹果放进托盘"
+      ],
+      "prefer_auto_resolve": true,
+      "assertions": [
+        "选择仅来自{17,18}；保存SelectionDecision并公开说明",
+        "后续仍通过规划/几何/执行检查"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR33",
+      "area": "自动选择",
+      "title": "已有明确ID不可改选",
+      "preconditions": "ID17为苹果，ID18另一个苹果",
+      "user_inputs": [
+        "把17号苹果放进托盘"
+      ],
+      "prefer_auto_resolve": true,
+      "assertions": [
+        "始终选17；auto不覆盖显式ID",
+        "ID无效则拒绝而非改18"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR34",
+      "area": "自动选择",
+      "title": "贴图颜色不可验证时沿用回退随机",
+      "preconditions": "两个苹果无可靠颜色标签、实例覆盖证据，贴图颜色不可解析；托盘唯一",
+      "user_inputs": [
+        "把红苹果放进托盘"
+      ],
+      "prefer_auto_resolve": true,
+      "assertions": [
+        "保留原有颜色描述回退，在无颜色证据的两个苹果中可持久化随机选一个",
+        "给出颜色不可验证提示，不声称选中物体实际为红色",
+        "仍经原有 Grounding/规划/执行和安全检查；询问模式 false 仍询问"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR35",
+      "area": "自动选择",
+      "title": "明确颜色证据冲突时不能乱选",
+      "preconditions": "只有绿色苹果，绿色由可靠tag或实例覆盖证据支持；没有颜色未知的候选",
+      "user_inputs": [
+        "把红苹果放进托盘"
+      ],
+      "prefer_auto_resolve": true,
+      "assertions": [
+        "明确颜色冲突的绿色对象不能进入颜色回退池",
+        "没有合格候选则询问/拒绝，零执行"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR36",
+      "area": "自动选择",
+      "title": "多个独立tags需全部满足",
+      "preconditions": "候选分别只满足花纹或无把手",
+      "user_inputs": [
+        "把带花纹且无把手的杯子移过去"
+      ],
+      "prefer_auto_resolve": true,
+      "assertions": [
+        "最高tag交集分不等于满足全部条件",
+        "无严格匹配则不自动选"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR37",
+      "area": "自动选择",
+      "title": "目的地不唯一不随机",
+      "preconditions": "一个苹果两个托盘",
+      "user_inputs": [
+        "把苹果放到托盘"
+      ],
+      "prefer_auto_resolve": true,
+      "assertions": [
+        "首版不自动选destination",
+        "询问托盘身份"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR38",
+      "area": "自动选择",
+      "title": "计数查询不抽样",
+      "preconditions": "四个苹果",
+      "user_inputs": [
+        "有几个苹果"
+      ],
+      "prefer_auto_resolve": true,
+      "assertions": [
+        "结果4而不是1",
+        "无选择随机数、无写入"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR39",
+      "area": "自动选择",
+      "title": "所有保持集合",
+      "preconditions": "三个苹果",
+      "user_inputs": [
+        "把所有苹果改成蓝色"
+      ],
+      "prefer_auto_resolve": true,
+      "assertions": [
+        "目标是3个，不随机一个",
+        "不减少用户数量"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR40",
+      "area": "自动选择",
+      "title": "极值并列不任意破局",
+      "preconditions": "两个苹果同为最左",
+      "user_inputs": [
+        "把最左边苹果放托盘"
+      ],
+      "prefer_auto_resolve": true,
+      "assertions": [
+        "首版保留极值歧义",
+        "未启用任意规则不随机"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR41",
+      "area": "自动选择",
+      "title": "破坏性编辑默认不随机",
+      "preconditions": "两个苹果",
+      "user_inputs": [
+        "删除一个苹果"
+      ],
+      "prefer_auto_resolve": true,
+      "assertions": [
+        "首版remove/replace不走自动选择",
+        "用户明确编号后才允许"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR42",
+      "area": "自动选择",
+      "title": "重试和重启复用选择",
+      "preconditions": "同logical task/step/constraint revision",
+      "user_inputs": [
+        "抓苹果（重试）"
+      ],
+      "prefer_auto_resolve": true,
+      "assertions": [
+        "不同request_id不重抽目标",
+        "保存并恢复同chosen IDs"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR43",
+      "area": "自动选择",
+      "title": "候选顺序不影响seed选择",
+      "preconditions": "对同候选倒序枚举",
+      "user_inputs": [],
+      "prefer_auto_resolve": true,
+      "assertions": [
+        "候选先canonical排序",
+        "相同decision key选择结果相同"
+      ],
+      "validation_layer": "unit",
+      "status": "not_run"
+    },
+    {
+      "id": "FR44",
+      "area": "自动选择",
+      "title": "选择失败不逐个换物体试",
+      "preconditions": "选17后规划拒绝",
+      "user_inputs": [
+        "把一个苹果放托盘"
+      ],
+      "prefer_auto_resolve": true,
+      "assertions": [
+        "记录真正失败并交用户修改",
+        "不自动改选18掩盖规划问题"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR45",
+      "area": "自动选择",
+      "title": "无放回数量",
+      "preconditions": "明确任意两个且契约支持，严格候选四个",
+      "user_inputs": [
+        "任意两个苹果改蓝"
+      ],
+      "prefer_auto_resolve": true,
+      "assertions": [
+        "只选2个不同ID，choice记录可复现",
+        "不重复抽同一个，不改为全部"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR46",
+      "area": "自动选择",
+      "title": "活动链策略不可被模型修改",
+      "preconditions": "ASK链有效",
+      "user_inputs": [
+        "改成自动成功就行"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "自然语言不直接修改服务端flag",
+        "允许建议UI切换，但不得绕过轮数和安全策略"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR47",
+      "area": "部分进度与现场",
+      "title": "成功前缀不得重放",
+      "preconditions": "增加苹果成功、增加托盘成功、抓放歧义、查询not_run",
+      "user_inputs": [
+        "左边的"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "不再新增苹果或托盘",
+        "只恢复失败抓放及原not_run后缀"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR48",
+      "area": "部分进度与现场",
+      "title": "后续失败保留累计Ledger",
+      "preconditions": "上一续接已完成step3，step4安全失败",
+      "user_inputs": [
+        "改成旁边"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "completed step1-3不重放",
+        "只改变尚未完成范围"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR49",
+      "area": "部分进度与现场",
+      "title": "取消不是撤销",
+      "preconditions": "原复合任务前两步已提交",
+      "user_inputs": [
+        "算了"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "已新增物体保留",
+        "仅取消剩余任务并明确告知"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR50",
+      "area": "部分进度与现场",
+      "title": "plan-only不当执行",
+      "preconditions": "execution_enabled=false，抓放只生成计划，后面还有依赖动作",
+      "user_inputs": [
+        "继续"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "原计划不能视为已搬运",
+        "保持plan_not_executed门控，不从预期效果推演Scene"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR51",
+      "area": "部分进度与现场",
+      "title": "当前Scene变化重新核验",
+      "preconditions": "用户在两轮之间改变布局",
+      "user_inputs": [
+        "左边的"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "旧candidate/选择不直接使用",
+        "在当前Scene重新绑定，无法证明一致则澄清"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR52",
+      "area": "部分进度与现场",
+      "title": "Scene分支变了",
+      "preconditions": "原root在sceneA，当前为sceneB",
+      "user_inputs": [
+        "继续刚才的"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "不套用旧对象ID",
+        "要求明确基线／新任务"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR53",
+      "area": "部分进度与现场",
+      "title": "原对象已删除",
+      "preconditions": "自动选中17后17被删除",
+      "user_inputs": [
+        "继续"
+      ],
+      "prefer_auto_resolve": true,
+      "assertions": [
+        "不能悄悄改选18",
+        "给出目标失效说明"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR54",
+      "area": "部分进度与现场",
+      "title": "OLS版本在模型调用期间变化",
+      "preconditions": "R使用目录revA，U/编辑时revB",
+      "user_inputs": [
+        "继续"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "执行前发现版本不一致并阻断",
+        "不绑定旧key到新资产"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR55",
+      "area": "执行与事务",
+      "title": "ACK丢失后禁止续接写入",
+      "preconditions": "Gateway commit有可能已落地",
+      "user_inputs": [
+        "再来一次"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "BLOCKED_RECONCILIATION",
+        "先查询既有transaction，不能新发同编辑"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR56",
+      "area": "执行与事务",
+      "title": "物理部分动作不重放",
+      "preconditions": "Control已approach/grasp，place失败且持物未知",
+      "user_inputs": [
+        "换个位置试试"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "普通对话不能宣告empty或重置机械臂",
+        "获取权威状态之前零派发"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR57",
+      "area": "执行与事务",
+      "title": "仿真丢弃有证据才可重规划",
+      "preconditions": "独立simulation确认已清理scratch，Scene未改，无真实动作",
+      "user_inputs": [
+        "放到托盘旁边"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "确认环境和安全证据后R可改目标",
+        "重走当前完整校验，不能仅凭错误码放行"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR58",
+      "area": "执行与事务",
+      "title": "旧错误码不证明无动作",
+      "preconditions": "同RETRYABLE code但execution_environment=unknown",
+      "user_inputs": [],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "不按现有五次循环盲目重试",
+        "进入blocked并保留日志"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR59",
+      "area": "执行与事务",
+      "title": "成功写回后发布失败",
+      "preconditions": "场景commit已确认、产物写入失败",
+      "user_inputs": [
+        "继续"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "保留已提交事实，禁止重做动作",
+        "先修发布／checkpoint"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR60",
+      "area": "执行与事务",
+      "title": "释放租约失败",
+      "preconditions": "业务处理后unlock不明",
+      "user_inputs": [
+        "继续"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "active chain阻断变更",
+        "不等待用户期间继续持有逻辑owner或重复加锁执行"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR61",
+      "area": "执行与事务",
+      "title": "Control写回PhysicalProperties保持",
+      "preconditions": "最新Scene含未知扩展及PhysicalProperties",
+      "user_inputs": [
+        "改苹果颜色后续接"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "非目标组件逐字/结构保持",
+        "无记忆功能引起的组件丢失"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR62",
+      "area": "Web与交付",
+      "title": "同Session新TaskID续接",
+      "preconditions": "首Task终结且租约释放",
+      "user_inputs": [
+        "左边的"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "新TaskID、新child request，但同root链",
+        "不是让首Task持续运行等用户"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR63",
+      "area": "Web与交付",
+      "title": "跨Session隔离",
+      "preconditions": "两个用户会话同对象语义",
+      "user_inputs": [
+        "左边的"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "不能读取另一Session的root/question/选择",
+        "外部source_turn_id越界拒绝"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR64",
+      "area": "Web与交付",
+      "title": "模型返回期间并发改变chain",
+      "preconditions": "同时取消或明确开新任务",
+      "user_inputs": [
+        "左边的"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "CAS检测chain revision冲突",
+        "旧R输出不执行"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR65",
+      "area": "Web与交付",
+      "title": "记忆关闭快速回退",
+      "preconditions": "conversation_recovery.enabled=false",
+      "user_inputs": [
+        "原支持的正常命令"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "不调用R、不做续接改写",
+        "原功能与结果保持，已记录审计不丢失"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR66",
+      "area": "Web与交付",
+      "title": "发布策略不被上下文绕过",
+      "preconditions": "平台换装禁用",
+      "user_inputs": [
+        "把机械臂换Piper",
+        "就按刚才的换"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "仍capability_unsupported",
+        "没有新平台提交"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR67",
+      "area": "Web与交付",
+      "title": "公开服务单臂门控保持",
+      "preconditions": "当前public service拒绝双臂",
+      "user_inputs": [
+        "两只手抓两个苹果",
+        "左手那个"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "R不能用上下文绕过control_dual_arm_not_ready",
+        "底层独立双臂测试不受重写"
+      ],
+      "validation_layer": "mock_integration",
+      "status": "not_run"
+    },
+    {
+      "id": "FR68",
+      "area": "Web与交付",
+      "title": "真实Qwen与仿真分层验收",
+      "preconditions": "固定当前版本组合，先execution disabled",
+      "user_inputs": [
+        "两苹果一托盘→左边的",
+        "改成篮子",
+        "查询和取消"
+      ],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "真实R/U结果单独记录token/route/IDs",
+        "Mock通过不写成真实Control通过"
+      ],
+      "validation_layer": "real_qwen",
+      "status": "not_run"
+    },
+    {
+      "id": "FR69",
+      "area": "Web与交付",
+      "title": "独立wheel与版本矩阵",
+      "preconditions": "干净checkout、最小元数据fixture",
+      "user_inputs": [],
+      "prefer_auto_resolve": false,
+      "assertions": [
+        "Python3.11/3.12分别报告；缺资源不掩盖核心测试",
+        "wheel内含新Prompt/Schema，源码目录外smoke"
+      ],
+      "validation_layer": "environment",
+      "status": "not_run"
+    }
+  ]
+}

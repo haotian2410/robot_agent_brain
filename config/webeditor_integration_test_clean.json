@@ -1,0 +1,36 @@
+{
+  "provider": "qwen",
+  "planner": "qwen",
+  "base_url": "http://127.0.0.1:8080/v1",
+  "model": "/home/cscvlab/models/qwen3.8-27b/Qwen3.8-27B-UD-Q4_K_M.gguf",
+  "asset_library_root": "/home/cscvlab/lht/webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data",
+  "asset_geometry_cache": "/home/cscvlab/lht/robot_agent_brain/var/webeditor/geometry_cache.json",
+  "asset_category_index": "/home/cscvlab/lht/robot_agent_brain/config/webeditor_categories.json",
+  "semantic_aliases": "/home/cscvlab/lht/robot_agent_brain/config/webeditor_aliases.json",
+  "defaults": "/home/cscvlab/lht/robot_agent_brain/config/final_models_defaults.json",
+  "library_ref_prefix": "$LIBRARY_SERVER/",
+  "default_scene": "/home/cscvlab/lht/webeditor_runtime/ObjectLibraryServer-1.0.5-rel/data/scenes/1/ur5e_table_empty.json",
+  "default_table_metadata_ref": "$LIBRARY_SERVER/29",
+  "default_robot_metadata_ref": "$LIBRARY_SERVER/1",
+  "default_robot_driver": {
+    "joint_sequence": ["shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint", "wrist_1_joint", "wrist_2_joint", "wrist_3_joint"],
+    "joint_limits": {"shoulder_pan_joint": [-6.28319, 6.28319], "shoulder_lift_joint": [-6.28319, 6.28319], "elbow_joint": [-3.1415, 3.1415], "wrist_1_joint": [-6.28319, 6.28319], "wrist_2_joint": [-6.28319, 6.28319], "wrist_3_joint": [-6.28319, 6.28319]},
+    "initial_joint_positions_rad": {"shoulder_pan_joint": 0.0, "shoulder_lift_joint": -2.094395, "elbow_joint": 1.570796, "wrist_1_joint": -1.5707963, "wrist_2_joint": -1.5707963, "wrist_3_joint": 0.0},
+    "available_connect_joints": ["wrist_3_joint"]
+  },
+  "robot": "ur5e",
+  "scene_platform_object_ids": [0,1,2,3,4,5,6,7],
+  "editor_scene_manifests": {
+    "ur5e_table_empty": [0,1,2,3,4,5,6,7],
+    "ur5e_table_apple": [0,1,2,3,4,5,6,8],
+    "ur5e_table_sorting": [0,1,2,3,4,5,6,14],
+    "ur5e_table_cabinet": [0,1,2,3,4,5,6,10],
+    "piper_r_table_twist": [0,1,2,3,4,5,6,7],
+    "ur5e_table_push_pull": [0,1,2,3,4,5,6,7]
+  },
+  "scene_id_bits": 32,
+  "vision": true,
+  "debug": true,
+  "allow_scene_reset": true,
+  "output_dir": "/home/cscvlab/lht/var/integration-flow-20261024final7/brain-tasks"
+}

@@ -8,6 +8,7 @@ from robot_agent_brain.adapters.final_models_library import FinalModelsLibraryAd
 from robot_agent_brain.adapters.ols_robot_assembly import OlsRobotAssemblyAdapter
 from robot_agent_brain.contracts.scene import SceneConfig, SceneSnapshot
 from robot_agent_brain.session.brain_session import BrainSession
+from robot_agent_brain.scene.component_access import SceneIndex
 
 
 OLS_DATA = Path(os.environ["ROBOT_BRAIN_OLS_DATA_ROOT"]) if os.environ.get("ROBOT_BRAIN_OLS_DATA_ROOT") else None
@@ -100,3 +101,38 @@ def test_camera_only_rebind_does_not_reposition_arm_or_remove_pedestal(adapter):
     assert after.keys() == before.keys()
     assert next(item for item in after[2].components if item.component_type == "Transform").model_dump(mode="json") == next(item for item in before[2].components if item.component_type == "Transform").model_dump(mode="json")
     assert next(item for item in after[6].components if item.component_type == "MetadataRef").properties["path"] == "$LIBRARY_SERVER/4"
+
+
+def test_robot_collision_profile_is_carried_into_scene_for_control(adapter):
+    """A scene authored by WebEditor without RobotModelRef gets the
+    robot-specific collision hint before it reaches the control bridge."""
+    raw = {
+        "scene_schema_version": 1, "scene_id": 77, "scene_version": 1,
+        "scene_name": "nero_fixture", "objects": [{
+            "object_id_in_scene": 2, "object_name_in_scene": "object_2",
+            "components": [
+                {"component_type": "Transform", "properties": {
+                    "position": [0, 0, 0], "quaternion_xyzw": [0, 0, 0, 1],
+                    "scale": [1, 1, 1], "parent": None}},
+                {"component_type": "MetadataRef", "properties": {
+                    "path": "$LIBRARY_SERVER/9", "type": "robot"}},
+                {"component_type": "RobotDriver", "properties": {
+                    "joint_sequence": ["joint1"], "joint_limits": {"joint1": [-1, 1]},
+                    "role": "arm"}},
+                {"component_type": "Semantic", "properties": {
+                    "semantic_name": "Nero机械臂", "category": "robot", "support": None}},
+            ],
+        }],
+    }
+    scene = SceneConfig.model_validate(raw)
+    scene._raw_document = raw
+    configured = OlsRobotAssemblyAdapter(adapter.assets, {
+        "robot:9": {"collision_geometry": {"link_overrides": {
+            "link5": {"max_convex_hulls": 32, "max_vertices": 256,
+                       "max_input_faces": 6000, "threshold": 0.03}}}}
+    })
+    candidate, info = configured.ensure_scene_robot_config(scene)
+    assert info["changed"] is True
+    ref = SceneIndex(candidate).component(2, "RobotModelRef")
+    assert ref is not None
+    assert ref.properties["collision_geometry"]["link_overrides"]["link5"]["max_convex_hulls"] == 32
