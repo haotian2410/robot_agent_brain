@@ -22,13 +22,18 @@ from ..ports.execution import ExecutionOutcome, ExecutionStep
 
 
 def _link_modules(link_root: str | None):
-    try:
-        from link import error_descriptions, feedback, runner, workspace
-    except ImportError:
-        if link_root is None:
-            raise
-        sys.path.insert(0, str(Path(link_root).resolve()))
-        from link import error_descriptions, feedback, runner, workspace
+    # The configured bridge checkout is authoritative.  Importing an already
+    # installed ``link`` package first can silently bind an older integrated
+    # copy, so a new bridge fix appears ineffective until the process is
+    # restarted (and can still be wrong after restart).  Put the configured
+    # root first for every run; only fall back to the environment package when
+    # no root was configured.
+    if link_root is not None:
+        root = str(Path(link_root).resolve())
+        if root in sys.path:
+            sys.path.remove(root)
+        sys.path.insert(0, root)
+    from link import error_descriptions, feedback, runner, workspace
     return error_descriptions, feedback, runner, workspace
 
 
@@ -59,6 +64,85 @@ def unique_named_document(document: dict) -> dict:
             reserved.add(candidate)
             item["object_name_in_scene"] = candidate
     return renamed
+
+
+def restore_runtime_state_names(report: dict, name_mapping: list[dict]) -> None:
+    """Translate control runtime names back to the submitted Scene names.
+
+    The control runner is deliberately given ASCII/unique transport names.  Its
+    measured ``final_state`` uses those names too, including the held object's
+    ``gripper.object_id`` and the keys of ``objects``.  The bridge previously
+    restored names only in ``final_scene.json``; consequently a successful grasp
+    of a non-ASCII or duplicate-named object was rejected as an incomplete
+    recoverable state.  Normalize the runtime report before feedback validation,
+    without changing the control report on disk.
+    """
+    if not isinstance(report, dict):
+        return
+    transport_to_original = {
+        row.get("transport_name"): row.get("source_name", row.get("original_name"))
+        for row in name_mapping
+        if isinstance(row, dict)
+        and isinstance(row.get("transport_name"), str)
+        and isinstance(row.get("original_name"), str)
+    }
+    final = report.get("final_state")
+    if not isinstance(final, dict):
+        return
+    gripper = final.get("gripper")
+    if isinstance(gripper, dict) and isinstance(gripper.get("object_id"), str):
+        gripper["object_id"] = transport_to_original.get(
+            gripper["object_id"], gripper["object_id"])
+    objects = final.get("objects")
+    if isinstance(objects, dict):
+        restored = {}
+        for key, value in objects.items():
+            restored[transport_to_original.get(key, key)] = value
+        final["objects"] = restored
+
+
+def restore_final_scene_names(path: Path, name_mapping: list[dict]) -> None:
+    """Restore transport names before the immutable final-scene check.
+
+    The control runner receives ASCII/unique names, and therefore writes those
+    names into ``snapshots/final_scene.json`` as well as ``final_state``.  The
+    validator compares that snapshot with the submitted Scene, so translating
+    only after ``feedback.summarize`` is too late: a valid run is rejected as
+    an immutable component change.  Keep the mapping at this bridge boundary;
+    IDs and all other authored fields remain untouched.
+    """
+    if not path.is_file():
+        return
+    transport_to_original = {
+        row.get("transport_name"): row.get("original_name")
+        for row in name_mapping
+        if isinstance(row, dict)
+        and isinstance(row.get("transport_name"), str)
+        and isinstance(row.get("original_name"), str)
+    }
+    if not transport_to_original:
+        return
+    document = json.loads(path.read_text(encoding="utf-8"))
+    # Object IDs are the stable identity.  A session may already contain a
+    # transport name from an earlier round, while the control snapshot may use
+    # its semantic name (or the reverse).  Prefer the submitted Scene's name
+    # carried in the mapping row, falling back to the name map for old rows.
+    id_to_scene_name = {
+        row.get("object_id"): row.get("source_name", row.get("original_name"))
+        for row in name_mapping
+        if isinstance(row, dict) and isinstance(row.get("object_id"), int)
+        and isinstance(row.get("original_name"), str)
+    }
+    for item in document.get("objects") or []:
+        if not isinstance(item, dict):
+            continue
+        object_id = item.get("object_id_in_scene")
+        if object_id in id_to_scene_name:
+            item["object_name_in_scene"] = id_to_scene_name[object_id]
+        elif isinstance(item.get("object_name_in_scene"), str):
+            item["object_name_in_scene"] = transport_to_original.get(
+                item["object_name_in_scene"], item["object_name_in_scene"])
+    path.write_text(json.dumps(document, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 class SubprocessExecutionAdapter:
@@ -108,6 +192,7 @@ class SubprocessExecutionAdapter:
                 request_id=commands.request_id)
             name_mapping = [{"object_id": original["object_id_in_scene"],
                              "original_name": original["object_name_in_scene"],
+                             "source_name": original["object_name_in_scene"],
                              "transport_name": transported["object_name_in_scene"]}
                             for original, transported in zip(source_header["objects"], header["objects"])]
             (ws.root / "object_name_mapping.json").write_text(
@@ -131,6 +216,19 @@ class SubprocessExecutionAdapter:
         # document carries those names: ``workspace.build`` returns the stamped
         # task document, which would reduce every moved object to nothing.
         with span("control.feedback_parse", component="bridge", source="adapters/subprocess_execution.py:SubprocessExecutionAdapter.run"):
+            # ``header`` is the unique ASCII transport document handed to the
+            # control process.  Feedback reduction must therefore use those
+            # names as well; restoring directly to the user's display names
+            # here makes the active robot/base name differ from ``header`` and
+            # causes complete_state() to report a missing final pose.  The
+            # public final_scene is restored separately below.
+            feedback_mapping = [dict(row, original_name=row.get("transport_name"),
+                                     source_name=row.get("transport_name"))
+                                for row in name_mapping]
+            restore_runtime_state_names(result.report, feedback_mapping)
+            final_scene_path = getattr(result, "final_scene_path", None)
+            if final_scene_path is not None:
+                restore_final_scene_names(final_scene_path, name_mapping)
             summary = feedback.summarize(result, header, describe)
         if summary.get("final_scene") is not None:
             original_names = {item["object_id_in_scene"]: item["object_name_in_scene"]

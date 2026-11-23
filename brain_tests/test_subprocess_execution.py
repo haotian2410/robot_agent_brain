@@ -11,7 +11,8 @@ from types import SimpleNamespace
 import pytest
 
 from robot_agent_brain.adapters import subprocess_execution
-from robot_agent_brain.adapters.subprocess_execution import SubprocessExecutionAdapter
+from robot_agent_brain.adapters.subprocess_execution import (SubprocessExecutionAdapter,
+                                                               restore_runtime_state_names)
 from robot_agent_brain.contracts.commands_atomic import AtomicCommand, AtomicCommandsFile
 
 SCENE = {"scene_id": 3, "scene_version": 7, "objects": [
@@ -104,6 +105,19 @@ def test_transport_name_is_restored_in_verified_final_scene(tmp_path, monkeypatc
     assert outcome.final_scene['objects'][0]['object_name_in_scene'] == '苹果'
     assert source['objects'][0]['object_name_in_scene'] == '苹果'
     assert (tmp_path/'workspaces/object_name_mapping.json').is_file()
+
+
+def test_transport_names_are_restored_in_runtime_grasp_state():
+    report = {"final_state": {
+        "objects": {"object_7": {"position": [0.1, 0.2, 0.3],
+                                   "quaternion_xyzw": [0., 0., 0., 1.]}},
+        "gripper": {"known": True, "holding": True, "object_id": "object_7"},
+    }}
+    restore_runtime_state_names(report, [{"object_id": 7,
+                                          "original_name": "苹果",
+                                          "transport_name": "object_7"}])
+    assert report["final_state"]["gripper"]["object_id"] == "苹果"
+    assert "苹果" in report["final_state"]["objects"]
 
 
 @pytest.mark.parametrize("overrides", [{"scene_id": 4}, {"scene_version": 8}])
