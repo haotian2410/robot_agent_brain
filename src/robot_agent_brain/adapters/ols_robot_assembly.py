@@ -252,6 +252,43 @@ class OlsRobotAssemblyAdapter:
                 # the same OLS metadata; camera_id selection remains separate.
                 "camera_asset": next(iter(camera_names)) if len(camera_names) == 1 else None}
 
+    def execution_context(self, scene: SceneConfig) -> dict:
+        """Return the complete single-arm selection for the control bridge.
+
+        This is descriptive metadata only: IK, collision and reachability stay
+        in the control process.  It is nevertheless part of every Brain command
+        request so an adapter cannot silently fall back to its configured UR5e.
+        """
+        from ..scene.component_access import SceneIndex
+        index = SceneIndex(scene)
+        classified = self.classify_scene(scene)
+        arms = classified.get("arm", [])
+        if len(arms) != 1:
+            raise ValueError("robot_scene_config_missing: expected exactly one active arm")
+        arm_id, arm = arms[0]
+        driver = index.robot_driver(arm_id)
+        if driver is None or not driver.joint_sequence:
+            raise ValueError("robot_driver_missing")
+        binding = self.scene_binding(scene)
+        if not binding.get("robot_asset"):
+            raise ValueError("robot_asset_unresolved")
+        attachment = None
+        for object_id, _asset in classified.get("gripper", []):
+            component = index.component(object_id, "RobotAttachment")
+            if component is not None:
+                attachment = {"object_id": object_id, **dict(component.properties)}
+                break
+        return {
+            "arm_usage": "single_arm",
+            "robot_asset": binding["robot_asset"],
+            "robot_object_id": arm_id,
+            "gripper_asset": binding.get("gripper_asset"),
+            "camera_asset": binding.get("camera_asset"),
+            "robot_driver": driver.model_dump(mode="json"),
+            "robot_attachment": attachment,
+            "ols_revision": self.revision,
+        }
+
     def platform_object_ids(self, scene: SceneConfig, previous=None) -> set[int]:
         """Return the platform ids that survive an assembly replacement.
 

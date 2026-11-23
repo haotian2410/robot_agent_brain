@@ -1612,7 +1612,12 @@ class AgentService:
         status["control_source"] = "Auto_Robot_demo"
         status["arm_modes"] = ["single_arm"]
         status["ols_catalog_revision"] = self.app.pipeline.asset_catalog.revision if self.app.pipeline.asset_catalog else None
-        status["switchable_assets"] = self.app.robot_assembly.catalog()
+        # Expose the same profile availability that the planner advertises.
+        # Calling catalog() without the registry makes every arm look
+        # unregistered even though the single-arm control path supports the
+        # OLS assets (ur5/ur10/nero/piper).
+        status["switchable_assets"] = self.app.robot_assembly.catalog(
+            self.app.registered_profile_ids)
         status["registered_profiles"] = sorted(self.app.registered_profile_ids)
         status["browser_id"] = None
         status["tasks"] = {"active_task_id": None, "queued": self.queue.qsize()}
@@ -2015,7 +2020,8 @@ def create_http_app(service):
         return web.json_response({
             "protocol": PROTOCOL_VERSION,
             "ols_catalog_revision": service.app.pipeline.asset_catalog.revision if service.app.pipeline.asset_catalog else None,
-            "switchable_assets": service.app.robot_assembly.catalog(),
+            "switchable_assets": service.app.robot_assembly.catalog(
+                service.app.registered_profile_ids),
             "registered_profiles": sorted(service.app.registered_profile_ids),
             "release_policy": service.config.release_policy.model_dump(mode="json"),
             "capabilities": ["atomic_commit", "sub_versioned_scene_identity", "initial_platform_binding",

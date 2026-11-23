@@ -17,7 +17,7 @@ from .scene.layout_geometry import SceneLayoutGeometryRegistry
 from .adapters.local_scene_platform import LocalScenePlatform
 from .adapters.scene_file_codec import SceneFileCodec
 from .adapters.artifact_writer import ArtifactWriter, safe_identifier
-from .adapters.ols_robot_assembly import OlsRobotAssemblyAdapter
+from .adapters.ols_robot_assembly import OlsRobotAssemblyAdapter, normalize_robot_platform_name
 from .contracts.run_report import BrainRunReport
 from .contracts.turn import TurnStatus
 from .errors import BrainIssue, BrainError
@@ -28,16 +28,20 @@ from .diagnostics import configuration_summary, fingerprint, redact
 class BrainApplication:
     def __init__(self, config=None, *, provider=None, platform_factory=LocalScenePlatform):
         self.config = config or BrainConfig.load()
-        # The legacy single-arm deployment is an explicit built-in UR5e
-        # profile.  It is not inferred from an arbitrary scene: it is enabled
-        # only when the configured planning backend is the fixed ``ur5e``
-        # backend.  Other OLS platforms remain display/query-only until a
-        # complete RobotProfile is supplied.
+        # RobotProfile remains the explicit dual-arm/deployment manifest.  For
+        # single-arm execution the control runtime owns IK and collision, so
+        # Brain must advertise every OLS arm asset instead of treating the
+        # configured default as the only executable platform.
         self.registered_profile_ids = set(self.config.robot_profiles.profiles)
-        if self.config.robot == "ur5e":
-            self.registered_profile_ids.add("ur5e")
         self.assets = self.config.load_assets()
         self.robot_assembly = OlsRobotAssemblyAdapter(self.assets, self.config.robot_collision_profiles)
+        supported_single_arm = {"ur5", "ur10", "nero", "piper"}
+        self.registered_profile_ids.update(
+            item["semantic_name"] for item in self.robot_assembly.catalog()
+            if item.get("role") == "arm"
+            and normalize_robot_platform_name(item.get("semantic_name")) in supported_single_arm)
+        if self.config.robot:
+            self.registered_profile_ids.add(self.config.robot)
         self.defaults = self.config.load_defaults()
         aliases = (self.config.load_semantic_aliases() if self.config.semantic_aliases is not None
                    else getattr(getattr(self.assets, "metadata", None), "aliases", {}))

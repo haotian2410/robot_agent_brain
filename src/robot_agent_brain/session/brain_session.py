@@ -893,6 +893,23 @@ class BrainSession:
             if result.session_action is None or result.session_action.action not in {"resume", "close"}:
                 raise ValueError("session_paused")
         if result.commands is not None:
+            # Atomic commands are scene-bound.  Attach the resolved OLS arm
+            # assembly at the last Brain-owned boundary so the bridge/control
+            # path cannot silently use its default UR5e configuration.
+            if (getattr(result.commands, "schema_version", None) == "2.0"
+                    and self.robot_assembly_adapter is not None and self.scene is not None):
+                # Lightweight semantic fixtures may deliberately omit a robot;
+                # preserve their historical command-only behavior.  A real web
+                # execution is gated earlier by the platform capability check,
+                # so an initialized platform never silently loses this context.
+                try:
+                    runtime_context = self.robot_assembly_adapter.execution_context(self.scene)
+                except ValueError:
+                    runtime_context = None
+                if runtime_context is not None:
+                    result = result.model_copy(update={
+                        "commands": result.commands.model_copy(update={"runtime_context": runtime_context})
+                    })
             if request_id in self.exported_commands or request_id in self.dispatched_requests:
                 raise ValueError("request_id_reused")
             self.exported_commands[request_id] = canonical_commands(result.commands)

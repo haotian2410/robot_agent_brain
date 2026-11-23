@@ -173,9 +173,9 @@
   "execution_link_root": "/home/cscvlab/lht/robot_agent_link",
   "execution_workspace_root": "/home/cscvlab/lht/robot_agent_workspace",
   "release_policy": {
-    "version": "v0.2",
-    "dynamic_platform_rebind": false,
+    "version": "v0.3",
+    "dynamic_platform_rebind": true,
     "runtime_robot_setup_change": false,
-    "nl_initial_platform_selection": false
+    "nl_initial_platform_selection": true
   }
 }

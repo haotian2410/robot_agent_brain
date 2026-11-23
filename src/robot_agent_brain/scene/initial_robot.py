@@ -3,13 +3,22 @@ import re
 
 
 def split_initial_robot(instruction):
-    match = re.match(r'^\s*(?:使用|用)\s*([A-Za-z][A-Za-z0-9_-]*)(?:\s*机械臂)?\s*(?=把|将|来|在|增加|生成|抓|拿|放)', instruction)
+    # Both forms are initialization qualifiers when the session is still an
+    # empty bootstrap.  ``设置为`` must not be treated as a runtime platform
+    # switch; the application applies the same empty-session guard as the
+    # traditional ``使用`` form.
+    match = re.match(
+        r'^\s*(?:(?:使用|用)\s*([A-Za-z][A-Za-z0-9_-]*)|'
+        r'(?:把|将)\s*机械臂\s*(?:设置为|设为|切换为)\s*([A-Za-z][A-Za-z0-9_-]*))'
+        r'(?:\s*机械臂)?\s*(?:[，,:：]\s*(?:然后|再|接着)?\s*)?'
+        r'(?=把|将|来|在|增加|生成|抓|拿|放|先)', instruction)
     if match is None:
         return None, instruction
+    name = match.group(1) or match.group(2)
     remainder = instruction[match.end():].strip()
     if remainder.startswith('来'):
         remainder = remainder[1:].strip()
-    return match.group(1).casefold(), remainder
+    return name.casefold(), remainder
 
 
 def recover_initial_robot_name(session, command, assembly, max_failed_turns=5):

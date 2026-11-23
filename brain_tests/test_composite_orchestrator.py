@@ -353,8 +353,9 @@ def test_a_run_that_failed_stops_the_walk_and_writes_nothing_back(tmp_path):
     assert result["outcome"] == "failed" and commits(walked.browser) == 1
     # A collision refusal is a decision about the plan, not a coin flip, so it is not repeated.
     assert len(runner.calls) == 1 and records[1]["attempts"] == 1
-    # A run that came back confirmed is a known world, not a quarantined one.
-    assert walked.binding["uncertain"] and walked.session.sync_state == "unknown"
+    # Failed execution is discarded at the Brain boundary; the session remains
+    # synchronized and can accept a fresh task without quarantine.
+    assert not walked.binding["uncertain"] and walked.session.sync_state == "synchronized"
 
 
 @pytest.mark.parametrize("code", ["GRASP_NOT_CONFIRMED", "GRASP_FAILED", "PLACEMENT_HEIGHT_SEARCH_FAILED",
@@ -368,7 +369,7 @@ def test_failed_skill_without_actual_state_is_not_replayed(code, tmp_path):
     assert states(result) == ["completed", "stopped", "not_run"]
     assert len(runner.calls) == 1 and records[1]["attempts"] == 1
     assert result["outcome"] == "failed" and commits(walked.browser) == 1
-    assert walked.binding["uncertain"] and walked.session.sync_state == "unknown"
+    assert not walked.binding["uncertain"] and walked.session.sync_state == "synchronized"
 
 
 def test_unverified_grasp_failure_preserves_reason_without_retry(tmp_path):

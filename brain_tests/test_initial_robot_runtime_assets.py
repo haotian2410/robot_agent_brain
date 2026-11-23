@@ -6,10 +6,20 @@ from robot_agent_brain.application import BrainApplication
 from robot_agent_brain.config import BrainConfig
 from robot_agent_brain.contracts.task_intent import TaskIntent, TaskEntity, Operation
 from robot_agent_brain.contracts.turn import BrainTurn
+from robot_agent_brain.scene.initial_robot import split_initial_robot
 
 
-@pytest.mark.parametrize('name', ['ur10', 'piper'])
-def test_initial_arm_bootstrap_keeps_default_accessories(tmp_path, name):
+@pytest.mark.parametrize("instruction", [
+    "使用 UR10，把苹果放进篮子里",
+    "把机械臂设置为 UR10，然后把苹果放进篮子里",
+])
+def test_initial_robot_language_forms_are_bootstrap_qualifiers(instruction):
+    assert split_initial_robot(instruction) == ("ur10", "把苹果放进篮子里")
+
+
+@pytest.mark.parametrize('name', ['ur5', 'ur10', 'nero', 'piper'])
+@pytest.mark.parametrize('form', ['use', 'set'])
+def test_initial_arm_bootstrap_keeps_default_accessories(tmp_path, name, form):
     path = os.environ.get('ROBOT_BRAIN_RUNTIME_CONFIG')
     if not path:
         pytest.skip('set ROBOT_BRAIN_RUNTIME_CONFIG for installed OLS verification')
@@ -27,7 +37,10 @@ def test_initial_arm_bootstrap_keeps_default_accessories(tmp_path, name):
     invalid = app.handle('使用 unknown_arm 把苹果放到篮子里', session_id='initial')
     assert invalid.run_status != 'success'
     assert app.get_session('initial').scene is None
-    report = app.handle(f'使用 {name} 把苹果放到篮子里', session_id='initial')
+    instruction = (f'使用 {name}，把苹果放到篮子里'
+                   if form == 'use'
+                   else f'把机械臂设置为 {name}，然后把苹果放到篮子里')
+    report = app.handle(instruction, session_id='initial')
     assert report.run_status == 'success', report.error
     session = app.get_session('initial')
     assert session.robot_asset == name
@@ -40,8 +53,12 @@ def test_initial_arm_bootstrap_keeps_default_accessories(tmp_path, name):
     mount = SceneIndex(session.scene).component(gripper_id, 'RobotAttachment').properties['transform']
     assert mount['position'] == arm_asset.driver['position'][0]
     assert mount['quaternion_xyzw'] == arm_asset.driver['quaternion_xyzw'][0]
+    exported = next(iter(session.exported_commands.values()))
+    assert exported["runtime_context"]["robot_asset"] == name
+    assert exported["runtime_context"]["arm_usage"] == "single_arm"
+    assert exported["runtime_context"]["robot_object_id"] == assembly['arm'][0][0]
     before = session.scene.raw_document()
-    other = 'piper' if name == 'ur10' else 'ur10'
+    other = 'piper' if name != 'piper' else 'ur10'
     rejected = app.handle(f'使用 {other} 把苹果放到篮子里', session_id='initial')
     assert rejected.error.code == 'robot_initialization_requires_empty_session'
     assert session.scene.raw_document() == before

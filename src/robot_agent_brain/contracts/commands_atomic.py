@@ -210,6 +210,12 @@ class AtomicCommandsFile(StrictModel):
     scene_id: SceneId
     scene_version: int = Field(strict=True, ge=0)
     commands: list[AtomicCommand] = Field(min_length=1)
+    # Brain/bridge context for selecting the robot assembled in the Scene.
+    # The control runner may ignore this metadata because it derives the
+    # concrete kinematic model from the scene document, but retaining it in the
+    # request makes configuration loss observable and prevents a fixed UR5e
+    # fallback in downstream adapters.
+    runtime_context: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def unique_command_ids(self):
