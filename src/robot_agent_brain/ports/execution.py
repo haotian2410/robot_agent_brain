@@ -42,6 +42,7 @@ class ExecutionOutcome:
     state_verified: bool = False
     no_effect_verified: bool = False
     holding_object: int | None = None
+    execution_checkpoint: dict | None = None
     traj_path: str | None = None
     final_scene: dict | None = None
     final_scene_path: str | None = None

@@ -31,7 +31,7 @@ if "%BRAIN_PORT%"=="" set "BRAIN_PORT=8500"
 if "%BRAIN_CONFIG%"=="" set "BRAIN_CONFIG=%ROOT_DIR%config\webeditor_local.json"
 if "%BRAIN_GATEWAY_URL%"=="" set "BRAIN_GATEWAY_URL=http://127.0.0.1:8099"
 if "%BRAIN_OLS_URL%"=="" set "BRAIN_OLS_URL=http://127.0.0.1:8000"
-if "%BRAIN_JOINT_INVENTORY%"=="" set "BRAIN_JOINT_INVENTORY=%ROOT_DIR%var\webeditor\joint_inventory.json"
+if "%BRAIN_JOINT_INVENTORY%"=="" set "BRAIN_JOINT_INVENTORY=%ROOT_DIR%var\webeditor\ols_latest_joint_inventory.json"
 if "%BRAIN_CAMERA_ID%"=="" set "BRAIN_CAMERA_ID=5"
 if "%BRAIN_OLS_MANIFEST%"=="" set "BRAIN_OLS_MANIFEST=%ROOT_DIR%config\ols_1_0_8_latest_manifest.json"
 

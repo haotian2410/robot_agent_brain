@@ -35,6 +35,7 @@ class BrainSession:
         self.sync_state = "synchronized"
         self.session_phase = "setup"
         self.holding_object = None
+        self.execution_checkpoint = None
         self.robot_setup = None
         self.robot_setup_revision = 0
         self.platform_rebind_revision = 0
@@ -92,6 +93,7 @@ class BrainSession:
         self.session_phase = "setup"
         self.dialogue = DialogueState()
         self.holding_object = None
+        self.execution_checkpoint = None
         # A generic import is not proof that the old deployed bindings still
         # apply. Restore/configuration paths must explicitly supply them again.
         self.robot_setup = None
@@ -674,6 +676,7 @@ class BrainSession:
         self.robot_setup_revision = revision
         self.arm_states = initial
         self.holding_object = None
+        self.execution_checkpoint = None
         self.platform_object_ids = (set(self.platform_object_ids or ()) - {self.profile_object_map[i] for i in current_profile.robot_object_ids}) | prepared.robot_object_ids
         self.profile_object_map = dict(prepared.template_id_map)
         self._invalidate_plans()
@@ -907,6 +910,10 @@ class BrainSession:
                 except ValueError:
                     runtime_context = None
                 if runtime_context is not None:
+                    from .execution_checkpoint import for_dispatch
+                    checkpoint = for_dispatch(self)
+                    if checkpoint is not None:
+                        runtime_context['execution_checkpoint'] = checkpoint
                     result = result.model_copy(update={
                         "commands": result.commands.model_copy(update={"runtime_context": runtime_context})
                     })
@@ -957,7 +964,7 @@ class BrainSession:
         self.pending_execution_request = commands.request_id
         self.dispatched_requests.add(commands.request_id)
 
-    def apply_execution_feedback(self, feedback: ExecutionFeedback, *, confirmed_scene=None, feedback_source="external"):
+    def apply_execution_feedback(self, feedback: ExecutionFeedback, *, confirmed_scene=None, feedback_source="external", execution_checkpoint=None):
         if self.pending_commands and self.pending_commands["schema_version"] == "3.0":
             from ..contracts.feedback_v3 import ExecutionFeedbackV3
             if not isinstance(feedback, ExecutionFeedbackV3):
@@ -984,12 +991,17 @@ class BrainSession:
                 raise ValueError("execution_feedback_holding_unknown")
         if feedback_source not in {"external", "simulated"}:
             raise ValueError("execution_feedback_source_invalid")
+        from .execution_checkpoint import bind
+        checkpoint = (bind(execution_checkpoint, candidate, feedback.request_id, feedback.holding_object)
+                      if candidate is not None else None)
         self.sync_state = "unknown"
         if candidate is not None:
             manager = self._candidate_manager(candidate)
             self._check_snapshot(self.platform.load_scene(candidate), candidate)
             self._commit_manager(manager)
             self.sync_state = "synchronized"
+        if candidate is not None:
+            self.execution_checkpoint = checkpoint
         self.holding_object = feedback.holding_object
         if self.robot_setup is not None and self.robot_setup.mode == "single":
             from ..contracts.robot_setup import RobotRuntimeState

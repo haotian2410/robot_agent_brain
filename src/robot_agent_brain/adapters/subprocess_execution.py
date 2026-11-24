@@ -251,6 +251,7 @@ class SubprocessExecutionAdapter:
                                  status=step["status"], error_code=step["error_code"],
                                  detail=step["detail"]) for step in summary["steps"]],
             moved=summary["moved"], holding_object=summary["holding_object"],
+            execution_checkpoint=summary.get("execution_checkpoint"),
             articulated_joints=summary.get("articulated_joints", {}),
             active_joint_ids=summary.get("active_joint_ids", []),
             state_verified=summary.get("state_verified", False),

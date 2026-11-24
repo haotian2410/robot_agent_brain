@@ -34,6 +34,7 @@ class SessionState(BaseModel):
     session_phase: Literal["setup", "agent_owned"] = "setup"
     camera_id: int | None = None
     holding_object: SceneId | None = None
+    execution_checkpoint: dict | None = None
     robot_setup: RobotSetup | None = None
     robot_setup_revision: int = Field(default=0, strict=True, ge=0)
     platform_rebind_revision: int = Field(default=0, strict=True, ge=0)
@@ -194,6 +195,7 @@ class SessionStore:
             dialogue=session.dialogue, session_action=session.session_action, sync_state=session.sync_state,
             session_phase=getattr(session, "session_phase", "setup"), camera_id=getattr(session, "camera_id", None),
             holding_object=session.holding_object, platform_rebind_revision=getattr(session, "platform_rebind_revision", 0),
+            execution_checkpoint=getattr(session, "execution_checkpoint", None),
             robot_asset=getattr(session, "robot_asset", None), gripper_asset=getattr(session, "gripper_asset", None),
             camera_asset=getattr(session, "camera_asset", None), execution_capability=getattr(session, "execution_capability", "unknown"),
             last_exported_request=session.last_exported_request,
@@ -254,7 +256,7 @@ class SessionStore:
         else:
             session.seen_scene_object_ids = set(state.seen_scene_object_ids)
             session.next_scene_object_id = state.next_scene_object_id
-        for name in ("dialogue", "session_action", "sync_state", "session_phase", "camera_id", "holding_object",
+        for name in ("dialogue", "session_action", "sync_state", "session_phase", "camera_id", "holding_object", "execution_checkpoint",
                      "platform_rebind_revision", "robot_asset", "gripper_asset", "camera_asset", "execution_capability", "last_exported_request",
                      "exported_commands", "dispatched_requests", "pending_commands", "pending_execution_request",
                      "stale_commands",

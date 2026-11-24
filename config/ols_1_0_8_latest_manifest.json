@@ -1,6 +1,6 @@
 {
-  "library_commit": "888b558",
-  "resource_version": "ResVersion 1.0.8-c2fdb5a",
+  "library_commit": "bf26ccf",
+  "resource_version": "ResVersion 1.0.8-fecd9a8",
   "model_ids": [
     1,
     2,
@@ -82,7 +82,8 @@
     13,
     14,
     15,
-    16
+    16,
+    17
   ],
   "scene_ids": [
     1,

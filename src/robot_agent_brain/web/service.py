@@ -1370,6 +1370,11 @@ class AgentService:
             # Ensure an OLS-specific RobotModelRef (including approved
             # collision decomposition hints) is present even for sessions
             # imported before this normalization was introduced.
+            from ..session.execution_checkpoint import for_dispatch
+            checkpoint = for_dispatch(session)
+            supplied = (commands.runtime_context or {}).get('execution_checkpoint')
+            if supplied != checkpoint:
+                raise ValueError('execution_checkpoint_dispatch_mismatch')
             execution_scene, _ = self.app.robot_assembly.ensure_scene_robot_config(session.scene)
             outcome = self.execution().run(commands, execution_scene.raw_document(), progress=progress)
             if outcome is None:
@@ -1399,7 +1404,8 @@ class AgentService:
                               commands=[CommandFeedback(command_id=step.command_id,
                                                          status="success" if step.status == "success" else "failed")
                                         for step in outcome.steps]),
-            confirmed_scene=candidate, feedback_source="external")
+            confirmed_scene=candidate, feedback_source="external",
+            execution_checkpoint=outcome.execution_checkpoint if success else None)
         if discarded:
             # Clear the execution transaction, then restore the exact
             # pre-dispatch Brain state. No Gateway write has occurred here.
