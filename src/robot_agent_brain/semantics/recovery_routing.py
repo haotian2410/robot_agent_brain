@@ -6,6 +6,37 @@ Unknown phrases retain the existing preview path.
 import re
 
 
+_ACTION_WORDS = (
+    "增加", "添加", "生成", "放置", "放到", "放进", "移动", "挪到", "拿起",
+    "抓起", "抓取", "放下", "删除", "移除", "改成", "换成", "旋转", "缩放",
+    "打开", "关闭", "拉开", "推回", "查询", "有几个", "是否存在", "找出",
+    "put", "pick", "move", "delete", "open", "close", "query",
+)
+
+
+def independent_task_candidate(text: str, *, asset_names=()) -> bool:
+    """Conservatively identify a complete current task before failure recovery.
+
+    This is routing only; normal understanding remains the authority on whether
+    the task is valid.  It intentionally rejects short amendments such as
+    ``改成蓝色`` and selectors, while accepting explicit actions with an asset
+    noun or an ordered compound instruction.
+    """
+    value = text.strip().rstrip("。！？!?，, ")
+    if not value or continuation_candidate(value, asset_names=asset_names):
+        return False
+    has_action = any(word in value for word in _ACTION_WORDS)
+    if not has_action:
+        return False
+    names = {str(name).lower() for name in asset_names if name}
+    lowered = value.lower()
+    has_asset = any(name and name in lowered for name in names)
+    compound = any(marker in value for marker in ("先", "然后", "接着", "之后", "再", "并把", "并将", "并让", ";", "；"))
+    # A compound with explicit actions is a complete task even if the asset
+    # catalog does not know one noun; normal U must report that asset error.
+    return (compound and sum(1 for word in _ACTION_WORDS if word in value) >= 2) or (has_action and has_asset)
+
+
 def continuation_candidate(text: str, *, asset_names=()) -> bool:
     text = text.strip().rstrip("。！？!?，, ")
     if text in {

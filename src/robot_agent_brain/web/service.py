@@ -461,8 +461,6 @@ class AgentService:
                 result = {"taskID":identifier,"sessionID":request.sessionID,"outcome":"failed", "executed":False,
                     "reply":f"{message}（{code}；诊断 task-{identifier}）",
                     "error":{"code":code,"message":message,"details":failure_details}}
-                if code == "robot_segment_intermediate_observation_unsupported":
-                    result.update(failure_class="capability_unsupported", scene_commit_status="unchanged")
         finally:
             if platform is not None:
                 result = {**(result or {}), "recovery_context": {
@@ -596,7 +594,7 @@ class AgentService:
         # preview remains strictly side-effect free; only an accepted,
         # executable payload passes this gate.  Exhausted chains use the same
         # rule so an explicit new task can recover without a manual reset.
-        from ..semantics.recovery_routing import continuation_candidate
+        from ..semantics.recovery_routing import continuation_candidate, independent_task_candidate
         catalog = getattr(getattr(self.app, "pipeline", None), "asset_catalog", None)
         recovery_names = [name for item in getattr(catalog, "models", ())
                           for name in (item.name, getattr(item, "display_name", None),
@@ -606,6 +604,15 @@ class AgentService:
             for component in obj.components:
                 if component.component_type == "Semantic":
                     recovery_names.append(component.properties.get("semantic_name"))
+        # Route a complete current instruction before invoking R.  A complete
+        # task must supersede stale selection/destination amendments even when
+        # its side-effect-free preview later returns clarification or a missing
+        # asset; otherwise the old chain can reject it as u_condition_lost.
+        if chain is not None and independent_task_candidate(request.command, asset_names=recovery_names):
+            chain.state = type(chain.state).SUPERSEDED
+            chain.latest_question = None
+            session.last_recovery_evidence = None
+            return request.command
         if chain is not None and not continuation_candidate(request.command, asset_names=recovery_names) and chain.state.value in {
                 "waiting_user", "resolving", "blocked_environment",
                 "blocked_system", "exhausted"}:

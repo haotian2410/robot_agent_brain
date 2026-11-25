@@ -28,7 +28,6 @@ class Subtask(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: SubtaskKind
     instruction: str = Field(min_length=1)
-    requires_fresh_observation: bool = False
 
     @model_validator(mode="after")
     def trimmed(self):
@@ -41,6 +40,24 @@ class Subtask(BaseModel):
 class TaskDecomposition(BaseModel):
     model_config = ConfigDict(extra="forbid")
     steps: list[Subtask] = Field(min_length=1, max_length=MAX_SUBTASKS)
+
+    @model_validator(mode="before")
+    @classmethod
+    def discard_legacy_observation_hint(cls, value):
+        """Read old wire documents without making the hint part of the contract.
+
+        Older Qwen responses may still contain ``requires_fresh_observation``.
+        It was a Brain-side policy decision, not a controller capability, so it
+        is deliberately ignored during compatibility loading.
+        """
+        if isinstance(value, dict) and isinstance(value.get("steps"), list):
+            value = dict(value)
+            value["steps"] = [
+                ({k: v for k, v in step.items() if k != "requires_fresh_observation"}
+                 if isinstance(step, dict) else step)
+                for step in value["steps"]
+            ]
+        return value
 
     @model_validator(mode="after")
     def legal_sequence(self):

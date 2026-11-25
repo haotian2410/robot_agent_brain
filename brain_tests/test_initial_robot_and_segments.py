@@ -58,28 +58,35 @@ def test_segment_preserves_pronouns():
     assert len(grouped) == 1 and '把它' in grouped[0].instruction
 
 
-def test_segment_rejects_intermediate_observation_before_dispatch():
+def test_segment_ignores_legacy_intermediate_observation_hint():
     steps = [Subtask(kind='robot_task', instruction='移开盒子'),
-             Subtask(kind='robot_task', instruction='根据露出的画面抓取物体',
-                     requires_fresh_observation=True)]
-    with pytest.raises(ValueError, match='robot_segment_intermediate_observation_unsupported'):
-        execution_segments(steps)
-    assert steps[0].instruction == '移开盒子'
+             Subtask(kind='robot_task', instruction='根据露出的画面抓取物体')]
+    grouped, _ = execution_segments(steps)
+    assert len(grouped) == 1
+    assert grouped[0].instruction == '移开盒子；然后根据露出的画面抓取物体'
 
 
 def test_explicit_query_boundary_allows_subsequent_observation():
     steps = [Subtask(kind='robot_task', instruction='移开盒子'),
              Subtask(kind='scene_query', instruction='观察盒子后的物体'),
-             Subtask(kind='robot_task', instruction='根据画面抓取苹果',
-                     requires_fresh_observation=True)]
+             Subtask(kind='robot_task', instruction='根据画面抓取苹果')]
     grouped, _ = execution_segments(steps)
     assert len(grouped) == 3
 
 
-def test_observation_requirement_survives_wire_parse():
+def test_legacy_observation_hint_is_ignored_by_wire_parse():
     from robot_agent_brain.models.task_decomposition import parse_decomposition, task_decomposition_wire_schema
     schema = task_decomposition_wire_schema()['properties']['steps']['items']['properties']
-    assert schema['requires_fresh_observation'] == {'type': 'boolean'}
     parsed = parse_decomposition({'steps': [dict(kind='robot_task', instruction='看新画面抓取',
                                                 requires_fresh_observation=True)]})
-    assert parsed.steps[0].requires_fresh_observation
+    assert 'requires_fresh_observation' not in schema
+    assert parsed.steps[0].instruction == '看新画面抓取'
+
+
+def test_complete_task_classifier_is_distinct_from_short_recovery():
+    from robot_agent_brain.semantics.recovery_routing import (
+        continuation_candidate, independent_task_candidate)
+    names = ['苹果', '魔方', '小汽车', '托盘']
+    assert continuation_candidate('左边的', asset_names=names)
+    assert not independent_task_candidate('左边的', asset_names=names)
+    assert independent_task_candidate('先删除苹果和魔方，再把小汽车放进托盘里', asset_names=names)

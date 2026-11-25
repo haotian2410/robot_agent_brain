@@ -28,9 +28,6 @@ def execution_segments(steps):
     sources = []
     for step in steps:
         if grouped and step.kind == SubtaskKind.ROBOT_TASK and grouped[-1].kind == step.kind:
-            if step.requires_fresh_observation:
-                raise ValueError("robot_segment_intermediate_observation_unsupported: "
-                                 "连续机器人动作需要先观察上一动作完成后的新画面；当前控制协议不能在同一执行段中请求新视觉证据。请在观察步骤处明确分开任务。")
             sources[-1].append(step.instruction)
             grouped[-1] = grouped[-1].model_copy(update={"instruction": "；然后".join(sources[-1])})
         else:
@@ -109,7 +106,6 @@ def task_decomposition_wire_schema() -> dict[str, Any]:
                     "properties": {
                         "kind": {"type": "string", "enum": KINDS},
                         "instruction": {"type": "string", "minLength": 1},
-                        "requires_fresh_observation": {"type": "boolean"},
                     },
                 },
             }

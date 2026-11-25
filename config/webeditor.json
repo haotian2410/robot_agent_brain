@@ -1,6 +1,7 @@
 {
   "provider": "qwen",
   "planner": "qwen",
+  "planner_max_completion_tokens": 4096,
   "base_url": "http://127.0.0.1:8080/v1",
   "model": "/home/cscvlab/models/qwen3.8-27b/Qwen3.8-27B-UD-Q4_K_M.gguf",
   "timeout": 300,
