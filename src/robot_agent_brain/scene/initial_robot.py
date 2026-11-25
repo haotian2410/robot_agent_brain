@@ -3,18 +3,18 @@ import re
 
 
 def split_initial_robot(instruction):
-    # Both forms are initialization qualifiers when the session is still an
-    # empty bootstrap.  ``设置为`` must not be treated as a runtime platform
-    # switch; the application applies the same empty-session guard as the
-    # traditional ``使用`` form.
+    # Extract initialization before task decomposition so an arm-add prefix
+    # is not split into a runtime platform switch. The application still
+    # checks that a different arm is selected only for an empty session.
     match = re.match(
         r'^\s*(?:(?:使用|用)\s*([A-Za-z][A-Za-z0-9_-]*)|'
-        r'(?:把|将)\s*机械臂\s*(?:设置为|设为|切换为)\s*([A-Za-z][A-Za-z0-9_-]*))'
-        r'(?:\s*机械臂)?\s*(?:[，,:：]\s*(?:然后|再|接着)?\s*)?'
-        r'(?=把|将|来|在|增加|生成|抓|拿|放|先)', instruction)
+        r'(?:把|将)\s*机械臂\s*(?:设置为|设为|切换为)\s*([A-Za-z][A-Za-z0-9_-]*)|'
+        r'(?:添加|增加)\s*([A-Za-z][A-Za-z0-9_-]*)\s*机械臂)'
+        r'(?:\s*机械臂)?\s*(?:[，,:：]\s*)?(?:(?:然后|再|接着)\s*)?'
+        r'(?=把|将|来|在|添加|增加|生成|抓|拿|放|先)', instruction)
     if match is None:
         return None, instruction
-    name = match.group(1) or match.group(2)
+    name = match.group(1) or match.group(2) or match.group(3)
     remainder = instruction[match.end():].strip()
     if remainder.startswith('来'):
         remainder = remainder[1:].strip()

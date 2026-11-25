@@ -18,7 +18,7 @@ def test_initial_robot_language_forms_are_bootstrap_qualifiers(instruction):
 
 
 @pytest.mark.parametrize('name', ['ur5', 'ur10', 'nero', 'piper'])
-@pytest.mark.parametrize('form', ['use', 'set'])
+@pytest.mark.parametrize('form', ['use', 'set', 'add'])
 def test_initial_arm_bootstrap_keeps_default_accessories(tmp_path, name, form):
     path = os.environ.get('ROBOT_BRAIN_RUNTIME_CONFIG')
     if not path:
@@ -28,7 +28,7 @@ def test_initial_arm_bootstrap_keeps_default_accessories(tmp_path, name, form):
             return BrainTurn(status='accepted', turn_kind='robot_task', instruction=request.instruction,
                 task_intent=TaskIntent(instruction=request.instruction, entities=[
                     TaskEntity(entity_id='a', semantic_name='apple', category='fruit'),
-                    TaskEntity(entity_id='b', semantic_name='basket', category='container')],
+                    TaskEntity(entity_id='b', semantic_name='basket', category='container', tags=['带提手'])],
                     operations=[Operation(operation_id='op-1', task_type='pick_and_place', source='a',
                         destination='b', placement_target={'kind': 'container_interior', 'reference': 'b'})]))
     config = BrainConfig.load(path).model_copy(update={'vision': False, 'planner': 'recipe',
@@ -37,9 +37,11 @@ def test_initial_arm_bootstrap_keeps_default_accessories(tmp_path, name, form):
     invalid = app.handle('使用 unknown_arm 把苹果放到篮子里', session_id='initial')
     assert invalid.run_status != 'success'
     assert app.get_session('initial').scene is None
-    instruction = (f'使用 {name}，把苹果放到篮子里'
-                   if form == 'use'
-                   else f'把机械臂设置为 {name}，然后把苹果放到篮子里')
+    instruction = {
+        'use': f'使用 {name}，把苹果放到篮子里',
+        'set': f'把机械臂设置为 {name}，然后把苹果放到篮子里',
+        'add': f'添加{name}机械臂然后把苹果放到篮子里',
+    }[form]
     report = app.handle(instruction, session_id='initial')
     assert report.run_status == 'success', report.error
     session = app.get_session('initial')

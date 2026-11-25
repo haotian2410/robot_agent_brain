@@ -9,10 +9,37 @@ from robot_agent_brain.models.task_decomposition import execution_segments
     ('使用ur10把苹果放到篮子里', 'ur10', '把苹果放到篮子里'),
     ('使用 Piper 机械臂把香蕉放到托盘里', 'piper', '把香蕉放到托盘里'),
     ('使用UR10来增加一个苹果', 'ur10', '增加一个苹果'),
+    ('添加UR10机械臂然后添加四个魔方然后把其他魔方放在最左侧的魔方上面',
+     'ur10', '添加四个魔方然后把其他魔方放在最左侧的魔方上面'),
+    ('添加 UR10 机械臂，再添加四个魔方', 'ur10', '添加四个魔方'),
+    ('增加 Piper 机械臂，接着把苹果放进篮子里', 'piper', '把苹果放进篮子里'),
+    ('添加Apple然后把它放进篮子里', None, '添加Apple然后把它放进篮子里'),
     ('把苹果放到篮子里', None, '把苹果放到篮子里'),
 ])
 def test_initial_qualifier(text, robot, command):
     assert split_initial_robot(text) == (robot, command)
+
+
+def test_arm_initialization_stays_with_first_edit_when_decomposing():
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from robot_agent_brain.contracts.decomposition import TaskDecomposition
+    from robot_agent_brain.web.service import AgentService
+
+    instruction = '添加UR10机械臂然后添加四个魔方然后把其他魔方放在最左侧的魔方上面'
+    plan = TaskDecomposition(steps=[
+        Subtask(kind='scene_edit', instruction='添加四个魔方'),
+        Subtask(kind='robot_task', instruction='把其他魔方放在最左侧的魔方上面'),
+    ])
+    pipeline = SimpleNamespace(decompose=Mock(return_value=plan))
+    steps = AgentService.decomposition(None,
+        SimpleNamespace(change_kind='scene_edit', command=instruction),
+        SimpleNamespace(pipeline=pipeline, scene=None))
+    pipeline.decompose.assert_called_once_with(
+        '添加四个魔方然后把其他魔方放在最左侧的魔方上面', scene=None)
+    assert [step.instruction for step in steps] == [
+        '使用 ur10 添加四个魔方', '把其他魔方放在最左侧的魔方上面']
+    assert [step.kind for step in steps] == ['scene_edit', 'robot_task']
 
 
 def test_robot_segments_do_not_cross_edits_or_queries():
