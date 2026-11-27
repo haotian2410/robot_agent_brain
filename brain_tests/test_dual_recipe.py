@@ -19,35 +19,38 @@ def task_scene(kind="grasp", parallel=True):
         if kind == "move":
             params.update(motion_direction="right", distance_m=.1)
         operations.append(Operation(operation_id=f"op-{i}", task_type=kind, arm=side,
-                                    parallel_group="g" if parallel else None, parallel_required=parallel, **params))
+                                    **params))
     task = GroundedTask(instruction="fixture", scene_id=1, scene_version=0, entities=entities, operations=operations)
     scene = SceneConfig(scene_schema_version=1, scene_id=1, scene_version=0, scene_name="fixture",
                         objects=[object_(e.scene_object_id, e.semantic_name, e.category) for e in task.entities])
     return task, scene
 
 
-@pytest.mark.parametrize("kind,count", [("grasp", 3), ("move", 5), ("pick_and_place", 6)])
-def test_dual_recipe_existing_skills_roundtrip(kind, count):
+@pytest.mark.parametrize("kind", ["grasp", "move", "pick_and_place"])
+def test_retired_staged_recipe_rejects_old_callers(kind):
     task, scene = task_scene(kind)
     setup = CommandsFileV3.model_validate(example()).robot_setup
-    commands = DualArmRecipePlanner().plan("fixture", task, scene, setup, 1, runtime())
-    assert len(commands.steps) == count
-    assert all(s.arms.left is not None and s.arms.right is not None for s in commands.steps)
-    assert CommandsFileV3.model_validate(canonical_commands_v3(commands)) == commands
-
-
-def test_sequential_recipe_keeps_explicit_null_slots():
-    task, scene = task_scene(parallel=False)
-    setup = CommandsFileV3.model_validate(example()).robot_setup
-    commands = DualArmRecipePlanner().plan("fixture", task, scene, setup, 1, runtime())
-    assert len(commands.steps) == 6
-    assert all(s.arms.right is None for s in commands.steps[:3])
-    assert all(s.arms.left is None for s in commands.steps[3:])
-
-
-def test_parallel_same_arm_is_not_silently_serialized():
-    task, scene = task_scene()
-    task.operations[1].arm = "left"
-    setup = CommandsFileV3.model_validate(example()).robot_setup
-    with pytest.raises(ValueError, match="parallel_arm_conflict"):
+    with pytest.raises(ValueError, match="staged_dual_v3_retired"):
         DualArmRecipePlanner().plan("fixture", task, scene, setup, 1, runtime())
+
+
+def test_v41_recipe_must_cover_every_operation_without_inventing_stages():
+    from test_dual_v4_pipeline import setup
+    from test_dual_coordinated_capability import task
+    session = setup()
+    session.pipeline.dual_skill_recipe = lambda request: {"operations": [
+        {"operation_id": "op-1", "steps": [{"skill_name": "pick", "parameters": {"source": 7}}]}]}
+    with pytest.raises(ValueError, match="operation_coverage_invalid"):
+        session.process_turn("missing", task())
+    assert not session.exported_commands
+
+
+def test_v41_recipe_rejects_unregistered_skill_without_fallback():
+    from test_dual_v4_pipeline import setup
+    from test_dual_session_pipeline import task
+    session = setup()
+    session.pipeline.dual_skill_recipe = lambda request: {"operations": [
+        {"operation_id": "op-1", "steps": [{"skill_name": "unregistered", "parameters": {}}]}]}
+    with pytest.raises(ValueError, match="control_skill_unregistered"):
+        session.process_turn("unknown", task())
+    assert not session.exported_commands

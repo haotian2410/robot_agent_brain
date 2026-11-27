@@ -56,7 +56,7 @@ def test_edit_failure_and_missing_reset_permission_have_no_side_effects(tmp_path
     assert session.scene == before and session.sync_state == "synchronized"
 
 
-def test_original_restore_restores_single_profile_from_current_dual(tmp_path):
+def test_original_restore_does_not_allow_later_mode_switch(tmp_path):
     from test_robot_config_turns import session as configured_session
     from robot_agent_brain.contracts.turn import BrainTurn
     current = configured_session()
@@ -64,11 +64,14 @@ def test_original_restore_restores_single_profile_from_current_dual(tmp_path):
     store = OriginalSceneStore(tmp_path)
     current.original_scene_manifest = store.capture_once(current.scene, platform_object_ids=current.platform_object_ids,
         request_id="single-original", source="fixture", robot_setup=current.robot_setup, profile_object_map=current.profile_object_map)
-    current.process_turn("dual", BrainTurn(status="accepted", turn_kind="robot_config", instruction="双臂", robot_setup_request={"mode": "dual"}))
-    assert current.robot_setup.mode == "dual"
+    with pytest.raises(ValueError, match="robot_mode_locked"):
+        current.process_turn("dual", BrainTurn(status="accepted", turn_kind="robot_config", instruction="双臂", robot_setup_request={"mode": "dual"}))
+    assert current.robot_setup.mode == "single"
     original, _ = store.load()
     result = current.derive_original_scene(store, lambda scene: scene, reset_allowed=True)
     assert current.robot_setup.mode == "single"
     assert current.profile_object_map is not None
+    current.robot_mode_lock.check_setup(current.robot_setup, current.robot_setup_revision)
+    assert current.robot_mode_lock.locked
     assert not current.arm_states.arms["single"].state_known
     assert set(current.profile_object_map.values()) <= {o.object_id_in_scene for o in result.scene.objects}

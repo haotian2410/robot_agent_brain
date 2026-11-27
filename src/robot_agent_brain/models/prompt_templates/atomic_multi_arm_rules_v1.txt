@@ -4,5 +4,6 @@ task 粒度只使用已注册任务级技能；不得再次展开 approach/grasp
 atomic 粒度只使用已注册原子技能；不得混用另一套粒度。不能根据技能名字猜测控制端能力。
 保持输入操作和对象 ID，完整覆盖所有 operation_id。步骤参数服从对应技能 Schema。
 输出仅为 {"operations":[{"operation_id":"op1","steps":[{"skill_name":"已注册技能名","parameters":{}}]}]}。
-不输出 command_id、arm、depends_on、资源锁、hold 或 sync；这些由 Python 根据已验证的操作、状态与约束构建。
+不输出 command_id、arm、depends_on、资源锁、hold、sync、parallel 或 conditions。
+Python只构建每臂序列和输入操作已明确声明的先后依赖；Control负责运行时等待和持物状态。
 控制端负责运动学、碰撞、感知及执行；不得把规划草稿表述为执行成功。

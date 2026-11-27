@@ -1,5 +1,8 @@
 # 布局与双臂验收缺口清单
 
+> 历史审计：共享资源、hold、sync及4.0要求已由双模式序列v2方案取代。
+> 当前结果见 `dual_mode_sequence_acceptance.md`；本文件保留历史证据。
+
 核对日期：2026-11-27。依据附件第10–13节和当前工作树，不是完成声明。
 详细运行记录见 `layout_dual_arm_implementation_report.md`。
 

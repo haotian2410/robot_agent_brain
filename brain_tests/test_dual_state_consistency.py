@@ -9,8 +9,14 @@ from test_robot_profiles_state import fixture
 
 def test_success_cannot_claim_empty_after_successful_grasp():
     session, _ = configured()
-    commands = session.process_turn("r", task()).commands
-    session.mark_dispatched(commands)
+    from test_coordinated_validator import plan
+    from test_dual_delivery import historical_pending
+    commands = plan([{"right": ("locate", {"target": 7})},
+                     {"right": ("move", {"target": 7, "region": "grasp_region"})},
+                     {"right": ("grasp", {"target": 7})}]).model_copy(update={"request_id": "r"})
+    from robot_agent_brain.contracts.commands import canonical_commands
+    session.exported_commands["r"] = canonical_commands(commands)
+    historical_pending(session, commands)
     actions = [{"step_id": s.step_id, "command_id": s.arms.right.command_id, "arm": "right", "status": "success"} for s in commands.steps]
     feedback = ExecutionFeedbackV3(request_id="r", scene_id=session.scene.scene_id, scene_version=session.scene.scene_version,
         robot_setup_revision=session.robot_setup_revision, status="success", actions=actions,
@@ -21,7 +27,8 @@ def test_success_cannot_claim_empty_after_successful_grasp():
 
 
 def test_external_state_confirmation_is_versioned_and_invalidates_old_plan():
-    session, _ = configured()
+    from test_dual_v4_pipeline import setup
+    session = setup()
     session.process_turn("old", task())
     args = dict(scene_id=session.scene.scene_id, scene_version=session.scene.scene_version,
                 robot_setup_revision=session.robot_setup_revision)

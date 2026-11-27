@@ -10,9 +10,22 @@ from test_dual_coordinated_capability import task
 
 
 def failed_session():
-    session, registry = configured()
-    commands = session.process_turn("failed", task()).commands
-    session.mark_dispatched(commands)
+    from test_dual_v4_pipeline import setup
+    from test_coordinated_validator import plan
+    from test_dual_delivery import historical_pending
+    from robot_agent_brain.contracts.commands import canonical_commands
+    session = setup()
+    registry = session.robot_profiles
+    # Simulate an existing upgrade checkpoint, not a new v3 submission.
+    raw = plan([{"left": ("locate", {"target": 7}),
+                 "right": ("locate", {"target": 8})}]).model_dump(mode="python")
+    raw.update(request_id="failed", scene_id=session.scene.scene_id,
+               scene_version=session.scene.scene_version, robot_setup=session.robot_setup,
+               robot_setup_revision=session.robot_setup_revision)
+    from robot_agent_brain.contracts.commands_v3 import CommandsFileV3
+    commands = CommandsFileV3.model_validate(raw)
+    session.exported_commands["failed"] = canonical_commands(commands)
+    historical_pending(session, commands)
     stage = commands.steps[0]
     feedback = ExecutionFeedbackV3(request_id="failed", scene_id=session.scene.scene_id,
         scene_version=session.scene.scene_version, robot_setup_revision=session.robot_setup_revision,
@@ -88,8 +101,9 @@ def test_reconciliation_platform_timeout_keeps_unknown_and_retry_provenance():
 
 @pytest.mark.parametrize("status,empty", [("failed", False), ("partial", False), ("partial", True)])
 def test_feedback_status_matches_reported_actions(status, empty):
-    session, _ = configured()
-    commands = session.process_turn("r", task()).commands
+    from test_coordinated_validator import plan
+    commands = plan([{"left": ("locate", {"target": 7}), "right": ("locate", {"target": 8})}])
+    commands = commands.model_copy(update={"request_id": "r"})
     actions = [] if empty else [
         {"step_id": step.step_id, "command_id": getattr(step.arms, side).command_id,
          "arm": side, "status": "success"} for step in commands.steps for side in ("left", "right")]

@@ -79,6 +79,6 @@ def test_rejected_platform_request_does_not_commit_same_turn_import(tmp_path):
     path.write_text(scene.model_dump_json(), encoding="utf-8")
     app = BrainApplication(BrainConfig(provider="replay", planner="recipe", output_dir=str(tmp_path / "out")), provider=Provider())
     report = app.handle("换成双臂", session_id="s", scene_path=path)
-    assert report.run_status == "blocked"
-    assert report.error.code == "capability_unsupported"
+    assert report.run_status == "failed"
+    assert report.error.code == "robot_setup_profile_not_registered", report.error
     assert app.get_session("s").scene is None

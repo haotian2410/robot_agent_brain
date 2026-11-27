@@ -23,7 +23,6 @@ class ArmAssignmentRequest(BaseModel):
     operations: list[BoundArmOperation] = Field(min_length=1)
     initial_held_objects: dict[Literal["left", "right"], int | None]
     both_required: bool = False
-    same_arm_groups: list[list[str]] = Field(default_factory=list)
     frame: CameraFrame = Field(exclude=True)
 
     @model_validator(mode="after")

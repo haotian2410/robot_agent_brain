@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "commands_dag_v4.schema.json",
   "$defs": {
-    "DagCommand": {
+    "SequenceCommand": {
       "additionalProperties": false,
       "properties": {
         "command_id": {
@@ -47,172 +47,15 @@
         "arm",
         "skill_name"
       ],
-      "title": "DagCommand",
-      "type": "object"
-    },
-    "DagExecutionPolicy": {
-      "additionalProperties": false,
-      "properties": {
-        "scheduler": {
-          "const": "dependency_dag",
-          "default": "dependency_dag",
-          "title": "Scheduler",
-          "type": "string"
-        },
-        "parallel": {
-          "default": "allowed",
-          "enum": [
-            "allowed",
-            "disabled"
-          ],
-          "title": "Parallel",
-          "type": "string"
-        },
-        "on_failure": {
-          "default": "stop_dependents_continue_independent",
-          "enum": [
-            "stop_dependents_continue_independent",
-            "stop_all"
-          ],
-          "title": "On Failure",
-          "type": "string"
-        }
-      },
-      "title": "DagExecutionPolicy",
-      "type": "object"
-    },
-    "HoldConstraintV4": {
-      "additionalProperties": false,
-      "properties": {
-        "object_id": {
-          "minimum": 0,
-          "title": "Object Id",
-          "type": "integer"
-        },
-        "holder_arm": {
-          "enum": [
-            "left",
-            "right"
-          ],
-          "title": "Holder Arm",
-          "type": "string"
-        },
-        "until_command_id": {
-          "minLength": 1,
-          "title": "Until Command Id",
-          "type": "string"
-        },
-        "after_command_id": {
-          "anyOf": [
-            {
-              "minLength": 1,
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "After Command Id"
-        },
-        "region_object_id": {
-          "anyOf": [
-            {
-              "minimum": 0,
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Region Object Id"
-        },
-        "region": {
-          "anyOf": [
-            {
-              "const": "placement_region",
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Region"
-        }
-      },
-      "required": [
-        "object_id",
-        "holder_arm",
-        "until_command_id"
-      ],
-      "title": "HoldConstraintV4",
-      "type": "object"
-    },
-    "ResourceGroup": {
-      "additionalProperties": false,
-      "properties": {
-        "resource_id": {
-          "minLength": 1,
-          "title": "Resource Id",
-          "type": "string"
-        },
-        "mode": {
-          "default": "exclusive",
-          "enum": [
-            "exclusive",
-            "shared"
-          ],
-          "title": "Mode",
-          "type": "string"
-        },
-        "command_ids": {
-          "items": {
-            "type": "string"
-          },
-          "minItems": 1,
-          "title": "Command Ids",
-          "type": "array"
-        }
-      },
-      "required": [
-        "resource_id",
-        "command_ids"
-      ],
-      "title": "ResourceGroup",
-      "type": "object"
-    },
-    "SyncGroup": {
-      "additionalProperties": false,
-      "properties": {
-        "sync_id": {
-          "minLength": 1,
-          "title": "Sync Id",
-          "type": "string"
-        },
-        "command_ids": {
-          "items": {
-            "type": "string"
-          },
-          "minItems": 2,
-          "title": "Command Ids",
-          "type": "array"
-        }
-      },
-      "required": [
-        "sync_id",
-        "command_ids"
-      ],
-      "title": "SyncGroup",
+      "title": "SequenceCommand",
       "type": "object"
     }
   },
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": "4.0",
-      "default": "4.0",
+      "const": "4.1",
+      "default": "4.1",
       "title": "Schema Version",
       "type": "string"
     },
@@ -246,36 +89,12 @@
       "title": "Skill Contract Revision",
       "type": "string"
     },
-    "execution_policy": {
-      "$ref": "#/$defs/DagExecutionPolicy"
-    },
     "commands": {
       "items": {
-        "$ref": "#/$defs/DagCommand"
+        "$ref": "#/$defs/SequenceCommand"
       },
       "minItems": 1,
       "title": "Commands",
-      "type": "array"
-    },
-    "resource_groups": {
-      "items": {
-        "$ref": "#/$defs/ResourceGroup"
-      },
-      "title": "Resource Groups",
-      "type": "array"
-    },
-    "hold_constraints": {
-      "items": {
-        "$ref": "#/$defs/HoldConstraintV4"
-      },
-      "title": "Hold Constraints",
-      "type": "array"
-    },
-    "sync_groups": {
-      "items": {
-        "$ref": "#/$defs/SyncGroup"
-      },
-      "title": "Sync Groups",
       "type": "array"
     }
   },
@@ -288,6 +107,6 @@
     "skill_contract_revision",
     "commands"
   ],
-  "title": "CommandsFileV4",
+  "title": "CommandsFileV41",
   "type": "object"
 }

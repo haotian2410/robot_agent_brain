@@ -34,6 +34,10 @@ FIELDS.update({
     "support": "sy", "keep_inside_region": "kr", "avoid_existing": "ae", "min_clearance_m": "mc",
     "allow_scale": "az", "mode": "mo", "alias": "ay",
 })
+# Retired short codes stay reserved; do not shift any remaining wire names.
+for _retired in ("hold_constraints", "holder_arm", "holder_operation", "object_entity",
+                 "region_entity", "while_operation", "parallel_group", "parallel_required", "same_arm_group"):
+    FIELDS.pop(_retired, None)
 FIELDS["turn_kind"] = "k"
 assert len(set(FIELDS.values())) == len(FIELDS)
 
@@ -44,6 +48,7 @@ def _base(*, strict_layout=True):
     schema["required"] = ["protocol_version", "turn_kind", "status"]
     schema["properties"]["protocol_version"] = {"const": VERSION, "type": "string"}
     schema["$defs"]["TaskEntityWire"]["required"] = ["entity_id", "semantic_name", "category"]
+    schema["$defs"]["RobotOperationWire"]["required"] = ["operation", "depends_on"]
     for name in ("ArrangementSpacing", "ArrangementItems"):
         definition = schema["$defs"][name]
         definition["required"] = list(dict.fromkeys([*definition.get("required", []), "mode"]))
@@ -204,7 +209,7 @@ def compact_schema():
     props = schema["properties"]
     variants = []
     routes = {
-        "robot_task": ("e o", "e o r au hc rq ir"),
+        "robot_task": ("e o", "e o r au rq ir"),
         "scene_edit": ("se", "se ir"),
         "scene_layout": ("at", "at"),
         "scene_query": ("sq", "sq ir"),
@@ -273,6 +278,9 @@ def _walk(value, node, root, *, encode):
 
 def encode(value):
     value = deepcopy(value)
+    if value.get("turn_kind") == "robot_task":
+        for operation in value.get("operations", []):
+            operation.setdefault("depends_on", [])
     value["protocol_version"] = VERSION
     root = _base(strict_layout=False)
     return _walk(value, root, root, encode=True)
@@ -306,6 +314,8 @@ def compact_prompt(prompt):
         "省略可选 null、空数组及 Schema 中已声明的默认值；不得省略操作目标、"
         "必需参照物或新增/替换的资产选择。关系和参照必须同时存在或同时省略。\n"
         "动作、关系、资产名等值不缩写；输入 scene_context/目录的字段不改变。\n"
+        '机器人 o 按顺序编号 op-1、op-2；明确先完成第一操作再开始第二操作时，第二项必须写 dp=["op-1"]。'
+        '每个机器人操作必须输出 dp；无依赖写 dp=[]，明确顺序写对应编号。\n'
         "每个实体必须有 id(本轮标识)、n(规范资产名称)、c(类别)。"
         "ex 是用户明确排除的已有场景实例编号；没有明确排除时完全省略 ex，"
         "绝不能枚举数字或生成场景中没有的编号。si 同样只用于用户明确指定编号。\n"
@@ -328,7 +338,7 @@ def compact_prompt(prompt):
             if isinstance(v, dict):
                 return {FIELDS.get(k, k): (VERSION if k == "protocol_version" else
                                           x if k == "properties" else keys(x)) for k, x in v.items()
-                        if x is not None and x != []}
+                        if x is not None and (x != [] or k == "depends_on")}
             if isinstance(v, list):
                 return [keys(x) for x in v]
             return v

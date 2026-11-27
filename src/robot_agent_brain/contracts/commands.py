@@ -205,7 +205,7 @@ def parse_commands(payload):
         return CommandsFile.model_validate(payload)
     if version == "3.0":
         return CommandsFileV3.model_validate(payload)
-    if version == "4.0":
+    if version == "4.1":
         from .commands_dag_v4 import CommandsFileV4
         return CommandsFileV4.model_validate(payload)
     raise ValueError("commands_schema_version_unsupported")

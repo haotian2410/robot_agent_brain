@@ -138,6 +138,5 @@ class SceneGrounder:
                 raise ValueError("scene_reference_unresolved: " + identifier)
             entities.append(grounded(identifier, members))
         return GroundedTask(instruction=intent.instruction, entities=entities,
-                            hold_constraints=intent.hold_constraints,
                             operations=intent.operations, spatial_relations=intent.spatial_relations,
                             scene_id=scene.scene_id, scene_version=scene.scene_version)

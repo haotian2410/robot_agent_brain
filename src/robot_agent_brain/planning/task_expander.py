@@ -28,11 +28,7 @@ class TaskExpander:
                                 model_scale=world_transform(scene, object_id).scale)
                 entities.append(entity.model_copy(update=data))
         operations, expanded_ids = [], {}
-        concrete_objects = {entity.entity_id: entity.scene_object_id for entity in entities}
-        previous_actor = {}
-        reference_readers = {}
         previous_block, current_block = [], []
-        active_group = None
         pairwise_cursors = {}
         distributed_counts = {}
         for operation in task.operations:
@@ -45,11 +41,7 @@ class TaskExpander:
             if count != len(members[actor]):
                 raise ValueError("task_expansion_pairwise_coverage_mismatch")
         for operation_index, operation in enumerate(task.operations):
-            # Explicit parallel peers share the same preceding barrier. Default
-            # operations and members expanded on a single arm remain serial.
-            if operation.parallel_group is None or operation.parallel_group != active_group:
-                previous_block, current_block = current_block, []
-            active_group = operation.parallel_group
+            previous_block, current_block = current_block, []
             actor = operation.source or operation.target
             if actor not in members:
                 raise ValueError("task_semantic_invalid: operation has no bound actor")
@@ -91,40 +83,10 @@ class TaskExpander:
                 if operation.placement_target:
                     data["placement_target"]["reference"] = select(operation.placement_target.reference, index)
                 dependencies = [i for dep in operation.depends_on for i in expanded_ids[dep]]
-                # A user milestone supersedes only the automatically inserted
-                # full-operation barrier between its holder and peer. Explicit
-                # depends_on stays intact and conflicting constraints fail.
-                milestone_holders = {h.holder_operation for h in task.hold_constraints
-                                     if h.kind == "hold_until_operation" and h.while_operation == operation.operation_id}
-                excluded = {i for h in milestone_holders for i in expanded_ids.get(h, [])}
                 if serial_barriers:
-                    dependencies.extend(i for i in previous_block if i not in excluded)
-                # Explicit parallel sets are assigned to arms after expansion.
-                # Keep user dependencies and the preceding group barrier, but
-                # do not invent a serial dependency inside that parallel set.
-                if serial_barriers and ids and operation.parallel_group is None:
-                    dependencies.append(ids[-1])
-                if not serial_barriers:
-                    # Independent arms may overlap, but repeated manipulation
-                    # of the same physical source still follows input order.
-                    # Match actual object IDs, including different entity aliases.
-                    object_id = concrete_objects[data.get("source") or data.get("target")]
-                    if object_id in previous_actor:
-                        dependencies.append(previous_actor[object_id])
-                    dependencies.extend(reference_readers.pop(object_id, []))
-                    references = {data.get("destination"), data.get("reference")}
-                    if data.get("placement_target"):
-                        references.add(data["placement_target"]["reference"])
-                    reference_ids = sorted({concrete_objects[name] for name in references if name is not None}
-                                           - {object_id})
-                    for reference_id in reference_ids:
-                        prior = previous_actor.get(reference_id)
-                        # An explicit hold milestone replaces the full-operation
-                        # reference barrier; its skill-level edge is built later.
-                        if prior is not None and prior not in excluded:
-                            dependencies.append(prior)
-                        reference_readers.setdefault(reference_id, []).append(data["operation_id"])
-                    previous_actor[object_id] = data["operation_id"]
+                    dependencies.extend(previous_block)
+                    if ids:
+                        dependencies.append(ids[-1])
                 data["depends_on"] = list(dict.fromkeys(dependencies))
                 operations.append(Operation.model_validate(data))
                 ids.append(data["operation_id"])
@@ -137,21 +99,5 @@ class TaskExpander:
             pairs = zip(sources, references) if len(sources) == len(references) else product(sources, references)
             for subject, reference in pairs:
                 relations.append(rel.model_copy(update={"subject": subject, "reference": reference}))
-        holds = []
-        for hold in task.hold_constraints:
-            data = hold.model_dump()
-            for field in ("object_entity", "region_entity"):
-                key = data[field]
-                if key is not None:
-                    if len(members[key]) != 1:
-                        raise ValueError("dual_hold_ambiguous_collection")
-                    data[field] = members[key][0]
-            for field in ("while_operation", "holder_operation"):
-                key = data[field]
-                if key is not None:
-                    if len(expanded_ids[key]) != 1:
-                        raise ValueError("dual_hold_ambiguous_operation_collection")
-                    data[field] = expanded_ids[key][0]
-            holds.append(type(hold).model_validate(data))
-        return task.model_copy(update={"entities": entities, "operations": operations, "spatial_relations": relations,
-                                       "hold_constraints": holds})
+        return task.model_copy(update={"entities": entities, "operations": operations,
+                                       "spatial_relations": relations})

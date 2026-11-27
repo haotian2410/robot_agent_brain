@@ -8,7 +8,7 @@ from jsonschema import ValidationError
 def payload():
     return {
         "protocol_version": "task_understanding.v3.1", "status": "accepted", "turn_kind": "scene_layout",
-        "arm_usage": "unspecified", "hold_constraints": [], "clarification_question": None,
+        "arm_usage": "unspecified", "clarification_question": None,
         "scene_edit": None,
         "arrangement_spec": {
             "arrangement_id": "arr-apples", "operation": "create", "basis": "current",

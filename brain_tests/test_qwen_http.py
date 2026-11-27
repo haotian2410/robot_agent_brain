@@ -108,7 +108,7 @@ def test_failure_context_is_a_separate_read_only_round():
 
 def _task_payload(**updates):
     value = {
-        "arm_usage": "unspecified", "hold_constraints": [], "status": "accepted",
+        "arm_usage": "unspecified", "status": "accepted",
         "turn_kind": "robot_task", "clarification_question": None,
         "scene_edit": None, "scene_query": None, "session_control": None,
         "robot_setup_request": None,

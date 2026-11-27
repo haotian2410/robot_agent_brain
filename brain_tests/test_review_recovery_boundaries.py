@@ -1,3 +1,4 @@
+from test_dual_delivery import historical_pending
 import pytest
 
 from robot_agent_brain.adapters.local_scene_platform import LocalScenePlatform
@@ -24,7 +25,7 @@ def test_restart_does_not_reset_uncertain_external_scene(tmp_path, mode):
     else:
         session, commands = prepared()
         if mode == "pending":
-            session.mark_dispatched(commands)
+            historical_pending(session, commands)
     store = SessionStore(tmp_path)
     store.save("s", session, revision=1)
     platform = RecordingPlatform()
@@ -84,7 +85,7 @@ def test_confirmed_snapshot_validates_deployment_and_custom_references(route, ta
         session, _, _ = failed_session()
     else:
         session, commands = prepared()
-        session.mark_dispatched(commands)
+        historical_pending(session, commands)
     candidate = session.scene.model_copy(deep=True)
     candidate.scene_version += 1
     if tamper == "metadata":

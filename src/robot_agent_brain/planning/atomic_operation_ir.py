@@ -13,4 +13,3 @@ class AtomicOperationIR(BaseModel):
     relation: str | None = None
     arm: Literal["left", "right"] | None = None
     depends_on: list[str] = Field(default_factory=list)
-    hold_object_id: int | None = Field(default=None, ge=0)

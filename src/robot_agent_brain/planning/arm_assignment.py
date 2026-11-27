@@ -9,8 +9,6 @@ class ArmAssignmentStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
     step_id: str = Field(min_length=1)
     arm: Literal["single", "left", "right"] = "single"
-    depends_on: list[str] = Field(default_factory=list)
-    resource_groups: list[str] = Field(default_factory=list)
 
 
 class ArmAssignmentPlan(BaseModel):
@@ -23,9 +21,6 @@ class ArmAssignmentPlan(BaseModel):
         ids = [step.step_id for step in self.steps]
         if len(ids) != len(set(ids)):
             raise ValueError("arm_assignment_duplicate_step")
-        known = set(ids)
-        if any(dep not in known for step in self.steps for dep in step.depends_on):
-            raise ValueError("arm_assignment_unknown_dependency")
         if self.mode == "single_arm" and any(step.arm != "single" for step in self.steps):
             raise ValueError("arm_assignment_single_arm_mismatch")
         return self
@@ -68,7 +63,7 @@ class ArmAssignmentOutput(BaseModel):
 
 def validate_assignment_output(output: ArmAssignmentOutput, *, operation_ids,
                                locked_arms=None, both_required=False,
-                               same_arm_groups=(), ordered_operations=()):
+                               ordered_operations=()):
     """Validate model output against Python-owned bindings and constraints."""
     output = ArmAssignmentOutput.model_validate(output)
     if output.status != "assigned":
@@ -82,9 +77,6 @@ def validate_assignment_output(output: ArmAssignmentOutput, *, operation_ids,
             raise ValueError("arm_assignment_locked_arm_changed")
     if both_required and set(assignments.values()) != {"left", "right"}:
         raise ValueError("arm_assignment_both_required")
-    for group in same_arm_groups:
-        if any(item not in assignments for item in group) or len({assignments[item] for item in group}) > 1:
-            raise ValueError("arm_assignment_continuity_changed")
     for arm in ("left", "right"):
         expected = [item for item in ordered_operations if assignments.get(item) == arm]
         actual = [item for item in output.arm_order.get(arm, []) if item in expected]

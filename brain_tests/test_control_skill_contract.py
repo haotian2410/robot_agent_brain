@@ -5,7 +5,7 @@ from robot_agent_brain.planning.dual_arm_dag import build_negotiated_commands_da
 
 
 def contract():
-    return dict(revision="fixture-reviewed-v1", supported_protocols=["4.0"], expansion_level="task",
+    return dict(revision="fixture-reviewed-v1", supported_protocols=["4.1"], expansion_level="task",
         skills={"pick": {"expansion_level": "task", "parameters_schema": {
             "type": "object", "properties": {"source": {"type": "integer", "minimum": 0}},
             "required": ["source"], "additionalProperties": False}}})
@@ -54,8 +54,7 @@ def test_stale_contract_and_unadvertised_resources_rejected():
     changed = ControlSkillContract.model_validate(contract()).model_copy(update={"revision": "new"})
     with pytest.raises(ValueError, match="revision_mismatch"):
         changed.validate_commands(result)
-    with pytest.raises(ValueError, match="control_dag_feature_unsupported"):
-        build(resource_groups=[{"resource_id": "basket", "command_ids": ["L-op1-1"]}])
+
 
 
 def test_skill_schema_cannot_fetch_external_references():
@@ -81,7 +80,7 @@ def test_feature_support_requires_explicit_boolean(field, value):
         ControlSkillContract.model_validate(data)
 
 
-@pytest.mark.parametrize("versions", [[""], ["4.0", "4.0"], [" 4.0"]])
+@pytest.mark.parametrize("versions", [[""], ["4.1", "4.1"], [" 4.0"]])
 def test_protocol_advertisement_has_unique_nonblank_exact_versions(versions):
     data = contract()
     data["supported_protocols"] = versions

@@ -7,7 +7,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .contracts.camera import CameraFrame
 from .contracts.commands import CommandsFile
 from .contracts.commands_atomic import AtomicCommandsFile
-from .contracts.commands_v3 import CommandsFileV3
 from .contracts.commands_dag_v4 import CommandsFileV4
 from .contracts.robot_setup import RobotSetup
 from .contracts.grounded_task import GroundedTask
@@ -136,7 +135,7 @@ class BrainResult(BaseModel):
     task_intent: TaskIntent | None = Field(default=None, alias="intent")
     grounded_task: GroundedTask | None = None
     skill_plan: SkillPlan | None = None
-    commands: CommandsFile | CommandsFileV3 | AtomicCommandsFile | CommandsFileV4 | None = None
+    commands: CommandsFile | AtomicCommandsFile | CommandsFileV4 | None = None
     scene_patch: ScenePatch | None = None
     scene_replacement: SceneConfig | None = None
     scene_source_snapshot: str | None = None
@@ -172,9 +171,8 @@ class BrainResult(BaseModel):
             TurnKind.SCENE_LAYOUT: (self.layout_plan, self.layout_resolution),
             TurnKind.SESSION_CONTROL: (self.session_action,),
         }
-        if isinstance(self.commands, (CommandsFileV3, AtomicCommandsFile, CommandsFileV4)):
-            # A staged v3 plan and the control atomic document are not a
-            # flattened v2 SkillPlan.
+        if isinstance(self.commands, (AtomicCommandsFile, CommandsFileV4)):
+            # Atomic and per-arm sequence output bypass the legacy SkillPlan.
             groups[TurnKind.ROBOT_TASK] = (self.task_intent, self.grounded_task, self.commands)
         if self.turn_kind == TurnKind.ROBOT_TASK and self.robot_setup_changed is not None:
             groups[TurnKind.ROBOT_TASK] = (*groups[TurnKind.ROBOT_TASK], self.robot_setup_changed)
@@ -558,7 +556,7 @@ class BrainPipeline:
                      seen_scene_object_ids=None, next_scene_object_id=None,
                      arrangement_record=None,
                      reserve_layout_ids=None,
-                     prefer_auto_resolve: bool = False) -> BrainResult:
+                     prefer_auto_resolve: bool = False, locked_robot_mode=None) -> BrainResult:
         """Consume an understood turn without another provider call or normalization."""
         self.skill_planner.last_trace = None
         if turn.status != TurnStatus.ACCEPTED:
@@ -568,7 +566,11 @@ class BrainPipeline:
             raise ValueError("asset_catalog_revision_conflict")
         dual = robot_profile is not None and robot_profile.setup.mode == "dual"
         if not dual:
-            turn.require_legacy_execution()
+            if (locked_robot_mode == "single" or robot_profile is not None and robot_profile.setup.mode == "single") and turn.task_intent is not None:
+                if turn.task_intent.arm_usage == "both_required":
+                    raise ValueError("robot_mode_locked")
+            else:
+                turn.require_legacy_execution()
         elif turn.robot_setup_request is not None:
             request = turn.robot_setup_request
             if request.mode != "dual" or request.profile_id not in {None, robot_profile.setup.profile_id}:
@@ -805,52 +807,29 @@ class BrainPipeline:
         # v4 schedules per-arm chains after assignment; the legacy global
         # barrier would incorrectly serialize independent opposite-arm work.
         grounded = self.expander.expand(grounded, scene,
-            serial_barriers=not (dual and robot_profile.commands_version == "4.0"))
+            serial_barriers=not (dual and robot_profile.commands_version == "4.1"))
         grounded = self.motion.resolve(grounded)
         if dual:
-            from .planning.dual_arm_recipe_planner import DualArmRecipePlanner
             from .planning.arm_assignment_resolver import resolve_arms
-            if robot_profile.commands_version == "4.0":
-                from .planning.dual_v4_planner import require_v4_contract
-                require_v4_contract(self.control_skill_contract)
-            elif self.control_skill_contract is not None:
-                # A supplied advertisement is authoritative even for a legacy
-                # profile. Never silently emit v3 to a v4-only controller.
-                # No-advertisement v3 replay keeps its historical behavior.
-                from .contracts.control_skill_contract import ControlSkillContract
-                contract = ControlSkillContract.model_validate(self.control_skill_contract)
-                if robot_profile.commands_version not in contract.supported_protocols:
-                    raise ValueError("unsupported_protocol_version: commands_" + robot_profile.commands_version)
+            from .planning.dual_v4_planner import require_v4_contract, plan_v4
+            if robot_profile.commands_version != "4.1":
+                raise ValueError("unsupported_protocol_version: dual_requires_4.1")
+            require_v4_contract(self.control_skill_contract)
             if arm_states is None:
                 raise ValueError("robot_runtime_state_unknown")
             assignment_audit = []
             grounded = resolve_arms(grounded, robot_profile, arm_usage=intent.arm_usage,
                                     runtime=arm_states, audit=assignment_audit,
-                                    model_provider=(self.skill_planner.provider
-                                        if robot_profile.commands_version == "4.0" else None),
+                                    model_provider=self.skill_planner.provider,
                                     scene=scene, capture=capture)
             operations = grounded.operations
-            if any(op.parallel_required for op in operations) and not robot_profile.coordinated_execution:
-                raise ValueError("dual_coordinated_execution_not_registered")
             from .planning.skill_planner_router import PlanningTrace
             mode = "qwen" if self.skill_planner.mode == "qwen" else "recipe"
             trace = self.skill_planner.last_trace = PlanningTrace(self.skill_planner.mode, used_planner=mode)
-            if robot_profile.commands_version == "4.0":
-                from .planning.dual_v4_planner import plan_v4
-                commands = plan_v4(request_id=request_id, task=grounded, scene=scene,
-                    profile=robot_profile, revision=robot_setup_revision, runtime=arm_states,
-                    skill_contract=self.control_skill_contract, provider=self.skill_planner.provider,
-                    recipe=self.dual_skill_recipe, trace=trace)
-            elif mode == "qwen":
-                from .planning.dual_qwen_planner import DualQwenPlanner
-                commands = DualQwenPlanner().plan(request_id, grounded, scene, robot_profile,
-                    robot_setup_revision, arm_states, self.skill_planner.provider, REGISTRY, trace)
-            else:
-                commands = DualArmRecipePlanner().plan(request_id, grounded, scene, robot_profile.setup,
-                                                      robot_setup_revision, arm_states)
-            from .planning.dual_capability import validate_dual_capability
-            if robot_profile.commands_version != "4.0":
-                validate_dual_capability(commands, robot_profile)
+            commands = plan_v4(request_id=request_id, task=grounded, scene=scene,
+                profile=robot_profile, revision=robot_setup_revision, runtime=arm_states,
+                skill_contract=self.control_skill_contract, provider=self.skill_planner.provider,
+                recipe=self.dual_skill_recipe, trace=trace)
             by_entity = {e.entity_id: e.scene_object_id for e in grounded.entities}
             return BrainResult(task_intent=intent, grounded_task=grounded, commands=commands,
                 focus_object_ids=list(dict.fromkeys(by_entity[op.source or op.target] for op in operations)),

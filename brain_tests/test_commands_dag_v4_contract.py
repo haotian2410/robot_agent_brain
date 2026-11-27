@@ -23,31 +23,10 @@ def test_dag_rejects_cycle():
         ])
 
 
-@pytest.mark.parametrize("mode,code", [
-    ("same_arm", "sync_same_arm"),
-    ("dependent", "sync_dependency_conflict"),
-    ("resource", "sync_resource_conflict"),
-])
-def test_sync_cannot_deadlock_with_arm_dependency_or_exclusive_resource(mode, code):
-    data = dict(request_id="sync", scene_id=1, scene_version=1, scene_digest="d",
-        robot_setup_revision=0, skill_contract_revision="s", commands=[
-            {"command_id": "a", "operation_id": "o1", "arm": "left", "skill_name": "pick"},
-            {"command_id": "b", "operation_id": "o2", "arm": "right", "skill_name": "pick"}],
-        sync_groups=[{"sync_id": "together", "command_ids": ["a", "b"]}])
-    if mode == "same_arm":
-        data["commands"][1].update(arm="left", depends_on=["a"])
-    elif mode == "dependent":
-        data["commands"][1]["depends_on"] = ["a"]
-    else:
-        data["resource_groups"] = [{"resource_id": "basket", "command_ids": ["a", "b"]}]
-    with pytest.raises(ValueError, match=code):
-        CommandsFileV4.model_validate(data)
-
-
 def test_dag_builder_orders_same_arm_and_keeps_parallel_arms():
     ops = [
-        type("Op", (), {"operation_id": "o1", "arm": "left"})(),
-        type("Op", (), {"operation_id": "o2", "arm": "right"})(),
+        type("Op", (), {"operation_id": "o1", "arm": "left", "depends_on": []})(),
+        type("Op", (), {"operation_id": "o2", "arm": "right", "depends_on": []})(),
     ]
     result = build_commands_dag(
         request_id="r", scene_id=1, scene_version=1, scene_digest="d",

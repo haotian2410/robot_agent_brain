@@ -4,7 +4,6 @@ import re
 from ..semantics.motion_evidence import _extract_motion_spans, resolve_motion_evidence
 from typing import Any, Protocol, Literal
 from ..contracts.robot_setup import RobotSetupRequest, RobotAssetSwitchRequest
-from ..contracts.task_intent import TaskHoldConstraint
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from ..contracts.turn import BrainTurn, SceneEditIntent, SceneEditPlan, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
 
@@ -114,9 +113,6 @@ class ParseOperation(BaseModel):
     placement_target: PlacementTarget | None = None
     depends_on: list[str] = Field(default_factory=list)
     arm: Literal["left", "right", "single"] | None = None
-    parallel_group: str | None = Field(default=None, min_length=1)
-    parallel_required: bool = False
-    same_arm_group: str | None = Field(default=None, min_length=1)
     assignment_mode: str = Field(default="broadcast", pattern=r"^(broadcast|pairwise|repeat_all|relation_matched)$")
 
 
@@ -175,11 +171,10 @@ class RobotOperationWire(BaseModel):
     distance_m: float | None = Field(default=None, gt=0, le=2)
     motion_scale: MotionScale | None = None
     placement_target: PlacementTarget | None = None
-    depends_on: list[str] = Field(default_factory=list)
+    depends_on: list[str] = Field(default_factory=list, description=(
+        "Explicit operation completion dependencies. Operations are numbered op-1, op-2 by array order. "
+        "For '先A，完成后再B', B must reference op-1. Independent/simultaneous operations use []."))
     arm: Literal["left", "right", "single"] | None = None
-    parallel_group: str | None = Field(default=None, min_length=1)
-    parallel_required: bool = False
-    same_arm_group: str | None = Field(default=None, min_length=1)
     assignment_mode: str = Field(default="broadcast", pattern=r"^(broadcast|pairwise|repeat_all|relation_matched)$")
 
     @model_validator(mode="before")
@@ -267,7 +262,6 @@ class TaskParseOutput(BaseModel):
     # the adapter output makes migration metrics truthful for non-scene turns.
     protocol_version: Literal["task_understanding.v2", "task_understanding.v3", "task_understanding.v3.1"] = "task_understanding.v3.1"
     arm_usage: Literal["unspecified", "both_required"] = "unspecified"
-    hold_constraints: list[TaskHoldConstraint] = Field(default_factory=list)
     status: TurnStatus = TurnStatus.ACCEPTED
     turn_kind: TurnKind = TurnKind.ROBOT_TASK
     clarification_question: str | None = None
@@ -284,8 +278,6 @@ class TaskParseOutput(BaseModel):
     def validate_turn(self):
         if self.status == TurnStatus.ACCEPTED and self.clarification_question is not None:
             raise ValueError("task_semantic_invalid: accepted turn cannot contain clarification_question")
-        if self.hold_constraints and (self.status != TurnStatus.ACCEPTED or self.turn_kind != TurnKind.ROBOT_TASK):
-            raise ValueError("task_semantic_invalid: hold constraints require accepted robot task")
         if self.arm_usage != "unspecified" and (self.status != TurnStatus.ACCEPTED or self.turn_kind != TurnKind.ROBOT_TASK):
             raise ValueError("task_semantic_invalid: arm usage requires accepted robot task")
         payloads = {TurnKind.SCENE_EDIT: self.scene_edit, TurnKind.SCENE_LAYOUT: self.arrangement_spec,
@@ -321,10 +313,6 @@ class TaskParseOutput(BaseModel):
         both = any(token in text for token in ("两只手各", "两臂分别", "用双臂分别", "both hands", "both arms must"))
         if both and self.arm_usage != "both_required" and {op.arm for op in self.operations} != {"left", "right"}:
             raise ValueError("task_semantic_invalid: arm_usage_required")
-        stable = (any(token in text for token in ("左臂保持", "右臂保持", "先不要松手", "hold position"))
-                  and any(token in text for token in ("左臂", "右臂", "left arm", "right arm")))
-        if stable and not self.hold_constraints:
-            raise ValueError("task_semantic_invalid: hold_constraint_required")
         moves = [o for o in self.operations if o.type == TaskType.MOVE]
         spans = resolve_motion_evidence(instruction, len(moves)) if moves else []
         operation_values = []
@@ -350,7 +338,6 @@ class TaskParseOutput(BaseModel):
         return apply_tabletop_placement_region(TaskIntent(
             instruction=instruction,
             arm_usage=self.arm_usage,
-            hold_constraints=self.hold_constraints,
             entities=[TaskEntity(
                 entity_id=item.id,
                 semantic_name=item.name,
@@ -390,7 +377,6 @@ class TaskParseWireOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
     protocol_version: Literal["task_understanding.v2", "task_understanding.v3", "task_understanding.v3.1"] = "task_understanding.v3.1"
     arm_usage: Literal["unspecified", "both_required"] = "unspecified"
-    hold_constraints: list[TaskHoldConstraint] = Field(default_factory=list)
     status: TurnStatus = TurnStatus.ACCEPTED
     turn_kind: TurnKind = TurnKind.ROBOT_TASK
     clarification_question: str | None = None
@@ -427,8 +413,6 @@ class TaskParseWireOutput(BaseModel):
     def validate_envelope(self):
         if self.status == TurnStatus.ACCEPTED and self.clarification_question is not None:
             raise ValueError("task_semantic_invalid: accepted turn cannot contain clarification_question")
-        if self.hold_constraints and (self.status != TurnStatus.ACCEPTED or self.turn_kind != TurnKind.ROBOT_TASK):
-            raise ValueError("task_semantic_invalid: hold constraints require accepted robot task")
         if self.arm_usage != "unspecified" and (self.status != TurnStatus.ACCEPTED or self.turn_kind != TurnKind.ROBOT_TASK):
             raise ValueError("task_semantic_invalid: arm usage requires accepted robot task")
         payloads = {
@@ -474,10 +458,6 @@ class TaskParseWireOutput(BaseModel):
         both = any(token in text for token in ("两只手各", "两臂分别", "用双臂分别", "both hands", "both arms must"))
         if both and self.arm_usage != "both_required" and {op.arm for op in self.operations} != {"left", "right"}:
             raise ValueError("task_semantic_invalid: arm_usage_required")
-        stable = (any(token in instruction for token in ("左臂保持", "右臂保持", "先不要松手", "hold position"))
-                  and any(token in instruction for token in ("左臂", "右臂", "left arm", "right arm")))
-        if stable and not self.hold_constraints:
-            raise ValueError("task_semantic_invalid: hold_constraint_required")
         moves = [o for o in self.operations if o.operation == TaskType.MOVE]
         spans = resolve_motion_evidence(instruction, len(moves)) if moves else []
         operation_values = []
@@ -519,7 +499,7 @@ class TaskParseWireOutput(BaseModel):
                      for item in self.relations]
         return apply_tabletop_placement_region(TaskIntent(
             instruction=instruction, arm_usage=self.arm_usage,
-            hold_constraints=self.hold_constraints, entities=entities,
+            entities=entities,
             operations=operation_values, spatial_relations=relations))
 
     def to_brain_turn(self, instruction: str) -> BrainTurn:

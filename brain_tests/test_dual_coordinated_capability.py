@@ -1,59 +1,41 @@
 import pytest
 
 from robot_agent_brain.models.task_understanding import TaskParseOutput
-from test_dual_session_pipeline import configured
-from test_dual_qwen_planner import Provider
+from test_dual_v4_pipeline import setup
+from test_layout_qwen_planning import provider_for
 
 
 def task(parallel=True):
+    # Retain the helper argument for historical recovery fixtures; it no
+    # longer encodes Brain-owned synchronization in the semantic payload.
     return TaskParseOutput.model_validate({
         "entities": [{"id": name, "name": name, "category": "fruit"} for name in ("apple", "banana")],
-        "operations": [{"type": "grasp", "target": name, "arm": side,
-                        "parallel_group": "optional" if parallel else None, "parallel_required": False}
+        "operations": [{"type": "grasp", "target": name, "arm": side}
                        for name, side in (("apple", "left"), ("banana", "right"))],
     }).to_brain_turn("分别抓苹果和香蕉")
 
 
-def model_output():
-    return {"stages": [{side: {"operation_id": op, "skill": skill, "target_role": "target", "region": region}
-                        for side, op in (("left", "op-1"), ("right", "op-2"))}
-                       for skill, region in (("locate", None), ("move", "grasp_region"), ("grasp", None))]}
-
-
 @pytest.mark.parametrize("mode", ["recipe", "qwen"])
-def test_optional_parallel_still_requires_final_coordinated_capability(mode):
-    session, registry = configured(mode)
-    registry.profiles["fixture_only"].coordinated_execution = False
+def test_ordinary_dual_skills_do_not_require_coordinated_execution_flag(mode):
+    session = setup(mode)
+    session.robot_profiles.profiles["fixture_only"].coordinated_execution = False
+    requests = []
     if mode == "qwen":
-        session.pipeline.skill_planner.provider = Provider(model_output())
-    with pytest.raises(ValueError, match="dual_coordinated_execution_not_registered"):
-        session.process_turn("parallel", task())
-    assert not session.exported_commands
+        session.pipeline.skill_planner.provider = provider_for({"operations": [
+            {"operation_id": op, "steps": [{"skill_name": "pick", "parameters": {"source": oid}}]}
+            for op, oid in (("op-1", 7), ("op-2", 8))]}, requests)
+    result = session.process_turn("ordinary", task())
+    assert result.commands.schema_version == "4.1"
+    assert all(not command.depends_on for command in result.commands.commands)
+    assert not {"resource_groups", "hold_constraints", "sync_groups"} & result.commands.model_dump().keys()
+    if mode == "qwen":
+        assert len(requests) == 1
 
 
-def test_v3_serial_consumer_does_not_require_parallel_capability():
-    session, registry = configured()
-    registry.profiles["fixture_only"].coordinated_execution = False
-    result = session.process_turn("serial", task(False))
-    assert result.commands.schema_version == "3.0"
-    assert all(step.arms.left is None or step.arms.right is None for step in result.commands.steps)
-    session.mark_dispatched(result.commands)
-
-
-def test_dispatch_rechecks_changed_profile_capability():
-    session, registry = configured()
-    result = session.process_turn("parallel", task())
-    registry.profiles["fixture_only"].coordinated_execution = False
-    with pytest.raises(ValueError, match="dual_coordinated_execution_not_registered"):
+def test_planning_capability_does_not_authorize_unsupported_live_dispatch():
+    session = setup()
+    result = session.process_turn("ordinary", task())
+    with pytest.raises(ValueError, match="unsupported_protocol_version"):
         session.mark_dispatched(result.commands)
     assert session.pending_commands is None
-
-
-def test_dispatch_rejects_changed_profile_instance_mapping():
-    session, registry = configured()
-    result = session.process_turn("old", task(False))
-    profile = registry.profiles["fixture_only"]
-    profile.setup.arms["left"].robot_object_id = 3
-    profile.setup.arms["right"].robot_object_id = 2
-    with pytest.raises(ValueError, match="setup_mismatch"):
-        session.mark_dispatched(result.commands)
+    assert not session.dispatched_requests

@@ -31,7 +31,7 @@ def test_adapter_contract_is_defensive_validated_snapshot(tmp_path, as_model):
     else:
         advertised["skills"]["pick"]["parameters_schema"]["required"].append("changed")
         advertised["supported_protocols"].clear()
-    assert snapshot.supported_protocols == ["4.0"]
+    assert snapshot.supported_protocols == ["4.1"]
     assert snapshot.skills["pick"].parameters_schema["required"] == ["source"]
 
 
@@ -41,7 +41,7 @@ def test_invalid_contract_rejected_before_provider_or_asset_initialization(tmp_p
     monkeypatch.setattr(BrainConfig, "load_assets", forbidden)
     raw = contract()
     raw["supports_sync"] = "true"
-    with pytest.raises(ValueError, match="bool_type"):
+    with pytest.raises(ValueError, match="extra_forbidden"):
         BrainApplication(BrainConfig(output_dir=str(tmp_path)), control_skill_contract=raw)
 
 
@@ -81,7 +81,7 @@ def test_application_session_can_plan_with_explicit_contract_without_dispatch(tm
     session.initialize_scene(fixture.scene)
     session.bind_imported_profile(fixture.robot_profiles.profiles["fixture_only"])
     result = session.process_turn("explicit-contract", task())
-    assert result.commands.schema_version == "4.0"
+    assert result.commands.schema_version == "4.1"
     assert result.commands.skill_contract_revision == "fixture-reviewed-v1"
     assert result.commands.commands[0].parameters == {"source": 7}
     with pytest.raises(ValueError, match="unsupported_protocol_version"):
@@ -99,7 +99,7 @@ def test_application_session_can_plan_with_explicit_contract_without_dispatch(tm
     commands = json.loads(Path(report.artifacts["commands"]).read_text())
     scene = json.loads(Path(report.artifacts["scene_config"]).read_text())
     from robot_agent_brain.web.protocol import digest
-    assert commands["schema_version"] == "4.0"
+    assert commands["schema_version"] == "4.1"
     assert commands["scene_digest"] == digest(scene) == digest(before)
     assert commands["skill_contract_revision"] == "fixture-reviewed-v1"
     assert session.scene.raw_document() == before

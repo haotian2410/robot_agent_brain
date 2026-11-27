@@ -62,73 +62,26 @@ def test_fully_locked_tasks_skip_camera_and_model():
     assert [op.arm for op in result.operations] == ["left", "right"]
 
 
-def test_same_arm_group_propagates_explicit_lock_across_objects_without_model():
-    session, task, frame = inputs()
-    for op in task.operations:
-        op.same_arm_group = "one-arm"
-    audit = []
-    requests = []
-    result = resolve_arms(task, session.robot_profiles.profiles["fixture_only"],
-        runtime=session.arm_states, scene=session.scene, capture=lambda: frame,
-        model_provider=provider_for(output(), requests), audit=audit)
-    assert [op.arm for op in result.operations] == ["left", "left"]
-    assert not requests
-    assert audit[1]["source"] == "same_arm_constraint"
-
-
-def test_same_arm_group_conflicting_explicit_locks_refused_before_model():
-    session, task, frame = inputs()
-    for op in task.operations:
-        op.same_arm_group = "one-arm"
-    task.operations[1].arm = "right"
-    requests = []
-    with pytest.raises(ValueError, match="same_arm_conflict"):
-        allocate(session, task, frame, provider_for(output(), requests))
-    assert not requests
-
-
-def test_visual_assignment_cannot_split_user_same_arm_group():
-    session, task, frame = inputs()
-    for op in task.operations:
-        op.arm = None
-        op.same_arm_group = "one-arm"
-    requests = []
-    with pytest.raises(QwenProviderError, match="continuity"):
-        resolve_arms(task, session.robot_profiles.profiles["fixture_only"],
-            runtime=session.arm_states, scene=session.scene, capture=lambda: frame,
-            model_provider=provider_for(output(), requests))
-    assert len(requests) == 1
-
-
-def test_same_arm_constraint_survives_wire_and_compact_round_trip():
-    from robot_agent_brain.models.task_understanding import RobotOperationWire
-    from robot_agent_brain.models.understanding_wire import encode, decode
-    payload = {"protocol_version": "3.0", "turn_kind": "robot_task", "status": "accepted",
+@pytest.mark.parametrize("field", ["same_arm_group", "parallel_group", "parallel_required"])
+def test_retired_assignment_constraints_rejected_at_semantic_boundary(field):
+    from robot_agent_brain.models.task_understanding import TaskParseWireOutput
+    data = {"status": "accepted", "turn_kind": "robot_task",
         "entities": [{"entity_id": "apple", "semantic_name": "apple", "category": "fruit"}],
-        "operations": [{"operation": "grasp", "target": "apple", "same_arm_group": "same"}]}
-    expanded = decode(encode(payload))
-    operation = RobotOperationWire.model_validate(expanded["operations"][0]).to_operation("op-1")
-    assert operation.same_arm_group == "same"
+        "operations": [{"operation": "grasp", "target": "apple", field: None}]}
+    with pytest.raises(ValueError):
+        TaskParseWireOutput.model_validate(data)
 
 
-def test_transitive_same_arm_groups_preserve_held_owner():
-    from robot_agent_brain.contracts.grounded_task import GroundedEntity
-    from robot_agent_brain.contracts.task_intent import Operation
-    session, task, _ = inputs()
-    task.operations[0].arm = None
-    task.operations[0].same_arm_group = "a"
-    task.operations[1].same_arm_group = "a"
-    task.entities.append(GroundedEntity(entity_id="third", semantic_name="apple",
-        category="fruit", scene_object_id=99))
-    task.operations.extend([
-        Operation(operation_id="op-c", task_type="grasp", target="banana", same_arm_group="b"),
-        Operation(operation_id="op-d", task_type="grasp", target="third", same_arm_group="b")])
-    session.arm_states.arms["right"].holding_object = 99
-    result = resolve_arms(task, session.robot_profiles.profiles["fixture_only"], runtime=session.arm_states)
-    assert [op.arm for op in result.operations] == ["right"] * 4
-    task.operations[0].arm = "left"
-    with pytest.raises(ValueError, match="same_arm_conflict"):
-        resolve_arms(task, session.robot_profiles.profiles["fixture_only"], runtime=session.arm_states)
+def test_visual_assignment_request_contains_no_same_arm_groups():
+    session, task, frame = inputs()
+    captured = []
+    class Provider:
+        def assign_arms(self, request):
+            captured.append(request.model_dump(mode="json"))
+            return output()
+    result = allocate(session, task, frame, Provider())
+    assert "same_arm_groups" not in captured[0]
+    assert [op.arm for op in result.operations] == ["left", "right"]
 
 
 @pytest.mark.parametrize("field", ["scene_id", "scene_version", "scene_sub_version"])

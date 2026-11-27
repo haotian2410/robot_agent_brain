@@ -9,7 +9,7 @@ from test_layout_qwen_planning import provider_for
 def setup(mode="recipe"):
     session, registry = configured(mode=mode)
     data = registry.model_dump()
-    data["profiles"]["fixture_only"]["commands_version"] = "4.0"
+    data["profiles"]["fixture_only"]["commands_version"] = "4.1"
     registry = RobotProfileRegistry.model_validate(data)
     session.robot_profiles = registry
     session.initialize_scene(session.scene)
@@ -26,12 +26,12 @@ def setup(mode="recipe"):
 def test_explicit_v4_profile_uses_negotiated_dag_without_legacy_planner():
     session = setup()
     result = session.process_turn("v4", task("right"))
-    assert result.commands.schema_version == "4.0"
+    assert result.commands.schema_version == "4.1"
     assert result.commands.scene_digest == digest(session.scene)
     assert result.commands.commands[0].arm == "right"
     assert result.commands.commands[0].parameters == {"source": 7}
     assert result.planner_trace["arm_assignment"][0]["source"] == "explicit_arm"
-    assert session.exported_commands["v4"]["schema_version"] == "4.0"
+    assert session.exported_commands["v4"]["schema_version"] == "4.1"
     # A successful plan does not change the real gripper or claim dispatch.
     assert session.arm_states.arms["right"].holding_object is None
 
@@ -61,7 +61,7 @@ def test_v4_expansion_keeps_same_physical_actor_order_across_aliases():
             {"operation_id": "op-one", "task_type": "grasp", "target": "a", "arm": "left"},
             {"operation_id": "op-two", "task_type": "grasp", "target": "alias", "arm": "right"}])
     expanded = TaskExpander().expand(grounded, serial_barriers=False)
-    assert expanded.operations[1].depends_on == ["op-one"]
+    assert expanded.operations[1].depends_on == []
 
 
 @pytest.mark.parametrize("reverse", [False, True])
@@ -80,7 +80,7 @@ def test_v4_expansion_orders_reference_and_actor_conflicts(reverse):
         entities=[{"entity_id": name, "semantic_name": name, "category": "fruit", "scene_object_id": oid}
                   for name, oid in (("apple", 7), ("banana", 8))], operations=operations)
     result = TaskExpander().expand(grounded, serial_barriers=False)
-    assert result.operations[1].depends_on == ["op-1"]
+    assert result.operations[1].depends_on == []
 
 
 def test_v4_shared_destination_does_not_become_whole_operation_barrier():
@@ -124,7 +124,7 @@ def test_contract_preflight_precedes_unlocked_arm_assignment(monkeypatch, advert
     monkeypatch.setattr("robot_agent_brain.planning.arm_assignment_resolver.resolve_arms",
                         forbidden_assignment)
     before = session.scene.raw_document()
-    expected = "bool_type" if advertisement == "invalid" else "unsupported_protocol_version"
+    expected = "extra_forbidden" if advertisement == "invalid" else "unsupported_protocol_version"
     with pytest.raises(ValueError, match=expected):
         session.process_turn("preflight-" + advertisement, task(arm=None))
     assert not calls
@@ -196,7 +196,23 @@ def test_v4_qwen_uses_operation_local_schema_and_actual_skill_contract():
     assert result.commands.commands[0].parameters == {"source": 7}
 
 
-def test_held_source_cannot_be_reassigned_by_default_or_explicit_request():
+@pytest.mark.parametrize("fault", ["scene_version", "source", "arm", "dependency"])
+def test_bound_planning_request_cannot_drift_from_grounded_task(fault):
+    from robot_agent_brain.models.dual_operation_planning import DualOperationPlanningRequest
+    session = setup()
+    session.process_turn("bound", task())
+    raw = session.pipeline.skill_planner.last_trace.context.model_dump(mode="python")
+    if fault == "scene_version":
+        raw["scene_version"] += 1
+    else:
+        field, value = {"source": ("source_object_id", 8), "arm": ("arm", "left"),
+                        "dependency": ("depends_on", ["invented"])}[fault]
+        raw["operations"][0][field] = value
+    with pytest.raises(ValueError, match="binding_mismatch"):
+        DualOperationPlanningRequest.model_validate(raw)
+
+
+def test_runtime_hold_does_not_override_operation_arm_or_default():
     from robot_agent_brain.planning.arm_assignment_resolver import resolve_arms
     from robot_agent_brain.contracts.grounded_task import GroundedTask
     session = setup()
@@ -207,8 +223,9 @@ def test_held_source_cannot_be_reassigned_by_default_or_explicit_request():
     audit = []
     allocated = resolve_arms(grounded, session.robot_profiles.profiles["fixture_only"],
         runtime=session.arm_states, audit=audit)
-    assert allocated.operations[0].arm == "right"
-    assert audit[0]["source"] == "held_object"
+    assert allocated.operations[0].arm == "left"
+    assert audit[0]["source"] == "configured_default_arm"
     grounded.operations[0].arm = "left"
-    with pytest.raises(ValueError, match="held_object_conflict"):
-        resolve_arms(grounded, session.robot_profiles.profiles["fixture_only"], runtime=session.arm_states)
+    explicit = resolve_arms(grounded, session.robot_profiles.profiles["fixture_only"], runtime=session.arm_states)
+    assert explicit.operations[0].arm == "left"
+    assert session.arm_states.arms["right"].holding_object == 7

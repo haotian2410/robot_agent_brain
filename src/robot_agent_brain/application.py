@@ -352,8 +352,17 @@ class BrainApplication:
         profile = None
         if self.config.scene_robot_profile is not None:
             profile = self.config.robot_profiles.profiles[self.config.scene_robot_profile]
+            declared_setup = scene.raw_document().get("robot_setup")
+            if declared_setup is not None:
+                from .contracts.robot_setup import RobotSetup
+                declared_setup = RobotSetup.model_validate(declared_setup)
+                if (declared_setup.mode, declared_setup.profile_id) != (
+                        profile.setup.mode, profile.setup.profile_id):
+                    raise ValueError("robot_profile_scene_mode_mismatch")
             profile.validate_scene(scene)
-        elif self.config.scene_platform_object_ids is not None:
+        elif self.config.robot_profiles.profiles:
+            profile = self.config.robot_profiles.resolve_scene(scene)
+        if profile is None and self.config.scene_platform_object_ids is not None:
             if not self.config.scene_platform_object_ids <= {o.object_id_in_scene for o in scene.objects}:
                 raise ValueError("scene_platform_manifest_invalid")
         session.initialize_scene(scene)
@@ -742,8 +751,11 @@ class BrainApplication:
                 # of Control support. Session/profile validation still follows,
                 # and mark_dispatched separately refuses the legacy v2 adapter.
                 if (turn.turn_kind == "robot_task" and turn.task_intent is not None
+                        and not (((session.robot_setup is not None and session.robot_setup.mode == "single")
+                                  or (session.robot_mode_lock is not None and session.robot_mode_lock.mode == "single"))
+                                 and turn.task_intent.arm_usage != "both_required")
                         and (turn.task_intent.arm_usage == "both_required"
-                             or any(op.arm in {"left", "right"} or op.parallel_group is not None
+                             or any(op.arm in {"left", "right"}
                                     for op in turn.task_intent.operations))):
                     contract = self.pipeline.control_skill_contract
                     if contract is None:

@@ -30,7 +30,6 @@
   "status": "accepted",
   "turn_kind": "scene_edit",
   "arm_usage": "unspecified",
-  "hold_constraints": [],
   "clarification_question": null,
   "scene_edit": null,
   "arrangement_spec": null,
@@ -76,7 +75,6 @@
 - `entities = []`
 - `operations = []`
 - `relations = []`
-- `hold_constraints = []`
 
 同时必须填写具体的 `clarification_question`。不要在拒绝或澄清响应中附带半成品操作。
 
@@ -626,7 +624,12 @@ left_of、right_of、front_of、behind、above、below、near、on、inside
 
 用户说“先增加篮子，再在篮子内部增加苹果”时，先生成 basket，再让 apple 的 operation reference=basket。必要时使用 `operation_id` 和 `depends_on`，但不得让后续操作引用尚未声明的实体。
 
-用户没有明确同时执行机器人动作时，不添加 `parallel_group`。
+机器人操作仅保留用户明确表达的先后关系为 `depends_on`；“同时”“分别”、共享对象或目的地不产生跨操作依赖。
+机器人操作按数组位置由Python编号为op-1、op-2……，depends_on引用这些编号。
+例如“先用左臂抓起苹果，完成后再用右臂抓起香蕉”：
+operations=[{"operation":"grasp","target":"apple","arm":"left"},
+{"operation":"grasp","target":"banana","arm":"right","depends_on":["op-1"]}]。
+“完成后再”“先……再……”的明确完成顺序必须保留；不能省略成两个独立操作。
 
 用户说"生成一个苹果，再让它向右移动五厘米"时，两个操作都是场景编辑：第一个是 `add`，第二个是 `translate`。没有明确机器人执行意图时，"移动五厘米"是场景编辑；明确要求机械臂执行时仍按 robot_task 解析，具体距离不能覆盖动作主体和路由。无法用当前机器人协议表达时澄清，不能改成场景编辑执行。
 
@@ -759,7 +762,6 @@ Python 的场景解析器处理。
   "status": "accepted",
   "turn_kind": "robot_task",
   "arm_usage": "unspecified",
-  "hold_constraints": [],
   "clarification_question": null,
   "scene_edit": null,
   "arrangement_spec": null,
@@ -790,7 +792,6 @@ Python 的场景解析器处理。
   "status": "accepted",
   "turn_kind": "robot_task",
   "arm_usage": "unspecified",
-  "hold_constraints": [],
   "clarification_question": null,
   "scene_edit": null,
   "arrangement_spec": null,
@@ -851,8 +852,10 @@ operation 必须明确输出：create 新增独立组；append 仅追加新成�
 只重排既有成员、不新建对象；replace 替换组内资产。“重新排成”是 rearrange，
 不是 create；必须保持该组 ID 和原有数量，除非用户明确要求改变成员。
 
-## 双臂同臂约束
+## 机械臂模式与操作分工
 
-用户明确要求若干操作使用同一只机械臂，但未指定左右时，为这些操作填写相同的
-same_arm_group 标签，保留已有显式 arm。它不是 parallel_group，不表示同时执行。
-不同物体可以属于同一组；只出现多个物体不意味着自动要求双臂，也不得擅自分成左右臂。
+robot_setup_request 仅表达用户明确的首轮模式和 profile 选择，不根据物体数量推断模式。
+operation.arm 保留用户明确指定的左/右臂；未指定时留空，由后续分臂处理。
+双臂会话本轮仅用左臂不等于改成单臂模式。
+本轮只输出语义操作及显式 depends_on，不生成技能、等待、资源锁、保持或同步调度。
+需要未注册协作能力（倒水、交接、联合抓取）时明确能力限制，不能拆成普通抓取冒充支持。

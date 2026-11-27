@@ -12,8 +12,8 @@ def parsed():
     return {"turn_kind": "robot_task", "robot_setup_request": {"mode": "dual"},
             "entities": [{"id": "apple", "name": "apple", "category": "fruit"},
                          {"id": "banana", "name": "banana", "category": "fruit"}],
-            "operations": [{"type": "grasp", "target": "apple", "arm": "left", "parallel_group": "g1", "parallel_required": True},
-                           {"type": "grasp", "target": "banana", "arm": "right", "parallel_group": "g1", "parallel_required": True}]}
+            "operations": [{"type": "grasp", "target": "apple", "arm": "left"},
+                           {"type": "grasp", "target": "banana", "arm": "right"}]}
 
 
 def test_config_and_task_only_allowed_combination_and_no_default_mode():
@@ -34,23 +34,23 @@ def test_config_and_task_only_allowed_combination_and_no_default_mode():
         BrainTurn(status="clarification_required", turn_kind="robot_config", instruction="bad", robot_setup_request={"mode": "dual"})
 
 
-def test_expansion_keeps_parallel_peers_and_barrier_after_both():
+def test_dual_expansion_keeps_only_explicit_dependencies():
     task = TaskParseOutput.model_validate(parsed()).to_task_intent("抓取")
-    task.operations.append(task.operations[0].model_copy(update={"operation_id": "op-3", "parallel_group": None, "parallel_required": False}))
+    task.operations.append(task.operations[0].model_copy(update={"operation_id": "op-3", "depends_on": ["op-2"]}))
     grounded = GroundedTask(instruction="抓取", scene_id=1, scene_version=1,
         entities=[{"entity_id": name, "semantic_name": name, "category": "fruit", "scene_object_id": i}
                   for i, name in enumerate(("apple", "banana"), 7)], operations=task.operations)
-    expanded = TaskExpander().expand(grounded)
+    expanded = TaskExpander().expand(grounded, serial_barriers=False)
     assert expanded.operations[0].depends_on == []
     assert expanded.operations[1].depends_on == []
-    assert expanded.operations[2].depends_on == ["op-1", "op-2"]
+    assert expanded.operations[2].depends_on == ["op-2"]
 
 
-def test_parallel_dependency_conflict_rejected():
+def test_explicit_cross_arm_dependency_is_preserved():
     data = parsed()
     data["operations"][1]["depends_on"] = ["op-1"]
-    with pytest.raises(ValueError, match="parallel dependency conflict"):
-        TaskParseOutput.model_validate(data).to_task_intent("bad")
+    intent = TaskParseOutput.model_validate(data).to_task_intent("先左臂再右臂")
+    assert intent.operations[1].depends_on == ["op-1"]
 
 
 def test_explicit_arm_move_is_not_reclassified_as_scene_edit():

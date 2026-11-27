@@ -20,7 +20,6 @@ def _scene_edit_payload(*, reference="table", name="table"):
         "status": "accepted",
         "turn_kind": "scene_edit",
         "arm_usage": "unspecified",
-        "hold_constraints": [],
         "clarification_question": None,
         "scene_edit": {
             "scene_basis": "current",

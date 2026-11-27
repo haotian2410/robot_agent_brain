@@ -14,7 +14,7 @@ class RobotProfile(BaseModel):
     robot_object_ids: set[SceneId] = Field(min_length=1)
     platform_object_ids: set[SceneId] = Field(min_length=1)
     supported_skills: set[Literal["locate", "move", "grasp", "release"]]
-    commands_version: Literal["2.0", "3.0", "4.0"]
+    commands_version: Literal["2.0", "3.0", "4.1"]
     coordinated_execution: bool = False
     initial_state: RobotRuntimeState | None = None
     default_task_arm: Literal["left", "right", "single"] | None = None
@@ -30,9 +30,9 @@ class RobotProfile(BaseModel):
         ids = {o.object_id_in_scene for o in self.template.objects}
         if not self.robot_object_ids <= self.platform_object_ids <= ids:
             raise ValueError("robot_profile_manifest_invalid")
-        if self.setup.mode == "dual" and self.commands_version not in {"3.0", "4.0"}:
+        if self.setup.mode == "dual" and self.commands_version not in {"3.0", "4.1"}:
             raise ValueError("robot_profile_dual_requires_v3_or_v4")
-        if self.commands_version == "4.0" and self.setup.mode != "dual":
+        if self.commands_version == "4.1" and self.setup.mode != "dual":
             raise ValueError("robot_profile_v4_requires_dual")
         if self.default_task_arm is not None and self.default_task_arm not in self.setup.arms:
             raise ValueError("robot_profile_default_arm_invalid")
@@ -48,6 +48,8 @@ class RobotProfile(BaseModel):
         from ..scene.component_access import SceneIndex
         index = SceneIndex(scene)
         setup = setup or self.setup
+        if setup.mode != self.setup.mode or set(setup.arms) != set(self.setup.arms):
+            raise ValueError("robot_profile_scene_mode_mismatch")
         template_index = SceneIndex(self.template)
         for side, arm in setup.arms.items():
             if index.robot_driver(arm.robot_object_id) is None:
@@ -91,3 +93,29 @@ class RobotProfileRegistry(BaseModel):
         if profile.setup.mode != request.mode:
             raise ValueError("robot_setup_profile_mode_mismatch")
         return profile.model_copy(deep=True)
+
+    def resolve_scene(self, scene):
+        """Resolve declared scene setup or a unique exact active-driver binding."""
+        from ..scene.component_access import SceneIndex
+        declared = scene.raw_document().get("robot_setup")
+        if declared is not None:
+            setup = RobotSetup.model_validate(declared)
+            profile = self.resolve(RobotSetupRequest(mode=setup.mode, profile_id=setup.profile_id))
+            profile.validate_scene(scene, setup)
+            return profile.model_copy(update={"setup": setup}, deep=True)
+        index = SceneIndex(scene)
+        active = {obj.object_id_in_scene for obj in scene.objects
+                  if index.robot_driver(obj.object_id_in_scene) is not None
+                  and index.robot_driver(obj.object_id_in_scene).role != "passive"}
+        matches = []
+        for profile in self.profiles.values():
+            if {arm.robot_object_id for arm in profile.setup.arms.values()} != active:
+                continue
+            try:
+                profile.validate_scene(scene)
+            except ValueError:
+                continue
+            matches.append(profile)
+        if len(matches) > 1:
+            raise ValueError("robot_scene_profile_ambiguous")
+        return matches[0].model_copy(deep=True) if matches else None

@@ -29,12 +29,14 @@ def task(arm="right"):
         "operations": [{"type": "grasp", "target": "apple", "arm": arm}]}).to_brain_turn("抓苹果")
 
 
-def test_session_generates_v3_and_inherits_dual_on_next_turn(tmp_path):
-    session, registry = configured()
+def test_session_generates_v41_and_inherits_dual_on_next_turn(tmp_path):
+    from test_dual_v4_pipeline import setup
+    session = setup()
+    registry = session.robot_profiles
     first = session.process_turn("first", task())
-    assert first.commands.schema_version == "3.0"
+    assert first.commands.schema_version == "4.1"
     assert first.skill_plan is None
-    assert all(stage.arms.left is None for stage in first.commands.steps)
+    assert {command.arm for command in first.commands.commands} == {"right"}
     assert session.arm_states.arms["right"].holding_object is None  # plan != execution
     store = SessionStore(tmp_path)
     with store.lock("s"):
@@ -42,14 +44,15 @@ def test_session_generates_v3_and_inherits_dual_on_next_turn(tmp_path):
         saved = store.load("s")
     resumed = store.restore(saved, BrainSession(None, session.pipeline, LocalScenePlatform(), robot_profiles=registry))
     second = resumed.process_turn("second", task(arm=None))
-    assert second.commands.robot_setup.mode == "dual"
-    assert all(stage.arms.right is None for stage in second.commands.steps)
+    assert resumed.robot_mode_lock.mode == "dual"
+    assert {command.arm for command in second.commands.commands} == {"left"}
     assert second.commands.robot_setup_revision == 1
 
 
 def test_qwen_mode_never_silently_uses_recipe():
-    session, _ = configured(mode="qwen")
-    with pytest.raises(ValueError, match="dual_qwen_planner_not_configured"):
+    from test_dual_v4_pipeline import setup
+    session = setup("qwen")
+    with pytest.raises(ValueError, match="dual_v4_qwen_planner_not_configured"):
         session.process_turn("q", task())
     assert not session.exported_commands
 
@@ -66,7 +69,7 @@ def test_v3_profile_cannot_override_explicit_v4_only_advertisement(mode, monkeyp
     monkeypatch.setattr("robot_agent_brain.planning.arm_assignment_resolver.resolve_arms",
                         forbidden_assignment)
     before = session.scene.raw_document()
-    with pytest.raises(ValueError, match="unsupported_protocol_version: commands_3.0"):
+    with pytest.raises(ValueError, match="unsupported_protocol_version: dual_requires_4.1"):
         session.process_turn("v3-profile-v4-controller", task())
     assert not calls
     assert not session.exported_commands
@@ -74,7 +77,9 @@ def test_v3_profile_cannot_override_explicit_v4_only_advertisement(mode, monkeyp
 
 
 def test_no_initial_state_declaration_does_not_invent_empty_grippers():
-    session, registry = configured()
+    from test_dual_v4_pipeline import setup
+    session = setup()
+    registry = session.robot_profiles
     session.initialize_scene(session.scene)
     profile = registry.profiles["fixture_only"].model_copy(update={"initial_state": None})
     session.bind_imported_profile(profile)

@@ -31,8 +31,9 @@ def test_config_only_switch_and_inherited_single_task():
     assert "robot" not in result.commands.model_dump(mode="json", exclude_none=True)
     assert current.robot_setup.profile_id == "fixture_single"
     back = BrainTurn(status="accepted", turn_kind="robot_config", instruction="换双臂", robot_setup_request={"mode": "dual"})
-    current.process_turn("back", back)
-    assert current.robot_setup.mode == "dual" and current.robot_setup_revision == 3
+    with pytest.raises(ValueError, match="robot_mode_locked"):
+        current.process_turn("back", back)
+    assert current.robot_setup.mode == "single" and current.robot_setup_revision == 2
 
 
 def test_combined_switch_and_plan_commits_both_only_on_success():

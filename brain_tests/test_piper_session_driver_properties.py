@@ -77,6 +77,8 @@ def test_first_edit_can_publish_a_bootstrapped_scene_with_connection_data():
     result = session.process_initial_edit_turn("initial", edit_turn(), scene,
                                               bindings_override={}, edit_defaults=None)
     assert result.scene_replacement.scene_version == 1
+    assert session.session_turn_index == 1
+    assert session.first_accepted_turn_id == "initial"
 
 
 @pytest.mark.parametrize("field,value", [

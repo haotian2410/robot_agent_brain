@@ -56,9 +56,6 @@ class ControlSkillContract(BaseModel):
     supported_protocols: list[str] = Field(min_length=1)
     expansion_level: Literal["atomic", "task"]
     skills: dict[str, RegisteredControlSkill] = Field(min_length=1)
-    supports_sync: bool = Field(default=False, strict=True)
-    supports_resources: bool = Field(default=False, strict=True)
-    supports_hold: bool = Field(default=False, strict=True)
 
     @model_validator(mode="after")
     def coherent_advertisement(self):
@@ -88,9 +85,4 @@ class ControlSkillContract(BaseModel):
             if errors:
                 path = ".".join(map(str, errors[0].path)) or "parameters"
                 raise ValueError(f"control_skill_parameters_invalid: {command.command_id}.{path}")
-        for field, enabled in (("sync_groups", self.supports_sync),
-                               ("resource_groups", self.supports_resources),
-                               ("hold_constraints", self.supports_hold)):
-            if getattr(commands, field) and not enabled:
-                raise ValueError("control_dag_feature_unsupported: " + field)
         return commands

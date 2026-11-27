@@ -94,50 +94,27 @@ class Operation(StrictModel):
     placement_target: PlacementTarget | None = None
     depends_on: list[str] = Field(default_factory=list)
     arm: Literal["left", "right", "single"] | None = None
-    parallel_group: str | None = Field(default=None, min_length=1)
-    parallel_required: bool = False
-    same_arm_group: str | None = Field(default=None, min_length=1)
     assignment_mode: str = Field(default="broadcast", pattern=r"^(broadcast|pairwise|repeat_all|relation_matched)$")
 
     @model_validator(mode="after")
     def validate_operation(self):
-        if self.parallel_required and self.parallel_group is None:
-            raise ValueError("task_semantic_invalid: parallel_required needs parallel_group")
         from ..semantics.operation_contracts import validate_operation_contract
         validate_operation_contract(self)
-        return self
-
-
-class TaskHoldConstraint(StrictModel):
-    kind: Literal["hold_during_operation", "hold_until_operation"]
-    holder_arm: Literal["left", "right"]
-    object_entity: str
-    while_operation: str
-    holder_operation: str | None = None
-    region_entity: str | None = None
-    region: Literal["placement_region"] | None = None
-
-    @model_validator(mode="after")
-    def complete_milestone(self):
-        if (self.region is None) != (self.region_entity is None):
-            raise ValueError("dual_hold_region_incomplete")
-        if self.kind == "hold_until_operation" and (self.holder_operation is None or self.region is None):
-            raise ValueError("dual_hold_milestone_incomplete")
-        if self.kind == "hold_during_operation" and self.holder_operation is not None:
-            raise ValueError("dual_hold_unexpected_holder_operation")
         return self
 
 
 class TaskIntent(StrictModel):
     instruction: str = Field(min_length=1)
     arm_usage: Literal["unspecified", "both_required"] = "unspecified"
-    hold_constraints: list[TaskHoldConstraint] = Field(default_factory=list)
     entities: list[TaskEntity]
     operations: list[Operation]
     spatial_relations: list[SpatialRelation] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_references(self):
+        if (len(self.operations) == 2 and "完成后再" in self.instruction
+                and self.operations[0].operation_id not in self.operations[1].depends_on):
+            raise ValueError("task_explicit_dependency_missing")
         entity_ids = {item.entity_id for item in self.entities}
         # A reference may be a declared task entity or a registered
         # environment reference (for example ``table``/``桌面``).  The latter
@@ -152,27 +129,8 @@ class TaskIntent(StrictModel):
         operation_ids = {item.operation_id for item in self.operations}
         if len(operation_ids) != len(self.operations):
             raise ValueError("task_semantic_invalid: operation ids must be unique")
-        for hold in self.hold_constraints:
-            if (hold.object_entity not in entity_ids or hold.region_entity is not None and hold.region_entity not in entity_ids
-                    or hold.while_operation not in operation_ids
-                    or hold.holder_operation is not None and hold.holder_operation not in operation_ids):
-                raise ValueError("task_semantic_invalid: hold constraint reference missing")
         previous = set()
-        groups = {}
-        closed_groups = set()
-        active_group = None
         for operation in self.operations:
-            if operation.parallel_group != active_group:
-                if active_group is not None:
-                    closed_groups.add(active_group)
-                if operation.parallel_group in closed_groups:
-                    raise ValueError("task_semantic_invalid: parallel group must be contiguous")
-                active_group = operation.parallel_group
-            if operation.parallel_group is not None:
-                peers = groups.setdefault(operation.parallel_group, set())
-                if peers.intersection(operation.depends_on):
-                    raise ValueError("task_semantic_invalid: parallel dependency conflict")
-                peers.add(operation.operation_id)
             refs = {value for value in (operation.source, operation.destination, operation.target, operation.reference) if value}
             unknown = {value for value in refs if not known_reference(value)}
             if unknown:

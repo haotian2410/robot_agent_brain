@@ -25,7 +25,6 @@ def envelope(**payload):
         "status": "accepted",
         "turn_kind": "scene_edit",
         "arm_usage": "unspecified",
-        "hold_constraints": [],
         "clarification_question": None,
         "scene_edit": None,
         "scene_query": None,
@@ -182,7 +181,6 @@ def test_live_v31_bare_add_is_canonicalized_to_primary_table():
         "status": "accepted",
         "turn_kind": "scene_edit",
         "arm_usage": "unspecified",
-        "hold_constraints": [],
         "clarification_question": None,
         "scene_edit": {
             "scene_basis": "current",
@@ -205,7 +203,7 @@ def test_live_v31_bare_multi_add_uses_primary_table_for_each_object():
     payload = {
         "protocol_version": "task_understanding.v3.1",
         "status": "accepted", "turn_kind": "scene_edit", "arm_usage": "unspecified",
-        "hold_constraints": [], "clarification_question": None,
+        "clarification_question": None,
         "scene_edit": {
             "scene_basis": "current",
             "entities": [

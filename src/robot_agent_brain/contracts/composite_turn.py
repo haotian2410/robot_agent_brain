@@ -32,6 +32,10 @@ class CompositePhase(BaseModel):
     scene_digest_before: str | None = None
     scene_digest_after: str | None = None
     error_code: str | None = None
+    mode: Literal["single", "dual"] | None = None
+    profile_id: str | None = None
+    robot_setup_revision: int | None = None
+    prompt_route: Literal["single_atomic", "dual_atomic"] | None = None
 
 
 class CompositeTurnRecord(BaseModel):

@@ -17,7 +17,7 @@ from robot_agent_brain.contracts.scene import SceneConfig
 from robot_agent_brain.scene.component_access import SceneIndex
 from robot_agent_brain.models.prompts import TASK_UNDERSTANDING_PROMPT, SKILL_PLANNING_PROMPT
 from robot_agent_brain.models.prompts import DUAL_SKILL_PLANNING_PROMPT
-from robot_agent_brain.contracts.commands_v3 import CommandsFileV3
+from robot_agent_brain.contracts.commands_sequence_v41 import CommandsFileV41
 from robot_agent_brain.skills.registry import REGISTRY
 
 
@@ -75,14 +75,14 @@ def main():
     else:
         raise AssertionError("installed wheel silently accepted changed radius")
     from robot_agent_brain.application import BrainApplication
-    contract = {"revision": "wheel-fixture-only", "supported_protocols": ["4.0"],
+    contract = {"revision": "wheel-fixture-only", "supported_protocols": ["4.1"],
         "expansion_level": "task", "skills": {"pick": {"expansion_level": "task",
         "parameters_schema": {"type": "object"}}}}
     app = BrainApplication(BrainConfig(provider="replay",
         output_dir=tempfile.mkdtemp(prefix="brain-wheel-contract-")),
         provider=object(), control_skill_contract=contract)
     contract["supported_protocols"].clear()
-    assert app.pipeline.control_skill_contract.supported_protocols == ["4.0"]
+    assert app.pipeline.control_skill_contract.supported_protocols == ["4.1"]
     assert files("robot_agent_brain.resources").joinpath("config.json").is_file()
     config = BrainConfig()
     assert config.planner == "qwen"
@@ -109,7 +109,7 @@ def main():
     run("schemas", "--output-dir", str(directory / "schemas"))
     schema = json.loads((directory / "schemas" / "commands.schema.json").read_text(encoding="utf-8"))
     assert schema == CommandsFile.model_json_schema()
-    assert json.loads((directory / "schemas" / "commands_v3.schema.json").read_text(encoding="utf-8")) == CommandsFileV3.model_json_schema()
+    assert json.loads((directory / "schemas" / "commands_v41.schema.json").read_text(encoding="utf-8")) == CommandsFileV41.model_json_schema()
     scene_schema = json.loads((directory / "schemas" / "scene_config.schema.json").read_text(encoding="utf-8"))
     assert scene_schema == SceneConfig.model_json_schema()
     instruction = "把两个苹果放进篮子"

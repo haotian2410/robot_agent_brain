@@ -613,12 +613,14 @@ class QwenHTTPProvider:
         self.asset_catalog_sha256 = None
         self.asset_catalog_snapshot = None
         self.atomic_skill_prompt_path = atomic_skill_prompt_path
-        from .prompts import build_atomic_skill_prompt
+        from .prompts import build_atomic_skill_prompt, build_dual_atomic_skill_prompt
         with span("planning.skill_prompt.load", component="brain.planning",
                   source="models/qwen_http.py:QwenHTTPProvider.__init__") as timing:
             self.atomic_skill_prompt, self.atomic_skill_source_sha256 = build_atomic_skill_prompt(
                 atomic_skill_prompt_path
             )
+            self.dual_atomic_skill_prompt, self.dual_atomic_skill_source_sha256 = build_dual_atomic_skill_prompt(
+                atomic_skill_prompt_path)
             if timing is not None:
                 timing.annotate(skill_prompt_source="control_skill_md" if self.atomic_skill_source_sha256 else "bundled_fallback",
                                 skill_md_sha256=self.atomic_skill_source_sha256,
@@ -1231,7 +1233,7 @@ class QwenHTTPProvider:
             if output.status == "assigned":
                 validate_assignment_output(output, operation_ids=[op.operation_id for op in request.operations],
                     locked_arms={op.operation_id: op.locked_arm for op in request.operations if op.locked_arm},
-                    both_required=request.both_required, same_arm_groups=request.same_arm_groups,
+                    both_required=request.both_required,
                     ordered_operations=[op.operation_id for op in request.operations])
             return output
         return self._call("arm_assignment", ARM_ASSIGNMENT_PROMPT, content,
@@ -1247,18 +1249,13 @@ class QwenHTTPProvider:
             draft = DualSkillDraft.model_validate(value)
             draft.steps_for(operation.operation_id for operation in request.operations)
             return draft
-        return self._call("dual_operation_planning", ATOMIC_MULTI_ARM_RULES_PROMPT,
+        return self._call("dual_operation_planning", self.dual_atomic_skill_prompt,
                           prompt_payload(request.model_dump(mode="json")),
                           DualSkillDraft.model_json_schema(), parse,
                           max_completion_tokens=self.planner_max_completion_tokens)
 
     def plan_dual(self, request):
-        from .dual_skill_planning import DualSkillPlanOutput
-        from .prompts import DUAL_SKILL_PLANNING_PROMPT
-        return self._call("skill_planning", DUAL_SKILL_PLANNING_PROMPT,
-                          prompt_payload({**request.context, "skills": request.skill_catalog}),
-                          DualSkillPlanOutput.model_json_schema(), DualSkillPlanOutput.model_validate,
-                          max_completion_tokens=self.planner_max_completion_tokens)
+        raise ValueError("unsupported_protocol_version: staged_dual_v3_retired")
 
     def detect(self, frame: CameraFrame, entities: list[VisionEntity]) -> VisionGroundingOutput:
         return self._call_request(

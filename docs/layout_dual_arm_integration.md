@@ -7,53 +7,31 @@
 3. `LayoutResolver` 在事务边界绑定场景实例；支撑、几何和最终提交仍由 SceneEditor/Gateway 负责。
 4. 混合任务按场景阶段和机器人阶段建立 `CompositeTurnRecord`，阶段失败时不重放已提交步骤。
 
-`CommandsFileV4` 是双臂逻辑依赖 DAG。Brain 校验 command/operation ID、依赖环、同臂顺序、资源、同步和持物事件引用；IK、碰撞、感知、轨迹和执行全部交给控制端。现有单臂 Atomic v2 和显式双臂 v3 兼容路径不变，生产双臂能力仍由发布策略控制。
+## 双臂4.1序列协议
 
-## v4 规划与持物事件契约
+本节按双模式时序重构方案更新，取代旧4.0共享调度约束。
+RobotProfile.commands_version必须为4.1，可信ControlSkillContract必须显式声明支持4.1。
+旧3.0/4.0不能静默升级或flatten；旧v3模型仅供历史读取，planner/dispatch已退役。
 
-显式 `RobotProfile.commands_version="4.0"` 可进入 v4 规划器；必须由可信适配器提供
-`ControlSkillContract`，且包含 `supported_protocols=["4.0"]`。模型不能自行声明控制能力。
+Brain生成每臂技能序列，同臂相邻命令结构串接；跨臂依赖只转换Operation.depends_on，
+从前置操作末条连接后置操作首条。不因同目的地、同物体或持物状态生成跨臂依赖。
+输出没有execution_policy、resource_groups、hold_constraints、sync_groups。
+Control负责感知、运行时等待、持物、IK、碰撞、轨迹和执行。
 
-合同在进入Recipe/Qwen技能规划之前校验：只支持v3的合同立即返回
-`unsupported_protocol_version`，不先调用技能模型再拒绝。合同内所有注册技能必须
-与顶层`expansion_level`一致（包括本次未使用的技能）；同步、资源、保持能力标志
-必须是JSON布尔值，不能以字符串或0/1隐式启用。协议列表不允许空值或重复条目。
-当前代码允许规划和导出，不代表现有 Control 已支持 v4 下发或执行结果回写。
+分臂按operation分配，显式arm优先；可信当前画面的实例身份可供模型分配未指定操作。
+不以画面左右猜测机械臂标签；缺证据时沿用已配置且可审计的默认/均衡规则。
+所有操作必须完整覆盖，模型不能修改对象、显式arm和输入顺序。
 
-v4 存在未锁定操作时，且 provider 提供 `assign_arms`，可进入视觉分臂阶段。
-仅在当前画面包含两个机械臂和操作源对象的可信实例框时调用模型；机械臂左右身份由
-当前 profile 的对象 ID 映射提供，不按画面左右猜测。过期场景 ID/version/sub-version、
-未知实例或重复框身份会被拒绝。全部操作已显式锁定或已由持物状态锁定时跳过拍照和分臂模型。
+单臂/双臂技能prompt读取同一Control skill.md来源，使用各自输出包装。
+双臂草稿只含operation_id和steps；Python生成命令ID、场景绑定和序列。
+skill注册、参数schema、对象角色绑定、版本和合同revision仍校验。
 
-分臂结果必须覆盖所有操作并保留锁定臂、同对象连续性、双臂要求和已有操作顺序。
-非法输出不触发静默 fallback。模型明确 `insufficient_evidence` 或缺少可用视觉身份时，
-沿用可审计的配置默认臂/双臂均衡规则；没有可用规则则澄清。规划 trace 区分
-`explicit_arm`、`held_object`、`visual_assignment`、`configured_default_arm` 和
-`deterministic_balanced_fallback`。视觉分配不是 IK 或可达性保证。
+首轮接受后RobotModeLock锁定mode/profile，保存恢复保持；双臂本轮仅左臂动作仍输出4.1。
+后续不同mode返回robot_mode_locked，不同profile返回robot_setup_change_after_first_turn_unsupported。
+布局复合按layout提交→新场景grounding→模式对应规划，机器人失败保留已提交布局。
 
-每个注册技能提供参数 Schema、`expansion_level` 和 `object_parameters`。后者说明参数对应
-已绑定 source/destination/reference 的哪种角色，禁止模型更换实例。持物任务还要求注册
-`holding_effect`，不能按名称猜测自定义技能的效果：
-
-```json
-{
-  "object_parameters": {"object": "source_object_id"},
-  "holding_effect": {"action": "acquire", "object_parameter": "object"}
-}
-```
-
-`action=preserve/release` 不带 `object_parameter`。缺少效果声明时，持物链明确拒绝。
-这些声明用于验证计划语义；计划里的预测持物状态绝不会写成运行时的实测状态。
-
-输出 `hold_constraints` 中：
-
-- `after_command_id` 指建立持物状态或完成持有方里程碑的命令；为空时依据已验证的输入持物状态。
-- `until_command_id` 指另一只臂完成目标操作的最后一条命令。
-- `region_object_id/region` 成对保留显式区域约束，实际空间判定由 Control 负责。
-
-Python 在被约束操作开始前加入建立持物状态的依赖，在持有臂后续动作前加入结束事件依赖。
-不生成 `wait/null` 技能，不删除用户原有依赖以消除环。`supports_hold=false`、缺少持物证据、
-跨臂重复抓取同一持物对象、事件环等情况均停止导出。
+目前真实Control 4.1下发适配尚未完成，mark_dispatched拒绝此版本；
+规划和离线测试通过不代表真实双臂执行通过。
 
 ## Prompt 与 Schema
 
@@ -64,6 +42,10 @@ Python 在被约束操作开始前加入建立持物状态的依赖，在持有�
 - `schemas/commands_dag_v4.schema.json`
 
 布局协议的 compact U 字段为 `at`，其嵌套字段复用版本化字段注册表；full 协议仍可回放。非法字段不会被删除或改写。
+当前Compact机器人操作必须显式输出`dp`，无依赖为`[]`；该字段不能省略。
+Full Python模型仍允许其默认空数组。历史Compact原始响应若缺dp不能直接作为当前
+实时响应解析；历史Full/canonical内容可通过encode按声明默认值转换为当前Compact。
+这项语法收紧不补语义依赖，模型遗漏明确“完成后再”的两操作依赖时仍拒绝。
 
 ## 测试
 

@@ -167,8 +167,17 @@ def build_atomic_skill_prompt(source_path: str | Path | None = None) -> tuple[st
     return fallback + build_atomic_skill_reference_tables() + build_atomic_draft_output_rules(), None
 
 
+def build_dual_atomic_skill_prompt(source_path: str | Path | None = None) -> tuple[str, str | None]:
+    """Share Control semantics, with an operation-local dual output envelope."""
+    single, sha = build_atomic_skill_prompt(source_path)
+    appendix = build_atomic_draft_output_rules()
+    if not single.endswith(appendix):
+        raise RuntimeError("atomic_prompt_output_appendix_missing")
+    return single[:-len(appendix)] + "\n" + _load_prompt("atomic_multi_arm_rules_v1.txt"), sha
+
+
 ATOMIC_SKILL_PLANNING_PROMPT, ATOMIC_SKILL_SOURCE_SHA256 = build_atomic_skill_prompt()
-DUAL_SKILL_PLANNING_PROMPT = _load_prompt("dual_skill_planning_v3.txt")
+DUAL_SKILL_PLANNING_PROMPT, _ = build_dual_atomic_skill_prompt()
 TASK_DECOMPOSITION_PROMPT = _load_prompt("task_decomposition_v1.txt")
 
 

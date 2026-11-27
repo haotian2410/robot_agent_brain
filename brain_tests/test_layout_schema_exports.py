@@ -14,7 +14,8 @@ def test_export_matches_canonical_contract(name, document):
     Draft202012Validator.check_schema(document)
 
 
-def test_resource_groups_are_not_untyped_arrays():
+def test_public_sequence_schema_has_no_shared_scheduling_metadata():
     schema = schema_documents()["commands_dag_v4.schema.json"]
-    assert schema["properties"]["resource_groups"]["items"] == {"$ref": "#/$defs/ResourceGroup"}
-    assert schema["$defs"]["ResourceGroup"]["additionalProperties"] is False
+    assert schema["properties"]["schema_version"]["const"] == "4.1"
+    assert not {"resource_groups", "hold_constraints", "sync_groups", "execution_policy"} & schema["properties"].keys()
+    assert schema["additionalProperties"] is False

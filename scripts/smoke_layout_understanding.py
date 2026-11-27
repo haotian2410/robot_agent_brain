@@ -15,13 +15,15 @@ def main():
     parser.add_argument("--missing-count", action="store_true",
                         help="Audit unquantified layouts: must clarify, never invent a quantity")
     parser.add_argument("--dual-semantics", action="store_true",
-                        help="Read-only explicit-arm and same-arm understanding audit; no controller claims")
+                        help="Read-only explicit-arm and explicit-order audit; no controller claims")
     parser.add_argument("--quantity-range", action="store_true",
                         help="Audit explicit quantity bounds versus exact-count automatic spacing")
     parser.add_argument("--round-dimensions", action="store_true",
                         help="Audit explicit circle/ring/arc dimensions without scene mutation")
+    parser.add_argument("--mode-selection", action="store_true",
+                        help="Real U with explicitly registered fixture-only single/dual profiles")
     args = parser.parse_args()
-    if sum((args.missing_count, args.dual_semantics, args.quantity_range, args.round_dimensions)) > 1:
+    if sum((args.missing_count, args.dual_semantics, args.quantity_range, args.round_dimensions, args.mode_selection)) > 1:
         parser.error("choose one audit mode")
     config = BrainConfig.load(args.config)
     assets = config.load_assets()
@@ -35,7 +37,8 @@ def main():
         response.raise_for_status()
         provider = QwenHTTPProvider(config.base_url, response.json()["data"][0]["id"],
             client=client, live_catalog=True, understanding_wire_format="compact_v1")
-        pipeline = BrainPipeline(provider, assets)
+        pipeline = BrainPipeline(provider, assets, registered_profiles=(
+            ["fixture_single", "fixture_dual"] if args.mode_selection else None))
         cases = [
             ("在桌面新增六个苹果，排列成两行三列", "scene_layout", "grid", 6),
             ("在桌面新增五个苹果，沿半径20厘米的圆周均匀排列", "scene_layout", "circle", 5),
@@ -52,7 +55,7 @@ def main():
             cases = [(instruction, None, None, None) for instruction in (
                 "用左臂抓起苹果，用右臂抓起香蕉",
                 "用右臂抓起苹果，用左臂抓起香蕉",
-                "用同一只机械臂先抓起苹果并放下，再抓起香蕉并放下，不指定左右臂",
+                "先用左臂抓起苹果，完成后再用右臂抓起香蕉",
             )]
         if args.quantity_range:
             cases = [(instruction, "scene_layout", "line", 10) for instruction in (
@@ -66,6 +69,11 @@ def main():
                 ("在桌面新增六个苹果，均匀排列在圆环区域内，内半径固定为10厘米，外半径固定为20厘米", "scene_layout", "ring", 6),
                 ("在桌面新增六个苹果，沿圆弧均匀排列，半径固定为20厘米，圆心角90度", "scene_layout", "arc", 6),
             ]
+        if args.mode_selection:
+            cases = [(instruction, None, None, None) for instruction in (
+                "首轮使用已注册配置 fixture_single，单臂模式，抓起苹果",
+                "首轮使用已注册配置 fixture_dual，双臂模式，让左臂抓起苹果",
+            )]
         for number, (instruction, route, pattern, count) in enumerate(cases, 1):
             call_start, wire_start = len(provider.calls), len(requests)
             item = {"case": number, "instruction": instruction, "scene_published": False,
@@ -105,7 +113,7 @@ def main():
                         operations = intent.operations
                         item["binding_summary"] = [{"operation": str(op.task_type),
                             "object": names.get(op.source or op.target), "arm": op.arm,
-                            "same_arm_group": op.same_arm_group} for op in operations]
+                            "depends_on": op.depends_on} for op in operations]
                         if number < 3:
                             expected = {"apple": "left", "banana": "right"} if number == 1 else {
                                 "apple": "right", "banana": "left"}
@@ -113,14 +121,16 @@ def main():
                                 names.get(op.source or op.target): op.arm for op in operations} == expected and all(
                                     str(op.task_type) == "grasp" for op in operations)
                         else:
-                            groups = {op.same_arm_group for op in operations}
-                            item["passed"] = (len(operations) == 4 and len(groups) == 1
-                                              and None not in groups
-                                              and all(op.arm is None for op in operations)
-                                              and [(str(op.task_type), names.get(op.source or op.target))
-                                                   for op in operations] == [
-                                                       ("grasp", "apple"), ("release", "apple"),
-                                                       ("grasp", "banana"), ("release", "banana")])
+                            item["passed"] = (len(operations) == 2
+                                and [op.arm for op in operations] == ["left", "right"]
+                                and operations[1].depends_on == [operations[0].operation_id])
+                if args.mode_selection:
+                    request = turn.robot_setup_request
+                    expected_mode, expected_profile = (("single", "fixture_single") if number == 1
+                                                       else ("dual", "fixture_dual"))
+                    item["passed"] = (turn.status == "accepted" and turn.turn_kind == "robot_task"
+                        and request is not None and request.mode == expected_mode
+                        and request.profile_id == expected_profile)
             except Exception as error:
                 item.update(passed=False, error_type=type(error).__name__,
                     error_code=getattr(error, "code", None), error=str(error))

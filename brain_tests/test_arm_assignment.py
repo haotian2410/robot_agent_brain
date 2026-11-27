@@ -18,7 +18,6 @@ def test_complete_assignment_preserves_locks():
 @pytest.mark.parametrize("kwargs,code", [
     ({"operation_ids": ["a"]}, "coverage"),
     ({"operation_ids": ["a", "b"], "locked_arms": {"a": "right"}}, "locked"),
-    ({"operation_ids": ["a", "b"], "same_arm_groups": [["a", "b"]]}, "continuity"),
 ])
 def test_invalid_assignments_rejected(kwargs, code):
     with pytest.raises(ValueError, match=code):

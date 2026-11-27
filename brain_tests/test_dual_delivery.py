@@ -28,6 +28,13 @@ def prepared():
     return session, commands
 
 
+def historical_pending(session, commands):
+    """An upgrade checkpoint from before v3 retirement; never live dispatch."""
+    session.pending_commands = canonical_commands(commands)
+    session.pending_execution_request = commands.request_id
+    session.dispatched_requests.add(commands.request_id)
+
+
 def test_v3_artifacts_and_pending_checkpoint_preserve_null(tmp_path):
     session, commands = prepared()
     report = BrainRunReport(session_id="s", request_id="fixture", run_status="success", provider="replay")
@@ -36,7 +43,7 @@ def test_v3_artifacts_and_pending_checkpoint_preserve_null(tmp_path):
     payload = json.loads(open(published.artifacts["commands"]).read())
     assert payload["steps"][0]["arms"]["right"] is None
     assert parse_commands(payload) == commands
-    session.mark_dispatched(commands)
+    historical_pending(session, commands)
     store = SessionStore(tmp_path)
     with store.lock("s"):
         store.save("s", session, revision=1)
@@ -48,7 +55,7 @@ def test_v3_artifacts_and_pending_checkpoint_preserve_null(tmp_path):
 
 def test_partial_feedback_keeps_successful_arm_and_missing_peer_unknown():
     session, commands = prepared()
-    session.mark_dispatched(commands)
+    historical_pending(session, commands)
     feedback = ExecutionFeedbackV3(request_id="fixture", scene_id=1, scene_version=1, robot_setup_revision=1,
         status="partial", actions=[{"step_id": "stage-1", "command_id": "command-1", "arm": "left", "status": "success"}],
         arms={"left": {"state_known": True}})
@@ -56,14 +63,14 @@ def test_partial_feedback_keeps_successful_arm_and_missing_peer_unknown():
     assert session.arm_states.arms["left"].state_known
     assert not session.arm_states.arms["right"].state_known
     assert session.sync_state == "unknown" and session.pending_commands is None
-    with pytest.raises(ValueError, match="not_ready"):
+    with pytest.raises(ValueError, match="staged_dual_v3_retired"):
         session.mark_dispatched(commands)
 
 
 def test_wrong_setup_rejected_before_dispatch():
     session, commands = prepared()
     session.robot_setup_revision = 2
-    with pytest.raises(ValueError, match="setup_mismatch"):
+    with pytest.raises(ValueError, match="staged_dual_v3_retired"):
         session.mark_dispatched(commands)
     assert not session.dispatched_requests
 
