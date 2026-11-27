@@ -109,7 +109,7 @@ def test_failed_platform_patch_does_not_consume_identity():
 def test_held_zero_prevents_scene_patch():
     session = BrainSession(scene_(), None, LocalScenePlatform())
     session.holding_object = 0
-    result = SimpleNamespace(commands=None, scene_patch=ScenePatch(scene_id=0, base_scene_version=1,
+    result = SimpleNamespace(status="accepted", commands=None, scene_patch=ScenePatch(scene_id=0, base_scene_version=1,
         operations=[{"action": "remove_object", "object_id_in_scene": 0}]))
     with pytest.raises(ValueError, match="held_object_conflict"):
         session._accept_result("r", result)

@@ -85,21 +85,14 @@ with `relative` is an incomplete direction and fails validation.
 This defines world-tabletop X/Y directions, not image-relative directions or
 coordinates in the anchor's local frame. `around`/`near` retain their separate
 anchor-centered behavior. It does not imply containment inside the anchor.
-# Same-arm constraints across objects
+# Historical same-arm constraints (retired)
 
-Robot operations may carry `same_arm_group` (Compact U key `sg`). The field is
-optional and defaults to absent/null, preserving old recorded tasks. Group labels
-are semantic identifiers, not arm IDs or scheduler/resource names. Operations
-sharing a label must use the same arm; repeated actors connect groups transitively.
-Explicit arm and verified held-object locks propagate through the whole component.
-Contradictory ownership fails before model planning (`arm_assignment_same_arm_conflict`).
+`same_arm_group` and Compact `sg` are retired from current task protocols.
+Brain does not propagate same-object or held-object locks across operations.
+Current assignment uses explicit arm selection and registered deployment context;
+only same-arm sequence and user-explicit dependencies affect 4.1 ordering.
+Old documents describing shared locks are historical-only.
 
-The assignment request includes these components in `same_arm_groups`; a model
-cannot split them. Configured or balanced fallback also locks whole components,
-and the audit marks inherited locks as `same_arm_constraint`. The task expander
-preserves the label on expanded instances. Once resolved, normal same-arm DAG
-serialization applies; no fake barrier/skill is emitted. `both_required` remains
-an independent constraint and is rejected when both requirements cannot be met.
 # Free-path placement bounds
 
 For custom/text/scatter slots, normalized coordinates map to the common safe
@@ -236,21 +229,16 @@ Diagnostics report the parameter actually used: `layout_spacing_m` for regular
 line/grid patterns, `layout_radius_m` for circle/ring/arc, and
 `layout_origin_bounds_xy_m` for free paths. A computed but unused spacing value
 must not be presented as the physical inter-object distance on a circle/path.
-# 应用层规划合同接入（2026-11-27）
+# 应用层规划合同接入（2026-11-27整改）
 
-已确认的控制适配器可以通过
-`BrainApplication(config, provider=provider, control_skill_contract=advertised_contract)`
-传入 `ControlSkillContract` 或同结构字典。应用在加载资产/创建模型前校验合同，
-并深拷贝协议列表及嵌套技能Schema，避免调用方修改原字典影响已经创建的应用。
-省略参数时保持原行为，不猜测任何v4支持。
+可信调用方可向 `BrainApplication` 或 `AgentService` 注入 `control_skill_contract`，
+或由运维配置 `control_skill_contract_path` 加载合同快照。模型输出、skill.md存在、
+RobotProfile或测试fixture不能作为Control授权。合同必须包含真实注册技能、参数、
+对象角色和revision；双臂规划还要求可信operation_semantics明确技能语义。
+配置文件revision变化使旧计划失效；相同revision不同内容拒绝。
 
-应用任务入口在明确合同支持4.0时允许双臂**规划**，继续经过正常Session/Profile、
-grounding和状态校验；没有合同仍返回`control_dual_arm_not_ready`，仅支持旧协议的
-合同返回`unsupported_protocol_version`。`handle()`导出的Commands与保存Scene
-必须具有相同digest，`executed=false`，不得因此改变持物状态或发送控制请求。
-
-此入口仅提供**规划合同快照**，不等于执行协议协商成功，不改变 `/health` 声明，
-也不解除 `mark_dispatched()` 对v4的拒绝。当前桥接实际消费端仍为2.0；
-Web启动路径没有真实v4合同发现端点。集成方必须先提供实际注册技能、粒度和revision，
-不能使用测试fixture作为生产声明。合同变更需创建新应用快照；正式动态协商及执行前
-revision复核仍属于后续Control适配工作，不以该注入入口宣称已完成。
+4.1规划与执行独立：health/brainCapabilities分别返回planning_protocols、
+execution_protocols、dual_planning_ready、dual_execution_ready和合同revision。
+当前4.1只规划，mark_dispatched保持关闭，不能交给2.0 adapter。
+候选部署不等于模式锁；布局/查询/编辑不锁模式。只有显式setup接受或机器人计划
+成功接受才决定模式。详见 `brain_4_1_followup_acceptance.md`。

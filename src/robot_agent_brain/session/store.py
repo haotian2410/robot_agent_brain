@@ -36,11 +36,15 @@ class SessionState(BaseModel):
     camera_id: int | None = None
     holding_object: SceneId | None = None
     execution_checkpoint: dict | None = None
+    execution_reconciliation: dict | None = None
     robot_setup: RobotSetup | None = None
     robot_setup_revision: int = Field(default=0, strict=True, ge=0)
     robot_mode_lock: RobotModeLock | None = None
     session_turn_index: int = Field(default=0, strict=True, ge=0)
     first_accepted_turn_id: str | None = None
+    first_robot_mode_turn_id: str | None = None
+    mode_lifecycle_version: Literal[1] = 1
+    mode_migration_diagnostics: list[str] = Field(default_factory=list)
     platform_rebind_revision: int = Field(default=0, strict=True, ge=0)
     robot_asset: str | None = None
     gripper_asset: str | None = None
@@ -116,6 +120,59 @@ class SessionState(BaseModel):
             value["version"] = "2.0"
         return value
 
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_mode_lifecycle(cls, value):
+        if not isinstance(value, dict) or "mode_lifecycle_version" in value:
+            return value
+        value = dict(value)
+        value["mode_lifecycle_version"] = 1
+        diagnostics = list(value.get("mode_migration_diagnostics", []))
+        memory = value.get("conversation_memory") or {}
+        turns = memory.get("recent_turns", [])
+        evidence = (value.get("last_exported_request") or value.get("pending_execution_request")
+                    or next(iter(value.get("exported_commands", {})), None)
+                    or next(iter(value.get("stale_commands", {})), None)
+                    or next(iter(value.get("dispatched_requests", [])), None))
+        if evidence is None:
+            evidence = next((turn["turn_id"] for turn in turns if
+                turn.get("executed") or turn.get("final_outcome") in {"plan_ready", "robot_configured"}), None)
+        lock = value.get("robot_mode_lock")
+        if isinstance(lock, RobotModeLock):
+            lock = lock.model_dump()
+        uncertain = (value.get("sync_state") == "unknown" or value.get("pending_execution_request")
+                     or value.get("recovery_context"))
+        complete_nonrobot = (bool(turns) and value.get("session_turn_index") == len(turns)
+                            and not memory.get("archived_turn_ids") and not uncertain
+                            and value.get("first_accepted_turn_id") in {t["turn_id"] for t in turns}
+                            and all(t.get("final_outcome") in {"scene_updated", "answered", "session_controlled"}
+                                    and not t.get("executed") for t in turns))
+        if evidence:
+            setup = value.get("robot_setup")
+            if isinstance(setup, RobotSetup):
+                setup = setup.model_dump()
+            if lock is None:
+                lock = {"mode": setup["mode"] if setup else "single",
+                        "profile_id": setup["profile_id"] if setup else "default_single",
+                        "source": "scene" if setup else "default",
+                        "setup_revision": value.get("robot_setup_revision", 0)}
+            lock = {**lock, "locked": True, "locked_at_turn": lock.get("locked_at_turn") or 1}
+            value["first_robot_mode_turn_id"] = evidence
+            value["session_turn_index"] = max(value.get("session_turn_index", 0), lock["locked_at_turn"])
+            value["first_accepted_turn_id"] = value.get("first_accepted_turn_id") or evidence
+            diagnostics.append("mode_migration_verified_robot_history")
+        elif lock and lock.get("locked"):
+            if complete_nonrobot:
+                lock = {**lock, "locked": False, "locked_at_turn": None}
+                diagnostics.append("mode_migration_nonrobot_mislock_removed")
+            else:
+                # Keep the old decision when the audit trail is incomplete.
+                value["first_robot_mode_turn_id"] = value.get("first_accepted_turn_id") or "historical_mode_decision_unknown"
+                diagnostics.append("mode_migration_history_incomplete_lock_preserved")
+        value["robot_mode_lock"] = lock
+        value["mode_migration_diagnostics"] = diagnostics
+        return value
+
     @model_validator(mode="after")
     def consistent(self):
         safe_identifier(self.session_id)
@@ -123,8 +180,10 @@ class SessionState(BaseModel):
             self.robot_mode_lock.check_setup(self.robot_setup, self.robot_setup_revision)
             if self.robot_mode_lock.locked:
                 if (self.robot_mode_lock.locked_at_turn > self.session_turn_index
-                        or self.first_accepted_turn_id is None):
+                        or self.first_robot_mode_turn_id is None):
                     raise ValueError("session_mode_lock_turn_mismatch")
+        if self.first_robot_mode_turn_id is not None and not (self.robot_mode_lock and self.robot_mode_lock.locked):
+            raise ValueError("session_robot_mode_decision_without_lock")
         ranges = sorted(self.layout_id_reservations.values())
         for index, (start, end) in enumerate(ranges):
             if (not 0 <= start < end <= self.next_scene_object_id or end - start > 1000
@@ -143,7 +202,8 @@ class SessionState(BaseModel):
             if self.robot_setup is None or not set(self.profile_object_map.values()) <= known or len(set(self.profile_object_map.values())) != len(self.profile_object_map):
                 raise ValueError("session_profile_object_map_invalid")
         if self.robot_setup is None:
-            if self.arm_states is not None or self.robot_setup_revision != 0:
+            if (self.arm_states is not None or (self.robot_setup_revision != 0
+                    and (self.platform_rebind_revision < 1 or self.robot_setup_revision < self.platform_rebind_revision))):
                 raise ValueError("session_robot_setup_missing")
         else:
             if self.robot_setup_revision < 1 or self.arm_states is None or set(self.arm_states.arms) != set(self.robot_setup.arms):
@@ -177,6 +237,8 @@ class SessionState(BaseModel):
         if self.pending_commands is not None:
             request = self.pending_execution_request
             command = parse_commands(self.pending_commands)
+            if command.schema_version == "4.1":
+                raise ValueError("session_v41_pending_adapter_unavailable")
             if command.schema_version == "3.0" and (command.robot_setup != self.robot_setup or command.robot_setup_revision != self.robot_setup_revision):
                 raise ValueError("session_state_pending_setup_mismatch")
             if (request not in self.dispatched_requests or self.exported_commands.get(request) != self.pending_commands
@@ -238,12 +300,16 @@ class SessionStore:
             session_phase=getattr(session, "session_phase", "setup"), camera_id=getattr(session, "camera_id", None),
             holding_object=session.holding_object, platform_rebind_revision=getattr(session, "platform_rebind_revision", 0),
             execution_checkpoint=getattr(session, "execution_checkpoint", None),
+            execution_reconciliation=session.execution_reconciliation,
             robot_asset=getattr(session, "robot_asset", None), gripper_asset=getattr(session, "gripper_asset", None),
             camera_asset=getattr(session, "camera_asset", None), execution_capability=getattr(session, "execution_capability", "unknown"),
             last_exported_request=session.last_exported_request,
             robot_setup=session.robot_setup, robot_setup_revision=session.robot_setup_revision, arm_states=session.arm_states,
             robot_mode_lock=session.robot_mode_lock, session_turn_index=session.session_turn_index,
             first_accepted_turn_id=session.first_accepted_turn_id,
+            first_robot_mode_turn_id=session.first_robot_mode_turn_id,
+            mode_lifecycle_version=session.mode_lifecycle_version,
+            mode_migration_diagnostics=session.mode_migration_diagnostics,
             original_scene_manifest=session.original_scene_manifest, platform_object_ids=session.platform_object_ids,
             profile_object_map=session.profile_object_map,
             exported_commands=session.exported_commands, dispatched_requests=session.dispatched_requests,
@@ -306,7 +372,7 @@ class SessionStore:
         else:
             session.seen_scene_object_ids = set(state.seen_scene_object_ids)
             session.next_scene_object_id = state.next_scene_object_id
-        for name in ("dialogue", "session_action", "sync_state", "session_phase", "camera_id", "holding_object", "execution_checkpoint",
+        for name in ("dialogue", "session_action", "sync_state", "session_phase", "camera_id", "holding_object", "execution_checkpoint", "execution_reconciliation",
                      "platform_rebind_revision", "robot_asset", "gripper_asset", "camera_asset", "execution_capability", "last_exported_request",
                      "exported_commands", "dispatched_requests", "pending_commands", "pending_execution_request",
                      "stale_commands",
@@ -325,24 +391,8 @@ class SessionStore:
         session.robot_mode_lock = state.robot_mode_lock
         session.session_turn_index = state.session_turn_index
         session.first_accepted_turn_id = state.first_accepted_turn_id
-        if session.robot_mode_lock is None:
-            # Historical files predate explicit locks. Exported plans are
-            # evidence of an accepted task; preserve that boundary on restart.
-            session.robot_mode_lock = RobotModeLock(mode=session.robot_setup.mode if session.robot_setup else "single",
-                profile_id=session.robot_setup.profile_id if session.robot_setup else "default_single",
-                source="scene" if session.robot_setup else "default",
-                setup_revision=session.robot_setup_revision)
-            accepted_id = state.first_accepted_turn_id or state.last_exported_request
-            if accepted_id is None and state.exported_commands:
-                accepted_id = next(iter(state.exported_commands))
-            if accepted_id is None:
-                committed = [turn for turn in state.conversation_memory.recent_turns
-                             if turn.scene_commit_status == "committed"]
-                if committed:
-                    accepted_id = committed[0].turn_id
-            if accepted_id is not None:
-                session.session_turn_index = max(1, session.session_turn_index)
-                session.first_accepted_turn_id = accepted_id
-                session.robot_mode_lock = session.robot_mode_lock.accept(1)
+        session.first_robot_mode_turn_id = state.first_robot_mode_turn_id
+        session.mode_lifecycle_version = state.mode_lifecycle_version
+        session.mode_migration_diagnostics = list(state.mode_migration_diagnostics)
         session.last_request_id = state.last_exported_request
         return session

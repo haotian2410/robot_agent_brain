@@ -42,11 +42,15 @@ class BrainSession:
         self.session_phase = "setup"
         self.holding_object = None
         self.execution_checkpoint = None
+        self.execution_reconciliation = None
         self.robot_setup = None
         self.robot_setup_revision = 0
         self.robot_mode_lock = None
         self.session_turn_index = 0
         self.first_accepted_turn_id = None
+        self.first_robot_mode_turn_id = None
+        self.mode_lifecycle_version = 1
+        self.mode_migration_diagnostics = []
         self.platform_rebind_revision = 0
         self.robot_asset = None
         self.gripper_asset = None
@@ -89,6 +93,8 @@ class BrainSession:
     def initialize_scene(self, scene):
         if self.pending_execution_request is not None:
             raise ValueError("execution_pending")
+        if self.robot_mode_lock is not None and self.robot_mode_lock.locked:
+            raise ValueError("robot_mode_locked_scene_import")
         candidate = self._candidate_manager(scene)
         try:
             self._check_snapshot(self.platform.load_scene(candidate.scene), candidate.scene)
@@ -106,6 +112,7 @@ class BrainSession:
         # A generic import is not proof that the old deployed bindings still
         # apply. Restore/configuration paths must explicitly supply them again.
         self.robot_setup = None
+        self.robot_mode_lock = None
         self.robot_setup_revision = 0
         self.platform_rebind_revision = 0
         self.robot_asset = None
@@ -167,6 +174,8 @@ class BrainSession:
         if change_kind not in {"scene_edit", "platform_rebind"}:
             raise ValueError("scene_change_kind_invalid")
         platform_rebind = change_kind == "platform_rebind"
+        if platform_rebind and self.robot_mode_lock is not None and self.robot_mode_lock.locked:
+            raise ValueError("robot_mode_locked_platform_rebind")
         if platform_rebind and self.release_policy is not None:
             self.release_policy.deny_dynamic_platform()
         if self.pending_execution_request is not None or self.sync_state != "synchronized":
@@ -422,6 +431,8 @@ class BrainSession:
         return approved & set(candidate_by_id)
 
     def rebind_platform_assets(self, adapter, request, *, owner_task_id=None):
+        if self.robot_mode_lock is not None and self.robot_mode_lock.locked:
+            raise ValueError("robot_mode_locked_platform_rebind")
         """Atomically apply an OLS robot/gripper/camera assembly change."""
         if self.release_policy is not None:
             self.release_policy.deny_dynamic_platform()
@@ -519,6 +530,13 @@ class BrainSession:
                                            arrangement_index=self.arrangement_index)
         return self.process_turn(request_id, turn)
 
+    def mode_context(self):
+        return {"locked": bool(self.robot_mode_lock and self.robot_mode_lock.locked),
+                "decision": self.robot_mode_lock.model_dump(mode="json") if self.robot_mode_lock else None,
+                "deployment": self.robot_setup.model_dump(mode="json") if self.robot_setup else None,
+                "robot_setup_revision": self.robot_setup_revision,
+                "first_robot_mode_turn_id": self.first_robot_mode_turn_id}
+
     def check_turn(self, turn):
         if self.robot_mode_lock is not None:
             self.robot_mode_lock.check_setup(self.robot_setup, self.robot_setup_revision)
@@ -537,7 +555,7 @@ class BrainSession:
             # document and owns that judgment.  A bound platform is different -- its
             # joint table is a claim this Brain already made.
             capability, reason = self._execution_capability_detail()
-            if capability != "supported":
+            if capability != "supported" and not (self.robot_setup is not None and self.robot_setup.mode == "dual"):
                 raise ValueError("capability_unsupported" + (": " + reason if reason else ""))
         if turn.robot_asset_switch is not None:
             if self.release_policy is not None:
@@ -551,10 +569,17 @@ class BrainSession:
             # in experimental fixtures, handled by the assembly path.  It is
             # not a legacy robot task and must not require a task profile.
             pass
+        elif (turn.turn_kind == "robot_task" and turn.task_intent is not None
+                and turn.task_intent.requires_dual
+                and not (self.robot_mode_lock and self.robot_mode_lock.locked)):
+            from ..contracts.robot_setup import RobotSetupRequest
+            if self.robot_profiles is None:
+                raise ValueError("robot_setup_profile_not_registered")
+            self.robot_profiles.resolve(RobotSetupRequest(mode="dual"))
         elif self.robot_setup is None or self.robot_setup.mode != "dual":
             if ((self.robot_setup is not None and self.robot_setup.mode == "single")
-                    or (self.robot_mode_lock is not None and self.robot_mode_lock.mode == "single")) and turn.task_intent is not None:
-                if turn.task_intent.arm_usage == "both_required":
+                    or (self.robot_mode_lock is not None and self.robot_mode_lock.locked and self.robot_mode_lock.mode == "single")) and turn.task_intent is not None:
+                if turn.task_intent.requires_dual and turn.robot_setup_request is None:
                     raise ValueError("robot_mode_locked")
             else:
                 turn.require_legacy_execution()
@@ -699,10 +724,18 @@ class BrainSession:
 
     def run_composite_task(self, request_id, instruction, *, edit_defaults=None):
         task = self.pipeline.understand_composite(instruction, scene=self.require_scene(),
-                                                arrangement_index=self.arrangement_index)
+                                                arrangement_index=self.arrangement_index, mode_context=self.mode_context())
         return self.process_composite_turn(request_id, task, edit_defaults=edit_defaults)
 
     def _process_turn_once(self, request_id, turn, *, bindings_override=None, edit_defaults=None):
+        # A first robot task can select a registered default dual deployment;
+        # non-robot turns never decide mode, and no physical binding is guessed.
+        if (turn.turn_kind == "robot_task" and turn.robot_setup_request is None
+                and turn.task_intent is not None and turn.task_intent.requires_dual
+                and not (self.robot_mode_lock and self.robot_mode_lock.locked)
+                and (self.robot_setup is None or self.robot_setup.mode != "dual")):
+            from ..contracts.robot_setup import RobotSetupRequest
+            turn = turn.model_copy(update={"robot_setup_request": RobotSetupRequest(mode="dual")})
         self.check_turn(turn)
         # Reuse a persisted opt-in source/actor choice when a failure-chain
         # continuation retries the same task.  The Grounder still validates
@@ -785,8 +818,7 @@ class BrainSession:
                 scene_source_snapshot=self.original_scene_manifest.snapshot_id, scene_id_remap=remapped.id_map,
                 focus_object_ids=[remapped.id_map[i] for i in result.focus_object_ids],
                 assumptions=result.assumptions)
-            self.dialogue.observe(final)
-            return final
+            return self._accept_result(request_id, final)
         profile = None
         arrangement_record = None
         if turn.arrangement_spec is not None:
@@ -799,7 +831,7 @@ class BrainSession:
             profile.validate_scene(self.require_scene(), self.robot_setup)
             profile = profile.model_copy(update={"setup": self.robot_setup.model_copy(deep=True)})
         result = self.pipeline.process_turn(request_id, turn, self.scene,
-                                           locked_robot_mode=self.robot_mode_lock.mode if self.robot_mode_lock else None,
+                                           locked_robot_mode=self.robot_mode_lock.mode if self.robot_mode_lock and self.robot_mode_lock.locked else None,
                                            dialogue=self.dialogue, capture=self.capture,
                                            held_object=self.holding_object, bindings_override=effective_bindings, edit_defaults=edit_defaults,
                                            seen_scene_object_ids=self.seen_scene_object_ids,
@@ -823,9 +855,9 @@ class BrainSession:
         if target.setup.profile_id == self.robot_setup.profile_id:
             if turn.turn_kind == "robot_config":
                 return self._accept_result(request_id, BrainResult(
-                    turn_kind="robot_config", robot_setup_changed=self.robot_setup))
+                    turn_kind="robot_config", robot_setup_changed=self.robot_setup), accepted_setup=True)
             return self.process_turn(request_id, turn.model_copy(update={"robot_setup_request": None}), bindings_override=bindings_override)
-        if self.first_accepted_turn_id is not None or self.exported_commands or self.pending_execution_request is not None:
+        if (self.robot_mode_lock is not None and self.robot_mode_lock.locked) or self.exported_commands or self.stale_commands or self.dispatched_requests or self.pending_execution_request is not None:
             raise ValueError("robot_setup_change_after_first_turn_unsupported")
         old = self.robot_profiles.resolve(RobotSetupRequest(mode=self.robot_setup.mode, profile_id=self.robot_setup.profile_id))
         anchors = target.platform_object_ids - target.robot_object_ids
@@ -845,7 +877,7 @@ class BrainSession:
             plan_candidate=plan if turn.turn_kind == "robot_task" else None)
         if result is None:
             return self._accept_result(request_id, BrainResult(
-                turn_kind="robot_config", robot_setup_changed=prepared.setup, robot_setup_was_changed=True))
+                turn_kind="robot_config", robot_setup_changed=prepared.setup, robot_setup_was_changed=True), accepted_setup=True)
         result = result.model_copy(update={"robot_setup_changed": prepared.setup, "robot_setup_was_changed": True})
         return self._accept_result(request_id, result)
 
@@ -856,7 +888,7 @@ class BrainSession:
         Absence remains unknown and blocks planning/dispatch.
         """
         from ..contracts.robot_setup import RobotRuntimeState, ArmRuntimeState
-        if self.robot_setup is not None or self.pending_execution_request is not None or self.holding_object is not None:
+        if (self.robot_mode_lock is not None and self.robot_mode_lock.locked) or self.robot_setup is not None or self.pending_execution_request is not None or self.holding_object is not None:
             raise ValueError("robot_profile_binding_requires_fresh_import")
         profile.validate_scene(self.require_scene())
         self.robot_setup = profile.setup.model_copy(deep=True)
@@ -864,14 +896,14 @@ class BrainSession:
         from ..contracts.robot_mode_lock import RobotModeLock
         self.robot_mode_lock = RobotModeLock(mode=self.robot_setup.mode,
             profile_id=self.robot_setup.profile_id, source="scene", setup_revision=1)
-        self.platform_object_ids = set(profile.platform_object_ids)
-        self.profile_object_map = {i: i for i in profile.platform_object_ids}
+        self.profile_object_map = dict(profile.bound_object_map or {i: i for i in profile.platform_object_ids})
+        self.platform_object_ids = set(self.profile_object_map.values())
         self.arm_states = (profile.initial_state.model_copy(deep=True) if profile.initial_state is not None else
                            RobotRuntimeState(arms={side: ArmRuntimeState(state_known=False) for side in self.robot_setup.arms}))
 
     def switch_robot_setup(self, target_profile, *, platform_bindings, plan_candidate=None):
         """Prepare, optionally plan, then ACK and commit the robot-only candidate."""
-        if self.first_accepted_turn_id is not None or self.exported_commands or self.pending_execution_request is not None:
+        if (self.robot_mode_lock is not None and self.robot_mode_lock.locked) or self.exported_commands or self.stale_commands or self.dispatched_requests or self.pending_execution_request is not None:
             if self.robot_setup is not None and target_profile.setup.mode != self.robot_setup.mode:
                 raise ValueError("robot_mode_locked")
             raise ValueError("robot_setup_change_after_first_turn_unsupported")
@@ -897,9 +929,24 @@ class BrainSession:
         revision = self.robot_setup_revision + 1
         # No live mutation before the entire optional task plan is validated.
         result = plan_candidate(prepared, initial, revision) if plan_candidate is not None else None
+        if plan_candidate is not None:
+            from ..web.protocol import digest
+            if result.status != "accepted" or result.commands is None:
+                raise ValueError("robot_setup_candidate_plan_not_accepted")
+            commands = result.commands
+            canonical_commands(commands)
+            if (commands.scene_id, commands.scene_version) != (prepared.scene.scene_id, prepared.scene.scene_version):
+                raise ValueError("commands_scene_binding_mismatch")
+            if getattr(commands, "scene_digest", None) not in (None, digest(prepared.scene)):
+                raise ValueError("commands_scene_binding_mismatch")
+            if getattr(commands, "robot_setup_revision", revision) != revision:
+                raise ValueError("commands_robot_setup_revision_mismatch")
         manager = self._candidate_manager(prepared.scene)
         try:
-            self._check_snapshot(self.platform.load_scene(prepared.scene), prepared.scene)
+            loader = getattr(self.platform, "configure_initial_robot_mode", None)
+            if loader is None:
+                raise SceneCommitRejected("initial_robot_mode_transaction_unsupported")
+            self._check_snapshot(loader(prepared.scene), prepared.scene)
         except SceneCommitRejected:
             raise
         except Exception:
@@ -1027,6 +1074,14 @@ class BrainSession:
         if self.original_scene_manifest is None:
             raise ValueError("original_scene_unavailable")
         original, manifest = original_store.load(self.original_scene_manifest)
+        if self.robot_setup is None and self.robot_setup_revision:
+            raise ValueError("original_scene_current_robot_assembly_merge_unsupported")
+        if (self.robot_mode_lock is not None and self.robot_mode_lock.locked
+                and ((manifest.robot_setup is None) != (self.robot_setup is None)
+                     or (manifest.robot_setup is not None and
+                         (manifest.robot_setup.mode, manifest.robot_setup.profile_id) !=
+                         (self.robot_setup.mode, self.robot_setup.profile_id)))):
+            raise ValueError("original_scene_current_robot_assembly_merge_unsupported")
         from ..adapters.scene_file_codec import SceneFileCodec
         transformed = transform(original.model_copy(deep=True))
         edited_document = transformed.raw_document()
@@ -1181,7 +1236,9 @@ class BrainSession:
         self.last_exported_request = None
         self.last_request_id = None
 
-    def _accept_result(self, request_id, result):
+    def _accept_result(self, request_id, result, *, accepted_setup=False):
+        if result.status != "accepted":
+            return result
         if self.session_action == "pause":
             if result.session_action is None or result.session_action.action not in {"resume", "close"}:
                 raise ValueError("session_paused")
@@ -1244,17 +1301,17 @@ class BrainSession:
         self.session_turn_index += 1
         if self.first_accepted_turn_id is None:
             self.first_accepted_turn_id = request_id
-        if self.robot_setup is None and self.robot_mode_lock is None:
+        decides_mode = ((result.turn_kind == "robot_task" and result.commands is not None)
+                        or accepted_setup)
+        if decides_mode and not (self.robot_mode_lock and self.robot_mode_lock.locked):
             from ..contracts.robot_mode_lock import RobotModeLock
-            self.robot_mode_lock = RobotModeLock(mode="single", profile_id="default_single",
-                source="default", setup_revision=self.robot_setup_revision).accept(self.session_turn_index)
-        if self.robot_setup is not None:
-            from ..contracts.robot_mode_lock import RobotModeLock
-            if self.robot_mode_lock is None or not self.robot_mode_lock.locked:
-                source = self.robot_mode_lock.source if self.robot_mode_lock is not None else "default"
-                self.robot_mode_lock = RobotModeLock(mode=self.robot_setup.mode,
-                    profile_id=self.robot_setup.profile_id, source=source,
-                    setup_revision=self.robot_setup_revision).accept(self.session_turn_index)
+            setup = self.robot_setup
+            self.robot_mode_lock = RobotModeLock(
+                mode=setup.mode if setup else "single",
+                profile_id=setup.profile_id if setup else "default_single",
+                source=self.robot_mode_lock.source if self.robot_mode_lock else "default",
+                setup_revision=self.robot_setup_revision).accept(self.session_turn_index)
+            self.first_robot_mode_turn_id = request_id
         if self.robot_mode_lock is not None:
             route = (self.robot_mode_lock.prompt_route if result.commands is not None else None)
             result = result.model_copy(update={"planner_trace": {
@@ -1264,9 +1321,39 @@ class BrainSession:
                     "robot_setup_revision": self.robot_mode_lock.setup_revision,
                     "prompt_route": route,
                     "locked_at_turn": self.robot_mode_lock.locked_at_turn,
+                    "locked": self.robot_mode_lock.locked,
+                    "first_robot_mode_turn_id": self.first_robot_mode_turn_id,
                 }}})
         self.dialogue.observe(result)
         return result
+
+    def prepare_sequence_execution_envelope(self, commands, skill_contract, *, session_id):
+        """Validate a prospective execution binding; never authorizes dispatch.
+
+        A future negotiated adapter must additionally establish a durable
+        pending record before its first external call. mark_dispatched remains
+        closed for 4.1 until that adapter and reconciliation exist.
+        """
+        from ..contracts.execution_v41 import ExecutionEnvelopeV41
+        from ..contracts.control_skill_contract import ControlSkillContract
+        from ..contracts.robot_setup import RobotSetupRequest
+        if self.pending_execution_request is not None or self.sync_state != "synchronized":
+            raise ValueError("execution_pending_or_state_unknown")
+        if self.session_action in {"pause", "close"} or self.execution_reconciliation is not None:
+            raise ValueError("session_not_ready_for_dispatch")
+        if not (self.robot_mode_lock and self.robot_mode_lock.locked and self.robot_mode_lock.mode == "dual"):
+            raise ValueError("execution_v41_mode_not_locked")
+        self.robot_mode_lock.check_setup(self.robot_setup, self.robot_setup_revision)
+        if commands.request_id in self.dispatched_requests or self.exported_commands.get(commands.request_id) != canonical_commands(commands):
+            raise ValueError("execution_not_exported_by_session")
+        contract = ControlSkillContract.model_validate(skill_contract)
+        contract.validate_commands(commands)
+        profile = self.robot_profiles.resolve(RobotSetupRequest(mode="dual", profile_id=self.robot_setup.profile_id))
+        profile.validate_scene(self.require_scene(), self.robot_setup)
+        return ExecutionEnvelopeV41(boundary_version="brain.execution.v41.proposal.1",
+            session_id=session_id, commands=commands, scene=self.require_scene(), setup=self.robot_setup,
+            setup_revision=self.robot_setup_revision, skill_contract_revision=contract.revision,
+            runtime=self.arm_states)
 
     def mark_dispatched(self, commands):
         if commands.schema_version == "3.0":

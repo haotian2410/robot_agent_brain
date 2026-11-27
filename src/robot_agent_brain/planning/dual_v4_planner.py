@@ -59,8 +59,14 @@ def plan_v4(*, request_id, task, scene, profile, revision, runtime,
             if skill.object_parameters is None:
                 raise ValueError("control_skill_binding_schema_missing: " + step["skill_name"])
             for name, role in skill.object_parameters.items():
-                if name in step["parameters"] and step["parameters"][name] != getattr(operation, role):
+                expected = getattr(operation, role)
+                if expected is not None and name not in step["parameters"]:
+                    raise ValueError("control_skill_object_parameter_missing: " + operation.operation_id + "." + name)
+                if name in step["parameters"] and (step["parameters"][name] != expected
+                        or type(step["parameters"][name]) is not type(expected)):
                     raise ValueError("commands_v4_object_binding_changed: " + operation.operation_id + "." + name)
+    for operation in task.operations:
+        contract.validate_operation(operation, steps[operation.operation_id], bindings)
     commands = build_negotiated_commands_dag(skill_contract=contract, draft=draft, operations=operations,
         request_id=request_id, scene_id=scene.scene_id, scene_version=scene.scene_version,
         scene_digest=request.scene_digest, robot_setup_revision=revision)

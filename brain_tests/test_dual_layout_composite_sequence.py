@@ -52,23 +52,23 @@ def test_dual_robot_binding_failure_keeps_layout_and_exports_no_commands():
     assert str(error.value).startswith("grounding_missing:")
     assert session.scene.scene_version == before + 1
     assert not session.exported_commands
-    assert session.robot_mode_lock.locked and session.robot_mode_lock.mode == "dual"
+    assert not session.robot_mode_lock.locked and session.robot_mode_lock.mode == "dual"
     phases = session.composite_turn_records[-1]["phases"]
     assert [phase["status"] for phase in phases] == ["committed", "failed"]
     assert phases[0]["scene_digest_after"] == digest(session.scene)
     assert phases[1]["scene_digest_before"] == phases[1]["scene_digest_after"]
 
 
-def test_composite_robot_phase_cannot_switch_mode_after_layout_commit():
+def test_composite_robot_phase_missing_requested_profile_preserves_unlocked_layout():
     from robot_agent_brain.contracts.robot_setup import RobotSetupRequest
     session, task = prepared()
     task.phases[1].robot_setup_request = RobotSetupRequest(mode="single")
     before = session.scene.scene_version
-    with pytest.raises(ValueError, match="robot_mode_locked"):
+    with pytest.raises(ValueError, match="robot_setup_profile_not_registered"):
         session.process_composite_turn("mode-drift", task)
     assert session.scene.scene_version == before + 1
     assert session.robot_mode_lock.mode == "dual"
     assert not session.exported_commands
     phases = session.composite_turn_records[-1]["phases"]
-    assert phases[1]["error_code"] == "robot_mode_locked"
+    assert phases[1]["error_code"] == "robot_setup_profile_not_registered"
     assert [phase["status"] for phase in phases] == ["committed", "failed"]

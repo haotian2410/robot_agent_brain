@@ -32,6 +32,9 @@ class BrainApplication:
         # skill.md, an LLM response or a RobotProfile. This is not dispatch
         # permission: the live execution adapter must separately negotiate v4.
         from .contracts.control_skill_contract import ControlSkillContract
+        config = config or BrainConfig.load()
+        if control_skill_contract is None and config.control_skill_contract_path:
+            control_skill_contract = json.loads(Path(config.control_skill_contract_path).read_text(encoding="utf-8"))
         contract_snapshot = (None if control_skill_contract is None else
             ControlSkillContract.model_validate(
                 control_skill_contract.model_dump(mode="json")
@@ -338,6 +341,46 @@ class BrainApplication:
         scene = self.codec.load(path)
         return self._load_scene_object(session_id, scene)
 
+    def refresh_control_contract(self):
+        """Refresh only an operator-configured snapshot, never an LLM claim."""
+        path = self.config.control_skill_contract_path
+        if not path:
+            return
+        from .contracts.control_skill_contract import ControlSkillContract
+        incoming = ControlSkillContract.model_validate_json(Path(path).read_text(encoding="utf-8"))
+        previous = self.pipeline.control_skill_contract
+        previous = ControlSkillContract.model_validate(previous) if previous is not None else None
+        if previous == incoming:
+            return
+        if previous is not None and previous.revision == incoming.revision:
+            raise ValueError("control_skill_contract_revision_reused")
+        if any(session.pending_execution_request is not None for session in self.sessions.values()):
+            raise ValueError("control_skill_contract_changed_during_execution")
+        for session in self.sessions.values():
+            session._invalidate_plans()
+        self.pipeline.control_skill_contract = incoming
+
+    def _resolve_imported_profile(self, scene):
+        declared = scene.raw_document().get("robot_setup")
+        if declared is not None and self.config.scene_robot_profile is not None:
+            from .contracts.robot_setup import RobotSetup
+            setup = RobotSetup.model_validate(declared)
+            configured = self.config.robot_profiles.profiles[self.config.scene_robot_profile]
+            if (setup.mode, setup.profile_id) != (configured.setup.mode, configured.setup.profile_id):
+                raise ValueError("robot_profile_scene_mode_mismatch")
+        resolved = self.config.robot_profiles.resolve_scene(scene)
+        if self.config.scene_robot_profile is not None:
+            configured = self.config.robot_profiles.profiles[self.config.scene_robot_profile]
+            if resolved is not None:
+                if (resolved.setup.mode, resolved.setup.profile_id) != (configured.setup.mode, configured.setup.profile_id):
+                    raise ValueError("robot_profile_scene_mode_mismatch")
+                return resolved
+            if declared is not None:
+                raise ValueError("robot_profile_scene_mode_mismatch")
+            configured.validate_scene(scene)
+            return configured
+        return resolved
+
     def _load_scene_object(self, session_id, scene):
         """Validate and commit one initial import after semantic policy checks."""
         session = self.get_session(session_id)
@@ -349,19 +392,7 @@ class BrainApplication:
         # baseline.  In particular this carries a robot-specific
         # RobotModelRef/collision profile to the control bridge.
         scene, _ = self.robot_assembly.ensure_scene_robot_config(scene)
-        profile = None
-        if self.config.scene_robot_profile is not None:
-            profile = self.config.robot_profiles.profiles[self.config.scene_robot_profile]
-            declared_setup = scene.raw_document().get("robot_setup")
-            if declared_setup is not None:
-                from .contracts.robot_setup import RobotSetup
-                declared_setup = RobotSetup.model_validate(declared_setup)
-                if (declared_setup.mode, declared_setup.profile_id) != (
-                        profile.setup.mode, profile.setup.profile_id):
-                    raise ValueError("robot_profile_scene_mode_mismatch")
-            profile.validate_scene(scene)
-        elif self.config.robot_profiles.profiles:
-            profile = self.config.robot_profiles.resolve_scene(scene)
+        profile = self._resolve_imported_profile(scene)
         if profile is None and self.config.scene_platform_object_ids is not None:
             if not self.config.scene_platform_object_ids <= {o.object_id_in_scene for o in scene.objects}:
                 raise ValueError("scene_platform_manifest_invalid")
@@ -371,8 +402,8 @@ class BrainApplication:
         # A profile that just validated its manifest is the deployment's own
         # opt-in, so it outranks the scene gate; that gate only judges platforms
         # with no declared manifest (and refuses multi-arm scenes outright).
-        session.execution_capability = ("supported" if profile is not None
-                                        else session._platform_execution_capability())
+        session.execution_capability = (("supported" if profile.setup.mode == "single" else "unsupported")
+                                        if profile is not None else session._platform_execution_capability())
         if profile is not None:
             session.bind_imported_profile(profile)
         elif self.config.scene_platform_object_ids is not None:
@@ -417,9 +448,12 @@ class BrainApplication:
             if manifest is None:
                 raise ValueError("browser_platform_manifest_required")
             initial_import = session.scene is None
+            profile = self._resolve_imported_profile(candidate) if initial_import else None
             changed = session.accept_browser_scene(candidate, platform_object_ids=manifest,
                                                    change_kind=change_kind)
             if initial_import:
+                if profile is not None:
+                    session.bind_imported_profile(profile)
                 classified = self.robot_assembly.classify_scene(candidate)
                 if classified["arm"]:
                     binding = self.robot_assembly.scene_binding(candidate)
@@ -522,6 +556,7 @@ class BrainApplication:
             "failed" if report.run_status != "success" else
             "scene_updated" if report.delivery_status == "scene_updated" else
             "plan_ready" if report.delivery_status == "commands_exported" else
+            "robot_configured" if report.delivery_status == "robot_configured" else
             "answered" if report.delivery_status in {"answered", "session_controlled"} else "failed")
         error_code = report.error.code if report.error else None
         turn = ConversationTurn(
@@ -540,7 +575,7 @@ class BrainApplication:
             auto_selection_decisions=[SelectionDecision.model_validate(item) for item in
                                       report.metrics.get("selection_decisions", [])],
         )
-        failed = outcome in {"failed", "clarification_required", "plan_ready"}
+        failed = outcome in {"failed", "clarification_required"}
         if failed:
             session.conversation_memory.begin_failure(
                 turn, question=report.clarification_question,
@@ -697,6 +732,12 @@ class BrainApplication:
         self.pipeline.skill_planner.last_trace = None
         pending_import = None
         try:
+            self.refresh_control_contract()
+            contract = self.pipeline.control_skill_contract
+            revision = (contract.get("revision") if isinstance(contract, dict) else getattr(contract, "revision", None))
+            if any(command.get("schema_version") == "4.1" and command.get("skill_contract_revision") != revision
+                   for command in session.exported_commands.values()):
+                session._invalidate_plans()
             if session.session_action == "close":
                 raise ValueError("session_closed")
             if scene_path is not None:
@@ -718,7 +759,7 @@ class BrainApplication:
                 if prepared_turn is None:
                     turn = self.pipeline.understand_turn(instruction, scene=pending_import or session.scene,
                         dialogue=session.dialogue, arrangement_index=session.arrangement_index,
-                        original_context=session.original_understanding_context())
+                        original_context=session.original_understanding_context(), mode_context=session.mode_context())
                 else:
                     from .contracts.turn import BrainTurn
                     turn = BrainTurn.model_validate(prepared_turn.model_dump(mode="json"))
@@ -752,9 +793,9 @@ class BrainApplication:
                 # and mark_dispatched separately refuses the legacy v2 adapter.
                 if (turn.turn_kind == "robot_task" and turn.task_intent is not None
                         and not (((session.robot_setup is not None and session.robot_setup.mode == "single")
-                                  or (session.robot_mode_lock is not None and session.robot_mode_lock.mode == "single"))
-                                 and turn.task_intent.arm_usage != "both_required")
-                        and (turn.task_intent.arm_usage == "both_required"
+                                  or (session.robot_mode_lock is not None and session.robot_mode_lock.locked and session.robot_mode_lock.mode == "single"))
+                                 and not turn.task_intent.requires_dual)
+                        and (turn.task_intent.requires_dual
                              or any(op.arm in {"left", "right"}
                                     for op in turn.task_intent.operations))):
                     contract = self.pipeline.control_skill_contract
@@ -835,8 +876,11 @@ class BrainApplication:
                         initial = None
                     else:
                         setup_request = turn.robot_setup_request
-                        if setup_request is None and turn.initial_robot_asset is None and self.config.robot_profiles.default_single is not None:
-                            setup_request = RobotSetupRequest(mode="single")
+                        if setup_request is None and turn.initial_robot_asset is None:
+                            if turn.task_intent is not None and turn.task_intent.requires_dual:
+                                setup_request = RobotSetupRequest(mode="dual")
+                            elif self.config.robot_profiles.default_single is not None:
+                                setup_request = RobotSetupRequest(mode="single")
                         if setup_request is not None:
                             initial_profile = self.config.robot_profiles.resolve(setup_request)
                             active_bootstrapper = self.bootstrapper.for_profile(initial_profile)
@@ -1048,6 +1092,8 @@ class BrainApplication:
                               "references": protocol_references,
                               "error_code": report.error.code if report.error is not None else None,
                           }}
+        if result is not None and result.planner_trace is not None:
+            report.metrics["planner_trace"] = result.planner_trace
         if result is not None and getattr(result, "selection_decisions", None):
             report.metrics["selection_decisions"] = list(result.selection_decisions)
         previous_config = getattr(session, "restored_config_fingerprint", None)

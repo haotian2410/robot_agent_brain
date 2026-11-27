@@ -133,7 +133,7 @@ def main(argv=None):
             from .contracts.robot_profile import RobotProfileRegistry
             directory = Path(args.output_dir).resolve()
             directory.mkdir(parents=True, exist_ok=True)
-            for name, model in (("commands", CommandsFile), ("commands_v41", CommandsFileV41),
+            for name, model in (("commands", CommandsFile), ("commands_v41", CommandsFileV41), ("commands_sequence_v41", CommandsFileV41),
                                 ("robot_profiles", RobotProfileRegistry),
                                 ("scene_config", SceneConfig), ("run_report", BrainRunReport)):
                 path = directory / (name + ".schema.json")

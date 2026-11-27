@@ -6,12 +6,12 @@
       "additionalProperties": false,
       "properties": {
         "command_id": {
-          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$",
           "title": "Command Id",
           "type": "string"
         },
         "operation_id": {
-          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$",
           "title": "Operation Id",
           "type": "string"
         },
@@ -24,7 +24,7 @@
           "type": "string"
         },
         "skill_name": {
-          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$",
           "title": "Skill Name",
           "type": "string"
         },
@@ -55,7 +55,6 @@
   "properties": {
     "schema_version": {
       "const": "4.1",
-      "default": "4.1",
       "title": "Schema Version",
       "type": "string"
     },
@@ -75,7 +74,7 @@
       "type": "integer"
     },
     "scene_digest": {
-      "minLength": 1,
+      "pattern": "^[0-9a-f]{64}$",
       "title": "Scene Digest",
       "type": "string"
     },
@@ -99,6 +98,7 @@
     }
   },
   "required": [
+    "schema_version",
     "request_id",
     "scene_id",
     "scene_version",

@@ -396,7 +396,7 @@ class BrainPipeline:
         )
 
     def understand_turn(self, instruction: str, *, scene: SceneConfig | None = None,
-                        dialogue=None, arrangement_index=None, original_context=None) -> BrainTurn:
+                        dialogue=None, arrangement_index=None, original_context=None, mode_context=None) -> BrainTurn:
         """Call understanding once; keep injected context out of the user text."""
         import re
         if re.search(r"(?:交换|互换).*(?:位置|坐标)|(?:位置|坐标).*互换", instruction):
@@ -427,6 +427,8 @@ class BrainPipeline:
             deferred_reference_error = exc
             provider_instruction = instruction
         scene_context = self._understanding_scene_context(scene, arrangement_index)
+        if mode_context is not None:
+            scene_context["robot_mode"] = mode_context
         if original_context is not None:
             from copy import deepcopy
             scene_context["original_snapshot"] = deepcopy(original_context)
@@ -533,13 +535,15 @@ class BrainPipeline:
             if hasattr(self.understanding, "set_asset_catalog"):
                 self.understanding.set_asset_catalog(current_catalog)
 
-    def understand_composite(self, instruction, *, scene, arrangement_index=None, original_context=None):
+    def understand_composite(self, instruction, *, scene, arrangement_index=None, original_context=None, mode_context=None):
         from .models.task_understanding import TaskUnderstandingRequest
         from .contracts.composite_turn import CompositeTask
         if not hasattr(self.understanding, "understand_composite"):
             raise ValueError("composite_understanding_unavailable")
         self._refresh_understanding_catalog()
         context = self._understanding_scene_context(scene, arrangement_index)
+        if mode_context is not None:
+            context["robot_mode"] = mode_context
         if original_context is not None:
             from copy import deepcopy
             context["original_snapshot"] = deepcopy(original_context)
@@ -567,7 +571,7 @@ class BrainPipeline:
         dual = robot_profile is not None and robot_profile.setup.mode == "dual"
         if not dual:
             if (locked_robot_mode == "single" or robot_profile is not None and robot_profile.setup.mode == "single") and turn.task_intent is not None:
-                if turn.task_intent.arm_usage == "both_required":
+                if turn.task_intent.requires_dual:
                     raise ValueError("robot_mode_locked")
             else:
                 turn.require_legacy_execution()
@@ -824,7 +828,11 @@ class BrainPipeline:
                                     scene=scene, capture=capture)
             operations = grounded.operations
             from .planning.skill_planner_router import PlanningTrace
-            mode = "qwen" if self.skill_planner.mode == "qwen" else "recipe"
+            mode = self.skill_planner.mode
+            if mode == "auto":
+                mode = "recipe" if self.dual_skill_recipe is not None else "qwen"
+            if mode == "qwen" and not hasattr(self.skill_planner.provider, "plan_dual_operations"):
+                raise ValueError("dual_v4_qwen_planner_not_configured")
             trace = self.skill_planner.last_trace = PlanningTrace(self.skill_planner.mode, used_planner=mode)
             commands = plan_v4(request_id=request_id, task=grounded, scene=scene,
                 profile=robot_profile, revision=robot_setup_revision, runtime=arm_states,

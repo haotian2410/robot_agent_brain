@@ -104,6 +104,10 @@ class Operation(StrictModel):
 
 
 class TaskIntent(StrictModel):
+    @property
+    def requires_dual(self):
+        return self.arm_usage == "both_required" or {op.arm for op in self.operations} >= {"left", "right"}
+
     instruction: str = Field(min_length=1)
     arm_usage: Literal["unspecified", "both_required"] = "unspecified"
     entities: list[TaskEntity]

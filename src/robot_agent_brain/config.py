@@ -110,6 +110,7 @@ class BrainConfig(BaseModel):
     # interpreter of its own (the control pins numpy/mujoco versions the Brain's
     # service environment cannot), the repository, the collision library it
     # dlopen()s and the link package that builds the scratch workspace.
+    control_skill_contract_path: str | None = None
     execution_enabled: bool = False
     execution_python: str | None = None
     execution_control_root: str | None = None

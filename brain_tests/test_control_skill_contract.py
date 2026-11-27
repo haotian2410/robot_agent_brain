@@ -5,7 +5,7 @@ from robot_agent_brain.planning.dual_arm_dag import build_negotiated_commands_da
 
 
 def contract():
-    return dict(revision="fixture-reviewed-v1", supported_protocols=["4.1"], expansion_level="task",
+    return dict(revision="fixture-reviewed-v1", supported_protocols=["4.1"], expansion_level="task", operation_semantics={"grasp": {"required_skill_sequence": ["pick"]}},
         skills={"pick": {"expansion_level": "task", "parameters_schema": {
             "type": "object", "properties": {"source": {"type": "integer", "minimum": 0}},
             "required": ["source"], "additionalProperties": False}}})
@@ -16,7 +16,7 @@ def build(capabilities=None, **kwargs):
         draft=kwargs.pop("draft", {"operations": [{"operation_id": "op1", "steps": [
             {"skill_name": "pick", "parameters": {"source": 7}}]}]}),
         operations=[AtomicOperationIR(operation_id="op1", kind="pick_and_place", arm="left")],
-        request_id="request", scene_id=1, scene_version=2, scene_digest="digest",
+        request_id="request", scene_id=1, scene_version=2, scene_digest="a" * 64,
         robot_setup_revision=1, **kwargs)
 
 

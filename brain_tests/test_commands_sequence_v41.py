@@ -8,7 +8,7 @@ from robot_agent_brain.contracts.commands_sequence_v41 import (
 
 def payload():
     return dict(schema_version="4.1", request_id="review", scene_id=1,
-                scene_version=2, scene_digest="scene", robot_setup_revision=1,
+                scene_version=2, scene_digest="a" * 64, robot_setup_revision=1,
                 skill_contract_revision="fixture-only", commands=[
                     dict(command_id="L-1", operation_id="op-1", arm="left",
                          skill_name="pick", parameters={"target": 7}, depends_on=[]),

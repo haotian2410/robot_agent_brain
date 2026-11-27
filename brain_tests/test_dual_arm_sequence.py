@@ -13,7 +13,7 @@ def build(*, second_arm="right", dependencies=(), same_source=False, steps=None)
         {"skill_name": "pick", "parameters": {"source": operation.source_object_id}},
         {"skill_name": "put", "parameters": {"destination": 9}}] for operation in operations}
     return build_commands_sequence(operations=operations, skill_steps=chains if steps is None else steps,
-        request_id="fixture", scene_id=1, scene_version=2, scene_digest="current-scene",
+        request_id="fixture", scene_id=1, scene_version=2, scene_digest="a" * 64,
         robot_setup_revision=1, skill_contract_revision="fixture-only")
 
 

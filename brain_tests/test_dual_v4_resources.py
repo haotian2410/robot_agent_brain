@@ -20,12 +20,15 @@ def shared_destination():
     contract = session.pipeline.control_skill_contract
     contract["skills"]["put"] = {"expansion_level": "task",
         "object_parameters": {"destination": "destination_object_id"},
-        "parameters_schema": {"type": "object", "properties": {"destination": {"type": "integer"}},
+        "parameters_schema": {"type": "object", "properties": {"destination": {"type": "integer"}, "placement": {"type": "object"}},
                               "required": ["destination"], "additionalProperties": False}}
+    contract["operation_semantics"]["pick_and_place"] = {
+        "required_skill_sequence": ["pick", "put"],
+        "parameter_bindings": {"put": {"placement": "placement_target"}}}
     def recipe(request):
         return {"operations": [{"operation_id": op.operation_id, "steps": [
             {"skill_name": "pick", "parameters": {"source": op.source_object_id}},
-            {"skill_name": "put", "parameters": {"destination": op.destination_object_id}}]}
+            {"skill_name": "put", "parameters": {"destination": op.destination_object_id, "placement": {"kind": "container_interior", "reference": op.destination_object_id}}}]}
             for op in request.operations]}
     return plan_v4(request_id="shared", task=task, scene=session.scene,
         profile=session.robot_profiles.profiles["fixture_only"], revision=session.robot_setup_revision,

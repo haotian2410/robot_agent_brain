@@ -50,7 +50,7 @@ def test_session_acceptance_locks_before_next_request():
     assert session.session_turn_index == 1
     assert result.planner_trace["robot_mode"] == {
         "mode": "dual", "profile_id": "fixture_only", "robot_setup_revision": 1,
-        "prompt_route": "dual_atomic", "locked_at_turn": 1}
+        "prompt_route": "dual_atomic", "locked_at_turn": 1, "locked": True, "first_robot_mode_turn_id": "first"}
 
 
 def test_session_lock_survives_store_and_next_left_only_task(tmp_path):
@@ -94,7 +94,7 @@ def test_inconsistent_saved_mode_is_rejected(tmp_path, fault):
     elif fault == "turn":
         raw["session_turn_index"] = 0
     else:
-        raw["first_accepted_turn_id"] = None
+        raw["first_robot_mode_turn_id"] = None
     with pytest.raises(ValueError, match="mode_lock"):
         SessionState.model_validate(raw)
 
@@ -148,7 +148,7 @@ def test_historical_exported_plan_restores_locked_mode(tmp_path):
     with store.lock("history"):
         store.save("history", session, revision=1)
         raw = store.load("history").model_dump(mode="python")
-    for field in ("robot_mode_lock", "session_turn_index", "first_accepted_turn_id"):
+    for field in ("robot_mode_lock", "session_turn_index", "first_accepted_turn_id", "first_robot_mode_turn_id", "mode_lifecycle_version"):
         raw.pop(field)
     restored = store.restore(SessionState.model_validate(raw),
         BrainSession(None, session.pipeline, LocalScenePlatform(), robot_profiles=session.robot_profiles))
@@ -158,7 +158,7 @@ def test_historical_exported_plan_restores_locked_mode(tmp_path):
         restored.robot_mode_lock.check_request(RobotSetupRequest(mode="single"))
 
 
-def test_historical_committed_edit_restores_lock_without_commands(tmp_path):
+def test_historical_committed_edit_does_not_create_lock_without_robot_history(tmp_path):
     from test_dual_v4_pipeline import setup
     from robot_agent_brain.session.store import SessionStore, SessionState
     from robot_agent_brain.session.conversation_memory import ConversationTurn
@@ -172,12 +172,12 @@ def test_historical_committed_edit_restores_lock_without_commands(tmp_path):
     with store.lock("history"):
         store.save("history", current, revision=1)
         raw = store.load("history").model_dump(mode="python")
-    for field in ("robot_mode_lock", "session_turn_index", "first_accepted_turn_id"):
+    for field in ("robot_mode_lock", "session_turn_index", "first_accepted_turn_id", "first_robot_mode_turn_id", "mode_lifecycle_version"):
         raw.pop(field)
     restored = store.restore(SessionState.model_validate(raw),
         BrainSession(None, current.pipeline, LocalScenePlatform(), robot_profiles=current.robot_profiles))
-    assert restored.robot_mode_lock.locked
-    assert restored.first_accepted_turn_id == "old-edit"
+    assert restored.robot_mode_lock is None
+    assert restored.first_robot_mode_turn_id is None
     assert not restored.exported_commands
 
 
@@ -307,7 +307,7 @@ def test_default_single_without_profile_locks_and_persists(tmp_path):
         restored.check_turn(turn)
     from robot_agent_brain.session.store import SessionState
     raw = store.load("default").model_dump(mode="python")
-    for field in ("robot_mode_lock", "session_turn_index", "first_accepted_turn_id"):
+    for field in ("robot_mode_lock", "session_turn_index", "first_accepted_turn_id", "first_robot_mode_turn_id", "mode_lifecycle_version"):
         raw.pop(field)
     historical = store.restore(SessionState.model_validate(raw),
         BrainSession(None, current.pipeline, LocalScenePlatform()))

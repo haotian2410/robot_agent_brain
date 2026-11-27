@@ -1,4 +1,4 @@
-"""Persistable session mode decision and first-accepted-turn boundary."""
+"""Persistable mode decision at accepted robot planning or explicit setup."""
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 

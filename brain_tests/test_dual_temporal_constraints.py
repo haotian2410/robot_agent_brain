@@ -21,7 +21,7 @@ def test_explicit_dependency_is_the_only_cross_arm_edge(dependent):
         {"skill_name": "locate", "parameters": {"target": 7}},
         {"skill_name": "pick", "parameters": {"target": 7}}] for op in operations}
     commands = build_commands_sequence(operations=operations, skill_steps=steps,
-        request_id="temporal", scene_id=1, scene_version=1, scene_digest="bound",
+        request_id="temporal", scene_id=1, scene_version=1, scene_digest="a" * 64,
         robot_setup_revision=1, skill_contract_revision="fixture-only")
     assert commands.commands[2].depends_on == (["L-op-1-2"] if dependent else [])
     assert commands.commands[3].depends_on == ["R-op-2-1"]

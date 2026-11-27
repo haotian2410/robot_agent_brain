@@ -367,3 +367,10 @@ pytest brain_tests/
 
 The test suite includes a dependency-boundary check and runs without MuJoCo or
 `robot_agent_control` installed.
+
+## Brain 4.1 模式与执行边界
+
+布局、编辑和查询不会锁定single/dual；首次成功接受的机器人计划或显式setup才锁定。
+单臂仍使用Atomic2.0，双臂规划使用4.1。真实Control4.1执行适配尚未交付，默认拒绝下发。
+运维可通过control_skill_contract_path提供可信规划合同；它不构成执行授权。
+详见[本轮整改验收](docs/brain_4_1_followup_acceptance.md)和[Control对接边界](docs/control_sequence_v41_boundary.md)。

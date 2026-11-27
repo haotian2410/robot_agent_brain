@@ -19,6 +19,7 @@ MODELS = {
     "layout_plan.schema.json": LayoutPlan,
     "layout_resolution.schema.json": LayoutResolution,
     "commands_dag_v4.schema.json": CommandsFileV4,
+    "commands_sequence_v41.schema.json": CommandsFileV4,
 }
 
 

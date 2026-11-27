@@ -20,5 +20,9 @@ class LocalScenePlatform:
         return SceneSnapshot(scene_id=scene.scene_id, scene_version=scene.scene_version,
                              scene_sub_version=scene.scene_sub_version)
 
+    def configure_initial_robot_mode(self, scene):
+        """Explicit local-metadata authorization, not physical reconfiguration."""
+        return self.load_scene(scene)
+
     def capture(self, request):
         raise ValueError("vision_unavailable: local metadata platform does not render images")

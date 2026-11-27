@@ -94,7 +94,7 @@ def world(tmp_path, outcome, execution_enabled=True, **kwargs):
 def dispatch(service, tmp_path, session, commands, task_id):
     path = tmp_path / "commands.json"
     path.write_text(json.dumps(canonical_commands(commands)), encoding="utf-8")
-    report = SimpleNamespace(artifacts={"commands": str(path)}, request_id=commands.request_id)
+    report = SimpleNamespace(session_id=next(key for key, value in service.app.sessions.items() if value is session), artifacts={"commands": str(path)}, request_id=commands.request_id)
     result = {"outcome": "plan_ready", "executed": False, "scene_commit_status": "unchanged"}
     trajs = service.dispatch(session, session.platform, report, task_id, result)
     # Mirror _run_step/finalization: playback reads the immutable task result,
@@ -156,10 +156,9 @@ def test_missing_preflight_evidence_still_requires_reconciliation(tmp_path):
     service, _, session, commands, record, _ = world(tmp_path, ExecutionOutcome(
         ok=False, error_code="unsupported_kinematic_chain"))
     result, _ = dispatch(service, tmp_path, session, commands, record["id"])
-    # Failed tasks are discarded and do not quarantine the session.  The raw
-    # control observation is retained separately for diagnostics.
-    assert session.sync_state == "synchronized"
-    assert result["execution"]["effect"] == "none"
+    # No Gateway write cannot establish that the execution had no effect.
+    assert session.sync_state == "unknown"
+    assert result["execution"]["effect"] == "unknown"
     assert result["execution"]["observed_effect"] == "unknown"
 
 
@@ -239,12 +238,12 @@ def test_a_run_that_did_not_account_for_every_command_is_never_a_success(tmp_pat
     # so no world is committed.  The clip still goes out -- it is the only picture of
     # a run that stopped halfway.
     assert result["executed"] is False and result["outcome"] == "failed"
-    assert result["execution"]["writeback_status"] == "discarded"
+    assert result["execution"]["writeback_status"] == "none"
     assert trajs == ["/tmp/trajectory.traj"]
     assert browser.calls.count(("POST", "/commitWorld")) == 0
     assert session.scene.scene_version == commands.scene_version
-    assert session.pending_execution_request is None
-    assert session.sync_state == "synchronized"
+    assert session.pending_execution_request == commands.request_id
+    assert session.sync_state == "unknown"
 
 
 def test_a_service_that_forbids_execution_never_reaches_the_runner(tmp_path):
@@ -263,16 +262,16 @@ def test_a_service_that_forbids_execution_never_reaches_the_runner(tmp_path):
     assert session.scene.scene_version == commands.scene_version
 
 
-def test_verified_partial_execution_is_discarded_and_remains_failed(tmp_path):
+def test_verified_partial_execution_keeps_evidence_and_remains_failed(tmp_path):
     service, browser, session, commands, record, _ = world(tmp_path, ExecutionOutcome(
         ok=False, steps=stopped_at(3), moved=MOVED, state_verified=True,
         error_code="EXECUTION_TIMEOUT", detail="partial physical movement"))
     result, _ = dispatch(service, tmp_path, session, commands, record["id"])
     assert result["outcome"] == "failed" and result["executed"] is False
-    assert result["execution"]["writeback_status"] == "discarded"
+    assert result["execution"]["writeback_status"] == "none"
     assert not result["execution"]["retry_safe"]
     assert result["scene_commit_status"] == "unchanged"
-    assert session.sync_state == "synchronized"
+    assert session.sync_state == "unknown"
     assert pose(session.scene, APPLE)["position"] != MOVED[APPLE]["position"]
 
 
@@ -280,7 +279,8 @@ def test_verified_partial_execution_is_discarded_and_remains_failed(tmp_path):
 def test_failed_simulation_discard_keeps_scene_and_allows_next_dispatch(tmp_path, verified):
     service, browser, session, commands, record, _ = world(tmp_path, ExecutionOutcome(
         ok=False, steps=stopped_at(3), moved=MOVED, state_verified=verified,
-        holding_object=APPLE, error_code='GRASP_FAILED', detail='lost grip', traj_path='/tmp/diagnostic.traj'))
+        holding_object=APPLE, error_code='GRASP_FAILED', detail='lost grip', traj_path='/tmp/diagnostic.traj',
+        isolated_workspace_discarded_verified=True))
     service.config.execution_failure_policy = 'discard_simulation'
     service.execution_port.backend = 'mujoco'
     before = digest(session.scene)
@@ -298,13 +298,13 @@ def test_failed_simulation_discard_keeps_scene_and_allows_next_dispatch(tmp_path
     session.mark_dispatched(next_commands)
 
 
-def test_failed_execution_is_discarded_for_any_backend(tmp_path):
+def test_physical_failure_policy_does_not_authorize_discard(tmp_path):
     service, browser, session, commands, record, _ = world(tmp_path, None)
     service.config.execution_failure_policy = 'discard_simulation'
     service.execution_port.backend = 'physical'
     result, _ = dispatch(service, tmp_path, session, commands, record['id'])
     assert result['scene_commit_status'] == 'unchanged'
-    assert result['execution']['writeback_status'] == 'discarded'
+    assert result['execution']['writeback_status'] == 'none'
 
 
 def test_active_robot_joint_state_does_not_require_command_target(tmp_path):
@@ -353,7 +353,8 @@ def test_a_failed_run_leaves_the_world_alone_but_still_shows_the_clip(tmp_path):
     assert pose(session.scene, APPLE)["position"] == started != MOVED[APPLE]["position"]
     assert session.scene.scene_version == commands.scene_version
     assert browser.calls.count(("POST", "/commitWorld")) == 0
-    assert session.pending_execution_request is None
+    assert session.pending_execution_request == commands.request_id
+    assert session.sync_state == "unknown"
     # The failure clip reaches the browser the same way a success clip does: after the
     # lease, as playback only, so nothing about the committed world is implied.
     service.play(record["id"], trajs)
@@ -361,12 +362,12 @@ def test_a_failed_run_leaves_the_world_alone_but_still_shows_the_clip(tmp_path):
     assert browser.calls.count(("POST", "/commitWorld")) == 0
 
 
-def test_a_runner_that_never_started_still_closes_the_dispatch(tmp_path):
+def test_opaque_runner_exception_preserves_pending_for_reconciliation(tmp_path):
     service, browser, session, commands, record, _ = world(tmp_path, None, raises=OSError("no such file"))
     result, trajs = dispatch(service, tmp_path, session, commands, record["id"])
     assert result["error"]["code"] == "execution_dispatch_failed"
     assert result["execution"]["steps"] == []
-    assert session.pending_execution_request is None and session.sync_state == "synchronized"
+    assert session.pending_execution_request == commands.request_id and session.sync_state == "unknown"
     assert trajs == [] and browser.calls.count(("POST", "/commitWorld")) == 0
 
 

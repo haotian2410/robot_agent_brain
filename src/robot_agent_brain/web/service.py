@@ -74,7 +74,7 @@ class AgentService:
     ASSET_CHECK_TTL_SECONDS = 30.0
 
     def __init__(self, config, *, gateway_url="http://127.0.0.1:8099", ols_url="http://127.0.0.1:8000",
-                 joint_inventory=None, camera_id=5, provider=None, platform_factory=None):
+                 joint_inventory=None, camera_id=5, provider=None, platform_factory=None, control_skill_contract=None):
         if config.scene_id_bits != 32:
             raise ValueError("web_uint32_configuration_required")
         loopback_url(config.base_url)
@@ -89,7 +89,7 @@ class AgentService:
         self.camera_bindings = {}
         self.binding = None
         self.platform_override = platform_factory
-        self.app = BrainApplication(config, provider=provider, platform_factory=self.platform)
+        self.app = BrainApplication(config, provider=provider, platform_factory=self.platform, control_skill_contract=control_skill_contract)
         self.queue = asyncio.Queue()
         self.perf_pending = {}
         self.mutex = asyncio.Lock()
@@ -366,7 +366,7 @@ class AgentService:
         return {"sessionID":identifier,"browserID":request.browserID,
                 "camera_id":getattr(session, "camera_id", None),
                 "camera_selection_reason":camera_reason if request.camera_id is None else "explicit_configuration",
-                "session_phase":getattr(session, "session_phase", "setup"),"active":True}
+                "session_phase":getattr(session, "session_phase", "setup"),"active":True, **self.mode_state(session)}
 
     @timed("web.execute", component="brain.web")
     def execute(self, identifier):
@@ -479,6 +479,8 @@ class AgentService:
                 # quarantining it makes the next, independent session impossible.
                 # Keep the reconciliation fence for any attempted/unknown write.
                 if (uncertain
+                        and session is not None and session.sync_state != "unknown"
+                        and session.pending_execution_request is None
                         and getattr(platform, "write_attempted", None) is False
                         and getattr(platform, "last_transaction", None) is None
                         and getattr(platform, "lease_state", None) == "granted"
@@ -625,7 +627,7 @@ class AgentService:
                 preview = self.app.pipeline.understand_turn(
                     request.command, scene=session.scene, dialogue=session.dialogue,
                     arrangement_index=getattr(session, "arrangement_index", None),
-                    original_context=session.original_understanding_context())
+                    original_context=session.original_understanding_context(), mode_context=getattr(session, "mode_context", lambda: None)())
                 payload = {
                     "scene_edit": getattr(preview, "scene_edit", None),
                     "scene_query": getattr(preview, "scene_query", None),
@@ -1051,7 +1053,7 @@ class AgentService:
         calls_start = len(getattr(provider, "calls", []))
         task = session.pipeline.understand_composite(request.command, scene=session.scene,
                                                     arrangement_index=session.arrangement_index,
-                                                    original_context=session.original_understanding_context())
+                                                    original_context=session.original_understanding_context(), mode_context=getattr(session, "mode_context", lambda: None)())
         from ..diagnostics import redact
         secret = self.config.api_key.get_secret_value() if self.config.api_key else None
         evidence = redact({"model_calls": list(getattr(provider, "calls", []))[calls_start:],
@@ -1081,6 +1083,7 @@ class AgentService:
             platform.camera_id = session.camera_id
             self.camera_bindings[request.sessionID] = session.camera_id
         result = self.result(report, identifier)
+        result["robot_mode"] = (report.metrics.get("planner_trace") or {}).get("robot_mode")
         result["camera_id"] = session.camera_id
         result["camera_selection_reason"] = camera_reason if session.scene is not None else "no_scene"
         # Even non-mutating plans must still refer to the live editor state.
@@ -1242,6 +1245,7 @@ class AgentService:
             record = {"step": index, "segment_id": f"segment-{index}",
                       "source_instructions": segment_sources[index - 1],
                       "execution": result.get("execution"),
+                      "robot_mode": result.get("robot_mode"),
                       "kind": step.kind.value, "instruction": step.instruction,
                       "request_id": report.request_id, "outcome": result["outcome"],
                       "attempts": attempts,
@@ -1342,22 +1346,14 @@ class AgentService:
 
     @staticmethod
     def _retry_allowed(result):
-        """Return whether a failed execution has explicit no-side-effect evidence.
-
-        A retry is safe only for a complete control report in which every command
-        is explicitly failed and the report contains no moved or held object.  A
-        partial/unknown report must remain terminal for this step: replaying it
-        could duplicate an already applied effect.  The legacy provider doubles
-        used by the isolated orchestration tests do not include an ``execution``
-        envelope, so they retain their historical retry behaviour.
-        """
+        """Require trusted no-effect evidence; absent envelopes are not safe."""
         execution = result.get("execution")
         if execution is None:
-            return True
+            return False
         if execution.get("retry_safe") is not True:
             return False
         steps = execution.get("steps") or []
-        return bool(steps) and all(item.get("status") == "failed" for item in steps)
+        return (execution.get("observed_effect") == "none" or execution.get("simulation_discarded") is True) and not any(item.get("status") == "success" for item in steps)
 
     @staticmethod
     def verdict(result):
@@ -1450,13 +1446,10 @@ class AgentService:
         return result
 
     def dispatch(self, session, platform, report, identifier, result):
-        """Act out the exported plan, then make the browser's world the executed one.
+        """Dispatch Atomic 2.0 with a durable ledger; keep 4.1 planning-only.
 
-        Success requires every command to be accounted for. Any failed task is
-        diagnostic-only: observed partial state is never published into the
-        next task's Scene or robot pose; the pre-dispatch state is restored.
-        Trajectory publication is separate from state commit and happens after
-        lease release. A failed clip is diagnostic, not evidence of success.
+        Partial/unknown execution remains fenced until Control reconciliation.
+        Failed state is discarded only with verified isolated-workspace evidence.
         """
         from ..contracts.commands import CommandFeedback, ExecutionFeedback, parse_commands
         from ..ports.execution import ExecutionOutcome
@@ -1466,6 +1459,10 @@ class AgentService:
             # costs the session nothing.
             raise ValueError("execution_disabled")
         commands = parse_commands(json.loads(Path(report.artifacts["commands"]).read_text(encoding="utf-8")))
+        if commands.schema_version != "2.0":
+            result["execution_unavailable_reason"] = "dual_arm_sequence_live_adapter_unavailable"
+            result["executed"] = False
+            return []
         total = len(commands.commands)
 
         def progress(steps):
@@ -1477,12 +1474,17 @@ class AgentService:
 
         prior_arm_states = session.arm_states.model_copy(deep=True) if session.arm_states is not None else None
         prior_holding = session.holding_object
-        # A failed control task is diagnostic evidence only.  It must never
-        # publish a partial/verified final scene: a timeout or failed grasp may
-        # have changed an intermediate simulator state, but it did not establish
-        # a successful user-visible world.
-        discard_failures = True
         session.mark_dispatched(commands)
+        try:
+            self.app._save_session(report.session_id)
+        except Exception:
+            # Nothing has crossed the execution port. Do not call Control if
+            # the durable pre-dispatch record cannot be established.
+            session.pending_execution_request = None
+            session.pending_commands = None
+            session.dispatched_requests.discard(commands.request_id)
+            raise
+        control_started = False
         try:
             # Ensure an OLS-specific RobotModelRef (including approved
             # collision decomposition hints) is present even for sessions
@@ -1493,6 +1495,7 @@ class AgentService:
             if supplied != checkpoint:
                 raise ValueError('execution_checkpoint_dispatch_mismatch')
             execution_scene, _ = self.app.robot_assembly.ensure_scene_robot_config(session.scene)
+            control_started = True
             outcome = self.execution().run(commands, execution_scene.raw_document(), progress=progress)
             if outcome is None:
                 outcome = ExecutionOutcome(ok=False, error_code="execution_dispatch_failed",
@@ -1501,28 +1504,38 @@ class AgentService:
             # A runner that never started still owes the session a feedback row, or
             # the dispatch would stay pending for every later task.
             outcome = ExecutionOutcome(ok=False, error_code="execution_dispatch_failed",
-                                       detail=f"{type(exc).__name__}: {exc}")
+                                       detail=f"{type(exc).__name__}: {exc}", no_effect_verified=not control_started)
         reported = {step.command_id for step in outcome.steps}
         success = (outcome.ok and reported == {command.command_id for command in commands.commands}
                    and all(step.status == "success" for step in outcome.steps))
-        discarded = discard_failures and not success
-        simulation_discarded = discarded and getattr(self.execution(), 'backend', None) == 'mujoco'
+        simulation_discarded = not success and outcome.isolated_workspace_discarded_verified
+        discarded = simulation_discarded
         observed_effect = (
             "completed" if success else
             "partial" if (outcome.state_verified or any(step.status == "success" for step in outcome.steps)
                           or outcome.moved or outcome.articulated_joints) else
-            "unknown")
+            "none" if outcome.no_effect_verified else "unknown")
         # Only a fully successful run can create a candidate Scene.  Measured
         # partial state remains in diagnostics, never in the next task's world.
         candidate = self.executed_scene(session.scene, outcome, commands) if success else None
-        session.apply_execution_feedback(
-            ExecutionFeedback(request_id=commands.request_id, status="success" if success else "partial",
-                              holding_object=outcome.holding_object if success else prior_holding,
-                              commands=[CommandFeedback(command_id=step.command_id,
-                                                         status="success" if step.status == "success" else "failed")
-                                        for step in outcome.steps]),
-            confirmed_scene=candidate, feedback_source="external",
-            execution_checkpoint=outcome.execution_checkpoint if success else None)
+        no_effect = (outcome.no_effect_verified and not outcome.ok and not outcome.steps
+                     and not outcome.moved and not outcome.articulated_joints
+                     and outcome.holding_object is None and outcome.traj_path is None)
+        if success or discarded or no_effect:
+            session.apply_execution_feedback(
+                ExecutionFeedback(request_id=commands.request_id, status="success" if success else "partial",
+                                  holding_object=outcome.holding_object if success else prior_holding,
+                                  commands=[CommandFeedback(command_id=step.command_id,
+                                                             status="success" if step.status == "success" else "failed")
+                                            for step in outcome.steps]),
+                confirmed_scene=candidate, feedback_source="external",
+                execution_checkpoint=outcome.execution_checkpoint if success else None)
+        else:
+            session.sync_state = "unknown"
+            session.execution_reconciliation = {"request_id": commands.request_id,
+                "input_scene_digest": digest(session.scene), "control_started": control_started,
+                "outcome": outcome.summary, "final_scene_path": outcome.final_scene_path}
+        self.app._save_session(report.session_id)
         if discarded:
             # Clear the execution transaction, then restore the exact
             # pre-dispatch Brain state. No Gateway write has occurred here.
@@ -1535,9 +1548,6 @@ class AgentService:
             # verification. Replace the pre-execution planning report's status;
             # a verified partial execution can also have committed actual state.
             result["scene_commit_status"] = "committed"
-        no_effect = (outcome.no_effect_verified and not outcome.ok and not outcome.steps
-                     and not outcome.moved and not outcome.articulated_joints
-                     and outcome.holding_object is None and outcome.traj_path is None)
         if candidate is None and not any(step.status == "success" for step in outcome.steps) \
                 and not outcome.moved and not outcome.articulated_joints \
                 and no_effect \
@@ -1577,7 +1587,7 @@ class AgentService:
                                  # ``effect`` describes the committed Brain
                                  # effect. Physical observations from a failed
                                  # run are reported separately and discarded.
-                                 "effect": "completed" if success else "none",
+                                 "effect": "completed" if success else ("none" if no_effect or discarded else "unknown"),
                                  "observed_effect": observed_effect,
                                  "retry_safe": retry_safe,
                                  "simulation_discarded": simulation_discarded,
@@ -1700,7 +1710,10 @@ class AgentService:
         result.update(taskID=identifier, sessionID=report.session_id, outcome=outcome,
                       executed=bool(report.executed))
         if report.execution_capability == "unsupported" and report.delivery_status == "robot_configured":
-            result.update(outcome="scene_updated", execution_capability="unsupported", failure_class="capability_unsupported")
+            result.update(execution_capability="unsupported", execution_unavailable_reason="platform_execution_unsupported")
+            mode_trace = (report.metrics.get("planner_trace") or {}).get("robot_mode") or {}
+            if not mode_trace.get("locked"):
+                result.update(outcome="scene_updated", failure_class="capability_unsupported")
         if isinstance(result.get("error"), dict) and result["error"].get("code") in {
                 "web_platform_profile_unsupported", "capability_unsupported", "robot_profile_not_registered",
                 "robot_setup_profile_not_registered", "dual_planner_capability_unsupported",
@@ -1723,15 +1736,53 @@ class AgentService:
             result["plan"] = commands
             result["planSummary"] = {"operations":commands.get('operations',[]),
                 "skillSequence":[c['skill_name'] for c in commands.get('commands',[])]}
+            if commands.get("schema_version") == "4.1":
+                groups, arms = {}, {}
+                for command in commands["commands"]:
+                    groups.setdefault(command["operation_id"], []).append(command)
+                    arms.setdefault(command["arm"], []).append(command["command_id"])
+                result["planSummary"] = {
+                    "operations": [{"operation_id": key, "arm": values[0]["arm"], "commands": values}
+                                   for key, values in groups.items()],
+                    "per_arm_sequences": arms,
+                    "ordering": "per_arm_and_explicit_dependencies_only"}
+
         # Internal artifact paths are kept only in the database, never returned.
         result["_artifact_paths"] = report.artifacts
         return result
+
+    @staticmethod
+    def mode_state(session):
+        return {"robot_mode_lock": session.robot_mode_lock.model_dump(mode="json") if session.robot_mode_lock else None,
+                "deployment_candidate": session.robot_setup.model_dump(mode="json") if session.robot_setup else None,
+                "profile_id": session.robot_setup.profile_id if session.robot_setup else None,
+                "robot_setup_revision": session.robot_setup_revision,
+                "first_robot_mode_turn_id": session.first_robot_mode_turn_id,
+                "session_turn_index": session.session_turn_index,
+                "mode_migration_diagnostics": session.mode_migration_diagnostics,
+                "prompt_route": session.robot_mode_lock.prompt_route if session.robot_mode_lock and session.robot_mode_lock.locked else None}
+
+    def planning_capabilities(self):
+        from ..planning.dual_v4_planner import require_v4_contract
+        contract = self.app.pipeline.control_skill_contract
+        try:
+            contract = require_v4_contract(contract)
+            ready, reason = True, None
+        except ValueError:
+            ready, reason = False, "control_planning_contract_missing_or_unsupported"
+        return {"planning_protocols": ["2.0"] + (["4.1"] if ready else []),
+                "execution_protocols": ["2.0"] if self._probe_control()["control_status"] == "ready" else [],
+                "dual_planning_ready": ready, "dual_execution_ready": False,
+                "skill_contract_revision": contract.revision if ready else None,
+                "dual_planning_reason": reason,
+                "dual_execution_reason": "dual_arm_sequence_live_adapter_unavailable"}
 
     def health(self):
         status = {"service":"ready","protocol":PROTOCOL_VERSION,"executed":False,
             "qwen":"unavailable","browser":"not_bound","assets":"unconfigured",
             "capabilities":{"control":"unavailable","segmentation":False,"active_browser_limit":1,
                 "requires_open_browser":True,"gateway_protocol":PROTOCOL_VERSION,"commands":["2.0"]}}
+        status.update(self.planning_capabilities())
         status["control_source"] = "Auto_Robot_demo"
         status["arm_modes"] = ["single_arm"]
         status["ols_catalog_revision"] = self.app.pipeline.asset_catalog.revision if self.app.pipeline.asset_catalog else None
@@ -2062,6 +2113,7 @@ def create_http_app(service):
             for item in sessions:
                 if item["id"] in service.app.sessions:
                     session = service.app.sessions[item["id"]]
+                    item.update(service.mode_state(session))
                     item["session_phase"] = getattr(session, "session_phase", "setup")
                     item["camera_id"] = getattr(session, "camera_id", None)
                     item["robot_asset"] = getattr(session, "robot_asset", None)
@@ -2070,8 +2122,19 @@ def create_http_app(service):
                     item["execution_capability"] = getattr(session, "execution_capability", "unknown")
                     item["prefer_auto_resolve"] = getattr(session, "prefer_auto_resolve", False)
                 else:
-                    item["session_phase"] = "setup"
-                    item["camera_id"] = service.camera_bindings.get(item["id"])
+                    # Read the durable candidate/decision without adopting a
+                    # scene or changing the currently active browser binding.
+                    checkpoint = service.app.store.load(item["id"])
+                    if checkpoint is not None:
+                        item.update(service.mode_state(checkpoint))
+                        item["session_phase"] = checkpoint.session_phase
+                        item["camera_id"] = checkpoint.camera_id
+                    else:
+                        item.update(robot_mode_lock=None, deployment_candidate=None,
+                            first_robot_mode_turn_id=None, robot_setup_revision=0, prompt_route=None,
+                            profile_id=None, session_turn_index=0)
+                        item["session_phase"] = "setup"
+                        item["camera_id"] = service.camera_bindings.get(item["id"])
             return web.json_response({"sessions":sessions})
         value = SessionRequest.model_validate(await request.json())
         async with service.mutex:
@@ -2085,7 +2148,11 @@ def create_http_app(service):
         if not values:
             raise ValueError("session_not_found")
         item = values[0]
-        session = service.app.get_session(item["id"])
+        previous_binding = service.binding
+        try:
+            session = service._bind(item["id"])
+        finally:
+            service.binding = previous_binding
         scene = getattr(session, "scene", None)
         return web.json_response({
             "sessionID": item["id"], "browser_id": browser_id,
@@ -2102,7 +2169,7 @@ def create_http_app(service):
             "profile_id": session.robot_setup.profile_id if getattr(session, "robot_setup", None) else None,
             "robot_mode_lock": session.robot_mode_lock.model_dump(mode="json") if session.robot_mode_lock else None,
             "session_turn_index": session.session_turn_index,
-            "prompt_route": session.robot_mode_lock.prompt_route if session.robot_mode_lock else None,
+            **service.mode_state(session),
             "execution_capability": getattr(session, "execution_capability", "unknown"),
             "prefer_auto_resolve": getattr(session, "prefer_auto_resolve", False),
             "platform_rebind_revision": getattr(session, "platform_rebind_revision", 0),
@@ -2153,6 +2220,7 @@ def create_http_app(service):
     async def brain_capabilities(request):
         return web.json_response({
             "protocol": PROTOCOL_VERSION,
+            **service.planning_capabilities(),
             "ols_catalog_revision": service.app.pipeline.asset_catalog.revision if service.app.pipeline.asset_catalog else None,
             "switchable_assets": service.app.robot_assembly.catalog(
                 service.app.registered_profile_ids),
@@ -2223,6 +2291,9 @@ def create_http_app(service):
             session = service._bind(session_id)
         finally:
             service.binding = previous_binding
+        if (session.pending_execution_request is not None or session.execution_reconciliation is not None
+                or session.recovery_context is not None):
+            raise ValueError("control_reconciliation_required")
         rows = service.tasks.db.execute("SELECT id,terminal FROM tasks WHERE session=? ORDER BY id DESC", (session_id,)).fetchall()
         if not rows or any(not row["terminal"] for row in rows):
             return web.json_response({"state":"kept_locked","sessionID":session_id,

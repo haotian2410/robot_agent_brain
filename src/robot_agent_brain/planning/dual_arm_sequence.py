@@ -50,6 +50,6 @@ def build_commands_sequence(*, operations, skill_steps, request_id, scene_id,
     for command in commands:
         command.depends_on = list(dict.fromkeys(command.depends_on + edges.get(command.command_id, [])))
     return CommandsFileV41(
-        request_id=request_id, scene_id=scene_id, scene_version=scene_version,
+        schema_version="4.1", request_id=request_id, scene_id=scene_id, scene_version=scene_version,
         scene_digest=scene_digest, robot_setup_revision=robot_setup_revision,
         skill_contract_revision=skill_contract_revision, commands=commands)

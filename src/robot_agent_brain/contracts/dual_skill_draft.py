@@ -1,11 +1,19 @@
 """Model-owned skill chains; scheduling remains exclusively Python-owned."""
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
+from .strict_json import validate_json
 
 
 class AtomicSkillDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
     skill_name: str = Field(min_length=1)
     parameters: dict = Field(default_factory=dict)
+
+    @field_validator("parameters", mode="before")
+    @classmethod
+    def standard_json_object(cls, value):
+        if type(value) is not dict:
+            raise ValueError("control_skill_parameters_object_required")
+        return validate_json(value)
 
 
 class OperationSkillDraft(BaseModel):

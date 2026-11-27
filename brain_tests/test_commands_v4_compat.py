@@ -6,8 +6,8 @@ from robot_agent_brain.session.brain_session import BrainSession
 
 
 def commands():
-    return CommandsFileV4(request_id="r", scene_id=1, scene_version=1,
-        scene_digest="d", robot_setup_revision=0, skill_contract_revision="s",
+    return CommandsFileV4(schema_version="4.1", request_id="r", scene_id=1, scene_version=1,
+        scene_digest="a" * 64, robot_setup_revision=0, skill_contract_revision="s",
         commands=[{"command_id": "c", "operation_id": "o", "arm": "left", "skill_name": "pick"}])
 
 

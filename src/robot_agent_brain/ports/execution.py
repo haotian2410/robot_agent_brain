@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Literal, Protocol
 
 from ..contracts.commands_atomic import AtomicCommandsFile
+from ..contracts.execution_v41 import ExecutionEnvelopeV41, ExecutionFeedbackV41
 
 StepStatus = Literal["success", "failed"]
 
@@ -41,6 +42,7 @@ class ExecutionOutcome:
     active_joint_ids: list[int] = field(default_factory=list)
     state_verified: bool = False
     no_effect_verified: bool = False
+    isolated_workspace_discarded_verified: bool = False
     holding_object: int | None = None
     execution_checkpoint: dict | None = None
     traj_path: str | None = None
@@ -75,4 +77,16 @@ class ExecutionPort(Protocol):
         already finished, which is the only way to answer "how far along is it"
         while a task holds the browser frozen.
         """
+        ...
+
+
+class SequenceExecutionPort(Protocol):
+    """Proposed separate port; Atomic 2.0 adapters do not implement it."""
+
+    def execute_sequence(self, envelope: ExecutionEnvelopeV41) -> ExecutionFeedbackV41:
+        """Requires negotiated 4.1 transport and durable idempotency ledger."""
+        ...
+
+    def query_sequence(self, session_id: str, request_id: str) -> ExecutionFeedbackV41:
+        """Reconcile the same request after timeout; never implicitly replay."""
         ...

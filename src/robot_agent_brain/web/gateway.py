@@ -241,6 +241,11 @@ class GatewayScenePlatformAdapter:
                     "scene_sub_version": previous.scene_sub_version, "sceneDigest": digest(previous)}.items())
                 and digest(self.read_live(lease_snapshot=False)) == digest(previous))
 
+    def configure_initial_robot_mode(self, scene):
+        # The current Gateway does not negotiate a first-mode transaction.
+        # Do not disguise a robot replacement as a normal scene edit/rebind.
+        raise SceneCommitRejected("initial_robot_mode_transaction_unsupported")
+
     @timed("gateway.commit", component="brain.web")
     def load_scene(self, scene, *, change_kind="scene_edit"):
         candidate = self.validate(scene)

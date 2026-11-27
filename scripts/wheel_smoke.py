@@ -40,6 +40,7 @@ def main():
     for name, model in {
         "arrangement_spec": ArrangementSpec, "layout_plan": LayoutPlan,
         "layout_resolution": LayoutResolution, "commands_dag_v4": CommandsFileV4,
+        "commands_sequence_v41": CommandsFileV4,
     }.items():
         resource = files("robot_agent_brain").joinpath("schemas", name + ".schema.json")
         packaged = json.loads(resource.read_text(encoding="utf-8"))

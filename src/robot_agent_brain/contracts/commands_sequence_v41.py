@@ -7,7 +7,8 @@ from the commands alone.
 from collections import deque
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
+from .strict_json import validate_json
 
 
 SHARED_METADATA = frozenset({
@@ -31,21 +32,28 @@ class SequenceStrictModel(BaseModel):
 
 
 class SequenceCommand(SequenceStrictModel):
-    command_id: str = Field(min_length=1)
-    operation_id: str = Field(min_length=1)
+    command_id: str = Field(pattern=r"^[A-Za-z0-9_][A-Za-z0-9_.:-]*$")
+    operation_id: str = Field(pattern=r"^[A-Za-z0-9_][A-Za-z0-9_.:-]*$")
     arm: Literal["left", "right"]
-    skill_name: str = Field(min_length=1)
+    skill_name: str = Field(pattern=r"^[A-Za-z0-9_][A-Za-z0-9_.:-]*$")
     parameters: dict = Field(default_factory=dict)
     depends_on: list[str] = Field(default_factory=list)
 
+    @field_validator("parameters", mode="before")
+    @classmethod
+    def json_object(cls, value):
+        if type(value) is not dict:
+            raise ValueError("commands_v41_parameters_object_required")
+        return validate_json(value)
+
 
 class CommandsFileV41(SequenceStrictModel):
-    schema_version: Literal["4.1"] = "4.1"
+    schema_version: Literal["4.1"]
     request_id: str = Field(min_length=1)
-    scene_id: int = Field(ge=0)
-    scene_version: int = Field(ge=0)
-    scene_digest: str = Field(min_length=1)
-    robot_setup_revision: int = Field(ge=0)
+    scene_id: int = Field(ge=0, strict=True)
+    scene_version: int = Field(ge=0, strict=True)
+    scene_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    robot_setup_revision: int = Field(ge=0, strict=True)
     skill_contract_revision: str = Field(min_length=1)
     commands: list[SequenceCommand] = Field(min_length=1)
 
@@ -99,6 +107,7 @@ class CommandsFileV41(SequenceStrictModel):
 
 
 def canonical_commands_v41(commands: CommandsFileV41) -> dict:
+    validate_json(commands.model_dump(mode="python", exclude_none=True))
     payload = commands.model_dump(mode="json", exclude_none=True)
     CommandsFileV41.model_validate(payload)
     return payload

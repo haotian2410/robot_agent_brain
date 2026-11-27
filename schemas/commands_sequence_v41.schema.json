@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "commands_sequence_v41.schema.json",
+  "$defs": {
+    "SequenceCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "command_id": {
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$",
+          "title": "Command Id",
+          "type": "string"
+        },
+        "operation_id": {
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$",
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "arm": {
+          "enum": [
+            "left",
+            "right"
+          ],
+          "title": "Arm",
+          "type": "string"
+        },
+        "skill_name": {
+          "pattern": "^[A-Za-z0-9_][A-Za-z0-9_.:-]*$",
+          "title": "Skill Name",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        }
+      },
+      "required": [
+        "command_id",
+        "operation_id",
+        "arm",
+        "skill_name"
+      ],
+      "title": "SequenceCommand",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "4.1",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "request_id": {
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    },
+    "scene_id": {
+      "minimum": 0,
+      "title": "Scene Id",
+      "type": "integer"
+    },
+    "scene_version": {
+      "minimum": 0,
+      "title": "Scene Version",
+      "type": "integer"
+    },
+    "scene_digest": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Scene Digest",
+      "type": "string"
+    },
+    "robot_setup_revision": {
+      "minimum": 0,
+      "title": "Robot Setup Revision",
+      "type": "integer"
+    },
+    "skill_contract_revision": {
+      "minLength": 1,
+      "title": "Skill Contract Revision",
+      "type": "string"
+    },
+    "commands": {
+      "items": {
+        "$ref": "#/$defs/SequenceCommand"
+      },
+      "minItems": 1,
+      "title": "Commands",
+      "type": "array"
+    }
+  },
+  "required": [
+    "schema_version",
+    "request_id",
+    "scene_id",
+    "scene_version",
+    "scene_digest",
+    "robot_setup_revision",
+    "skill_contract_revision",
+    "commands"
+  ],
+  "title": "CommandsFileV41",
+  "type": "object"
+}
