@@ -90,6 +90,8 @@ class StepLedgerEntry(BaseModel):
     confirmed_effects: list[str] = Field(default_factory=list)
     holding_state: str | None = None
     semantic_draft_ref: str | None = None
+    canonical_turn: dict[str, Any] | None = None
+    understanding_evidence: dict[str, Any] | None = None
     control_run_ids: list[str] = Field(default_factory=list)
 
 
@@ -134,6 +136,7 @@ class ConversationTurn(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     finalized_at: str | None = None
     recovery_evidence: RecoveryEvidence | None = None
+    step_ledger: list[StepLedgerEntry] = Field(default_factory=list)
 
 
 class FailureChain(BaseModel):

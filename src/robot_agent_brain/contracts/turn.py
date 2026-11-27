@@ -10,6 +10,7 @@ from .scene_edit_rules import (
     MOTION_ALLOWED, MOTION_FIELDS, SCALE_FIELDS, SCALE_MODES,
     LAYOUT_OPERATIONS, PROPERTY_OPERATIONS, FRAME_OPERATIONS, DISTANCE_FIELDS, REQUIRED, RELATION_PAIR,
 )
+from .arrangement import ArrangementSpec
 
 class TurnStatus(StrEnum):
     ACCEPTED = "accepted"
@@ -20,6 +21,7 @@ class TurnKind(StrEnum):
     ROBOT_CONFIG = "robot_config"
     ROBOT_TASK = "robot_task"
     SCENE_EDIT = "scene_edit"
+    SCENE_LAYOUT = "scene_layout"
     SCENE_QUERY = "scene_query"
     SESSION_CONTROL = "session_control"
     UNSUPPORTED_TASK = "unsupported_task"
@@ -434,6 +436,7 @@ class BrainTurn(BaseModel):
     clarification_question: str | None = None
     task_intent: TaskIntent | None = None
     scene_edit: SceneEditPlan | None = None
+    arrangement_spec: ArrangementSpec | None = None
     scene_query: SceneQueryIntent | None = None
     session_control: SessionControlIntent | None = None
     robot_setup_request: RobotSetupRequest | None = None
@@ -463,6 +466,7 @@ class BrainTurn(BaseModel):
             TurnKind.ROBOT_CONFIG: self.robot_setup_request,
             TurnKind.ROBOT_TASK: self.task_intent,
             TurnKind.SCENE_EDIT: self.scene_edit,
+            TurnKind.SCENE_LAYOUT: self.arrangement_spec,
             TurnKind.SCENE_QUERY: self.scene_query,
             TurnKind.SESSION_CONTROL: self.session_control,
         }

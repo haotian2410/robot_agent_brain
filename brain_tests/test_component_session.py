@@ -14,6 +14,38 @@ from robot_agent_brain.session.store import SessionStore, SessionState
 from test_component_runtime import scene_, object_, entity_
 
 
+@pytest.mark.parametrize("sub_version", [None, 0, 2])
+def test_checkpoint_preserves_lossless_scene_document(tmp_path, sub_version):
+    import json
+    from robot_agent_brain.contracts.scene import parse_scene_document
+    raw = scene_().raw_document()
+    raw["scene_name_Chinese"] = "空场景"
+    raw["editor_metadata"] = {"labels": ["桌面", {"revision": 1}]}
+    if sub_version is None:
+        raw.pop("scene_sub_version", None)
+    else:
+        raw["scene_sub_version"] = sub_version
+    session = BrainSession(parse_scene_document(raw, uint32=False).view, None, LocalScenePlatform())
+    store = SessionStore(tmp_path)
+    with store.lock("lossless"):
+        store.save("lossless", session, revision=1)
+    saved = json.loads((tmp_path / "lossless/session_state.json").read_text())
+    assert saved["scene"] == raw
+    restored = store.restore(store.load("lossless"), BrainSession(None, None, LocalScenePlatform()))
+    assert restored.scene.raw_document() == raw
+    with store.lock("lossless"):
+        store.save("lossless", restored, revision=2)
+    assert store.load("lossless").scene.raw_document() == raw
+
+
+def test_checkpoint_scene_document_rejects_duplicate_objects():
+    raw = scene_().raw_document()
+    raw["objects"].append(raw["objects"][0])
+    with pytest.raises(ValueError):
+        SessionState(session_id="bad", revision=1, scene=raw,
+                     seen_scene_object_ids={0, 8, 11, 12}, next_scene_object_id=13)
+
+
 @pytest.mark.parametrize("history,next_id", [({True}, None), ({"1"}, None),
     ({-1}, None), ({2**53}, None), (set(), True), (set(), -1), (set(), 2**53 + 1)])
 def test_direct_manager_rejects_invalid_identity_history(history, next_id):

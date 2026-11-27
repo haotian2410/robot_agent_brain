@@ -26,7 +26,17 @@ from .diagnostics import configuration_summary, fingerprint, redact
 
 
 class BrainApplication:
-    def __init__(self, config=None, *, provider=None, platform_factory=LocalScenePlatform):
+    def __init__(self, config=None, *, provider=None, platform_factory=LocalScenePlatform,
+                 control_skill_contract=None):
+        # Explicit adapter-supplied planning snapshot, never inferred from
+        # skill.md, an LLM response or a RobotProfile. This is not dispatch
+        # permission: the live execution adapter must separately negotiate v4.
+        from .contracts.control_skill_contract import ControlSkillContract
+        contract_snapshot = (None if control_skill_contract is None else
+            ControlSkillContract.model_validate(
+                control_skill_contract.model_dump(mode="json")
+                if isinstance(control_skill_contract, ControlSkillContract)
+                else control_skill_contract).model_copy(deep=True))
         self.config = config or BrainConfig.load()
         # RobotProfile remains the explicit dual-arm/deployment manifest.  For
         # single-arm execution the control runtime owns IK and collision, so
@@ -95,7 +105,9 @@ class BrainApplication:
                                       placement_policy_version="grid-v2",
                                       motion_policy_version="motion-v1",
                                       scene_reference_catalog=scene_reference_catalog,
-                                      catalog_for_provider=getattr(provider, "live_catalog", True))
+                                      catalog_for_provider=getattr(provider, "live_catalog", True),
+                                      layout_fonts=self.config.layout_fonts,
+                                      control_skill_contract=contract_snapshot)
         bootstrap = self.config.bootstrap_settings()
         self.bootstrapper = SceneBootstrapper(self.assets, self.defaults, robot=self.config.robot, seed=self.config.seed,
             layout_policy=editor.layout,
@@ -286,6 +298,7 @@ class BrainApplication:
             session.robot_assembly_adapter = self.robot_assembly
             session.scene_id_bits = self.config.scene_id_bits
             self.sessions[session_id] = self.store.restore(state, session) if state else session
+            self.sessions[session_id].persist_identity_reservation = lambda: self._save_session(session_id)
             from .session.original_scene_store import OriginalSceneStore
             self.sessions[session_id].original_store = OriginalSceneStore(self.store.directory(session_id))
             # LocalScenePlatform edits metadata only. External platforms must
@@ -374,6 +387,8 @@ class BrainApplication:
             session.original_scene_manifest = OriginalSceneStore(self.store.directory(session_id)).capture_once(
                 session.scene, platform_object_ids=session.platform_object_ids, request_id=request_id,
                 source=source, robot_setup=session.robot_setup, config_fingerprint=self.config_fingerprint,
+                arrangement_records=[record for record in session.arrangement_index.snapshot()
+                                     if record["scene_id"] == session.scene.scene_id],
                 profile_object_map=session.profile_object_map, allow_empty=allow_empty)
 
     def accept_browser_scene(self, session_id, scene, *, platform_object_ids=None,
@@ -450,13 +465,16 @@ class BrainApplication:
             pass
         return None
 
-    def handle(self, instruction, *, session_id=None, scene_path=None, origin="external", expected_turn_kind=None):
+    def handle(self, instruction, *, session_id=None, scene_path=None, origin="external", expected_turn_kind=None,
+               prepared_turn=None):
+        if prepared_turn is not None and origin != "internal_step":
+            raise ValueError("prepared_turn_internal_only")
         session_id = session_id or uuid.uuid4().hex
         report = None
         try:
             with self.store.lock(session_id):
                 report = self._handle(instruction, session_id=session_id, scene_path=scene_path,
-                                      expected_turn_kind=expected_turn_kind)
+                                      expected_turn_kind=expected_turn_kind, prepared_turn=prepared_turn)
                 if origin == "external":
                     self._record_cli_turn(session_id, instruction, report)
                 return report
@@ -642,7 +660,7 @@ class BrainApplication:
                                         robot_setup_revision=robot_setup_revision, source=source)
             self._save_session(session_id)
 
-    def _handle(self, instruction, *, session_id, scene_path=None, expected_turn_kind=None):
+    def _handle(self, instruction, *, session_id, scene_path=None, expected_turn_kind=None, prepared_turn=None):
         request_id = uuid.uuid4().hex
         session = self.get_session(session_id)
         started = time.monotonic()
@@ -686,9 +704,17 @@ class BrainApplication:
             elif session.scene is not None:
                 report.scene_source = "session"
             stage = "understanding"
-            understanding_calls = 1
+            understanding_calls = 0 if prepared_turn is not None else 1
             try:
-                turn = self.pipeline.understand_turn(instruction, scene=pending_import or session.scene, dialogue=session.dialogue)
+                if prepared_turn is None:
+                    turn = self.pipeline.understand_turn(instruction, scene=pending_import or session.scene,
+                        dialogue=session.dialogue, arrangement_index=session.arrangement_index,
+                        original_context=session.original_understanding_context())
+                else:
+                    from .contracts.turn import BrainTurn
+                    turn = BrainTurn.model_validate(prepared_turn.model_dump(mode="json"))
+                    if turn.instruction != instruction:
+                        raise ValueError("prepared_turn_instruction_mismatch")
             except Exception:
                 # The uploaded document is an explicit initial import.  If
                 # understanding is unavailable there is no accepted platform
@@ -711,17 +737,19 @@ class BrainApplication:
                 report.reply = (turn.clarification_question or "需要澄清任务。") \
                     if turn.status == "clarification_required" else (turn.clarification_question or "不支持该任务。")
             else:
-                # The current Web/Control integration is deliberately single-arm.
-                # Refuse a dual-arm request before session checks, bootstrap,
-                # planning, or any control dispatch.  Keeping this gate at the
-                # application boundary leaves the lower-level dual-arm fixtures
-                # available for their own tests while making the public service
-                # honest about the capability that is actually deployed.
+                # An explicitly advertised v4 snapshot allows planning only.
+                # Defaults remain single-arm; a profile alone is not evidence
+                # of Control support. Session/profile validation still follows,
+                # and mark_dispatched separately refuses the legacy v2 adapter.
                 if (turn.turn_kind == "robot_task" and turn.task_intent is not None
                         and (turn.task_intent.arm_usage == "both_required"
                              or any(op.arm in {"left", "right"} or op.parallel_group is not None
                                     for op in turn.task_intent.operations))):
-                    raise ValueError("control_dual_arm_not_ready")
+                    contract = self.pipeline.control_skill_contract
+                    if contract is None:
+                        raise ValueError("control_dual_arm_not_ready")
+                    from .planning.dual_v4_planner import require_v4_contract
+                    require_v4_contract(contract)
                 if session.last_recovery_evidence is not None:
                     self._validate_recovery_u_conditions(turn, session.last_recovery_evidence,
                         aliases=self.pipeline.grounder.aliases)
@@ -735,6 +763,7 @@ class BrainApplication:
                 bindings = None
                 initial_robot = None
                 initial_edit = None
+                initial_layout = None
                 initial_profile = None
                 active_bootstrapper = self.bootstrapper
                 if turn.initial_robot_asset is not None:
@@ -799,7 +828,25 @@ class BrainApplication:
                         if setup_request is not None:
                             initial_profile = self.config.robot_profiles.resolve(setup_request)
                             active_bootstrapper = self.bootstrapper.for_profile(initial_profile)
-                        if turn.turn_kind == "robot_config":
+                        if turn.turn_kind == "scene_layout":
+                            # A layout turn needs a real tabletop/workspace,
+                            # but it must not be interpreted as a robot task.
+                            # Start from the configured platform template and
+                            # let the layout transaction add the requested
+                            # instances in the processing phase.
+                            if active_bootstrapper.template_scene is None:
+                                raise ValueError("bootstrap_config_missing: scene_layout requires a configured workspace template")
+                            # File-backed scenes retain a lossless raw document.
+                            # model_copy updates only the typed identity, leaving
+                            # SceneManager to reload the old template identity.
+                            # Reparse the updated document so both views agree.
+                            from .contracts.scene import parse_scene_document
+                            template_document = active_bootstrapper.template_scene.raw_document()
+                            template_document.update(scene_id=randbits(self.config.scene_id_bits),
+                                                     scene_version=1, scene_sub_version=0)
+                            initial_layout = parse_scene_document(template_document, uint32=False).view
+                            initial = None
+                        elif turn.turn_kind == "robot_config":
                             if initial_profile is None:
                                 raise ValueError("robot_setup_profile_not_registered")
                             template = active_bootstrapper.template_scene.model_copy(update={"scene_id": randbits(self.config.scene_id_bits), "scene_version": 1})
@@ -824,7 +871,13 @@ class BrainApplication:
                             if initial_profile is not None:
                                 session.bind_imported_profile(initial_profile)
                 stage = "processing"
-                if initial_edit is not None:
+                if initial_layout is not None:
+                    result = session.process_initial_edit_turn(request_id, turn, initial_layout,
+                        bindings_override={}, edit_defaults=active_bootstrapper.defaults,
+                        profile=initial_profile)
+                    report.scene_created = True
+                    report.scene_commit_status = "committed"
+                elif initial_edit is not None:
                     result = session.process_initial_edit_turn(request_id, turn, initial_edit.scene,
                         bindings_override=initial_edit.bindings_for(initial_edit.scene),
                         edit_defaults=active_bootstrapper.defaults, profile=initial_profile)
@@ -877,7 +930,8 @@ class BrainApplication:
                 elif result.scene_patch is not None or result.scene_replacement is not None:
                     report.delivery_status = "scene_updated"
                     report.scene_commit_status = "committed"
-                    report.reply = "场景元数据已更新（未运行仿真）。"
+                    report.reply = ("场景布局已提交（未运行仿真）。"
+                                    if result.layout_plan is not None else "场景元数据已更新（未运行仿真）。")
                     default_choices = [item for item in report.assumptions
                                        if item.startswith("source=default_asset:")]
                     alternatives = [item for item in report.assumptions
@@ -996,6 +1050,10 @@ class BrainApplication:
         if result is not None and result.scene_replacement is not None and result.scene_source_snapshot is not None:
             record.update(scene_basis="original", source_snapshot=result.scene_source_snapshot,
                           id_remap={str(k): v for k, v in result.scene_id_remap.items()})
+        if result is not None and result.layout_plan is not None:
+            record["layout_plan"] = result.layout_plan.model_dump(mode="json")
+            if result.layout_resolution is not None:
+                record["layout_resolution"] = result.layout_resolution.model_dump(mode="json")
         record.update(robot_setup=session.robot_setup.model_dump(mode="json") if session.robot_setup else None,
                       robot_setup_revision=session.robot_setup_revision)
         if result is not None and result.commands is not None:
@@ -1106,7 +1164,12 @@ class BrainApplication:
             "asset_choice_missing", "asset_catalog_key_invalid", "provider_output_schema_invalid",
             "vision_output_schema_invalid",
         }
-        category = ("provider_output_schema" if code in provider_schema_codes else
+        layout_geometry_codes = {
+            "scene_layout_collision", "scene_layout_capacity_exceeded",
+            "scene_layout_workspace_exceeded",
+        }
+        category = ("geometry_layout" if code in layout_geometry_codes else
+                    "provider_output_schema" if code in provider_schema_codes else
                     "semantic_protocol" if code.startswith(semantic_codes) else
                     "provider" if code.startswith("provider_") or code == "model_output_invalid" else "internal")
         return BrainIssue(code=code, stage=stage, message=str(exc), category=category)

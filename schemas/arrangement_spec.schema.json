@@ -1,0 +1,578 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arrangement_spec.schema.json",
+  "$defs": {
+    "ArrangementConstraints": {
+      "additionalProperties": false,
+      "properties": {
+        "support": {
+          "default": "on_surface",
+          "enum": [
+            "on_surface",
+            "inside",
+            "free_space"
+          ],
+          "title": "Support",
+          "type": "string"
+        },
+        "keep_inside_region": {
+          "default": true,
+          "title": "Keep Inside Region",
+          "type": "boolean"
+        },
+        "avoid_existing": {
+          "default": true,
+          "title": "Avoid Existing",
+          "type": "boolean"
+        },
+        "min_clearance_m": {
+          "default": 0.01,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Min Clearance M",
+          "type": "number"
+        },
+        "allow_scale": {
+          "default": false,
+          "title": "Allow Scale",
+          "type": "boolean"
+        }
+      },
+      "title": "ArrangementConstraints",
+      "type": "object"
+    },
+    "ArrangementItem": {
+      "additionalProperties": false,
+      "properties": {
+        "alias": {
+          "minLength": 1,
+          "title": "Alias",
+          "type": "string"
+        },
+        "count": {
+          "default": 1,
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "alias"
+      ],
+      "title": "ArrangementItem",
+      "type": "object"
+    },
+    "ArrangementItems": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "single",
+          "enum": [
+            "single",
+            "sequence",
+            "counts"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/ArrangementItem"
+          },
+          "minItems": 1,
+          "title": "Assets",
+          "type": "array"
+        },
+        "requested_count": {
+          "maximum": 1000,
+          "minimum": 1,
+          "title": "Requested Count",
+          "type": "integer"
+        },
+        "count_mode": {
+          "default": "exact",
+          "enum": [
+            "exact",
+            "at_least",
+            "auto"
+          ],
+          "title": "Count Mode",
+          "type": "string"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence"
+        },
+        "auto_count": {
+          "default": false,
+          "title": "Auto Count",
+          "type": "boolean"
+        },
+        "min_count": {
+          "anyOf": [
+            {
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Count"
+        },
+        "max_count": {
+          "anyOf": [
+            {
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Count"
+        }
+      },
+      "required": [
+        "assets",
+        "requested_count"
+      ],
+      "title": "ArrangementItems",
+      "type": "object"
+    },
+    "ArrangementOrientation": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "fixed",
+          "enum": [
+            "fixed",
+            "follow_pattern"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "yaw_deg": {
+          "default": 0.0,
+          "title": "Yaw Deg",
+          "type": "number"
+        }
+      },
+      "title": "ArrangementOrientation",
+      "type": "object"
+    },
+    "ArrangementPattern": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "enum": [
+            "line",
+            "grid",
+            "circle",
+            "ring",
+            "arc",
+            "checker",
+            "alternating",
+            "scatter",
+            "text",
+            "custom"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "rows": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rows"
+        },
+        "cols": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cols"
+        },
+        "order": {
+          "default": "row_major",
+          "enum": [
+            "row_major",
+            "column_major",
+            "clockwise"
+          ],
+          "title": "Order",
+          "type": "string"
+        },
+        "axis": {
+          "anyOf": [
+            {
+              "enum": [
+                "x",
+                "y"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Axis"
+        },
+        "radius_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 10,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Radius M"
+        },
+        "inner_radius_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 10,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inner Radius M"
+        },
+        "outer_radius_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 10,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outer Radius M"
+        },
+        "angle_span_deg": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 360,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Angle Span Deg"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Text"
+        },
+        "font": {
+          "default": "default",
+          "maxLength": 64,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_-]+$",
+          "title": "Font",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "items": {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "number"
+                  }
+                ],
+                "type": "array"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "ArrangementPattern",
+      "type": "object"
+    },
+    "ArrangementRegion": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "default": "surface_region",
+          "enum": [
+            "surface_region",
+            "around",
+            "near",
+            "relative"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "surface_ref": {
+          "minLength": 1,
+          "title": "Surface Ref",
+          "type": "string"
+        },
+        "anchor_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Anchor Ref"
+        },
+        "side": {
+          "default": "center",
+          "enum": [
+            "left_half",
+            "right_half",
+            "front_half",
+            "back_half",
+            "center",
+            "any"
+          ],
+          "title": "Side",
+          "type": "string"
+        },
+        "width_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 10,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width M"
+        },
+        "depth_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 10,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Depth M"
+        },
+        "margin_m": {
+          "default": 0.03,
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Margin M",
+          "type": "number"
+        }
+      },
+      "required": [
+        "surface_ref"
+      ],
+      "title": "ArrangementRegion",
+      "type": "object"
+    },
+    "ArrangementSpacing": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "center",
+          "enum": [
+            "center",
+            "edge",
+            "auto"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "value_m": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 10,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value M"
+        },
+        "auto": {
+          "default": false,
+          "title": "Auto",
+          "type": "boolean"
+        }
+      },
+      "title": "ArrangementSpacing",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "arrangement_id": {
+      "minLength": 1,
+      "pattern": "^arr-[A-Za-z0-9_-]+$",
+      "title": "Arrangement Id",
+      "type": "string"
+    },
+    "operation": {
+      "default": "create",
+      "enum": [
+        "create",
+        "append",
+        "rearrange",
+        "replace"
+      ],
+      "title": "Operation",
+      "type": "string"
+    },
+    "basis": {
+      "default": "current",
+      "enum": [
+        "current",
+        "original"
+      ],
+      "title": "Basis",
+      "type": "string"
+    },
+    "pattern": {
+      "$ref": "#/$defs/ArrangementPattern"
+    },
+    "items": {
+      "$ref": "#/$defs/ArrangementItems"
+    },
+    "region": {
+      "$ref": "#/$defs/ArrangementRegion"
+    },
+    "spacing": {
+      "$ref": "#/$defs/ArrangementSpacing"
+    },
+    "orientation": {
+      "$ref": "#/$defs/ArrangementOrientation"
+    },
+    "constraints": {
+      "$ref": "#/$defs/ArrangementConstraints"
+    },
+    "seed": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Seed"
+    },
+    "source": {
+      "default": "user",
+      "enum": [
+        "user",
+        "replay",
+        "planner"
+      ],
+      "title": "Source",
+      "type": "string"
+    }
+  },
+  "required": [
+    "arrangement_id",
+    "pattern",
+    "items",
+    "region",
+    "spacing"
+  ],
+  "title": "ArrangementSpec",
+  "type": "object"
+}

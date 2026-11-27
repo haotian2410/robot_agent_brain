@@ -21,16 +21,101 @@ FIELDS = dict(zip(
     "ac al aa ad ar au ch ak am ax ca c co q cl cf ct dp ds dr dz di dm e id es ex er ga hc ha ho ir ki mo md ms oe op oi o pg pr pi pl ph rg pt po pd pf p v qm qt rf re rn rl r rp ra rs rq sa sd sm sx sb se si sq sc sf n ss sr s su tg t wo".split(),
     strict=True,
 ))
+FIELDS.update({
+    "same_arm_group": "sg",
+    "min_count": "ql", "max_count": "qu",
+    "arrangement_spec": "at", "arrangement_id": "ai", "basis": "bs", "pattern": "pn",
+    "items": "it", "assets": "as", "spacing": "sp", "orientation": "ot", "constraints": "cn", "seed": "zz", "auto": "ao",
+    "source": "sr", "rows": "rw", "cols": "cx", "order": "od", "radius_m": "rm",
+    "inner_radius_m": "ri", "outer_radius_m": "ro", "angle_span_deg": "ag", "text": "tx", "font": "ft",
+    "description": "de", "path": "pa", "requested_count": "rc", "count_mode": "cm",
+    "sequence": "uq", "auto_count": "af", "surface_ref": "sv", "anchor_ref": "ah", "side": "yd",
+    "width_m": "wm", "depth_m": "wd", "margin_m": "mg", "value_m": "vm", "yaw_deg": "yw",
+    "support": "sy", "keep_inside_region": "kr", "avoid_existing": "ae", "min_clearance_m": "mc",
+    "allow_scale": "az", "mode": "mo", "alias": "ay",
+})
 FIELDS["turn_kind"] = "k"
 assert len(set(FIELDS.values())) == len(FIELDS)
 
 
-def _base():
+def _base(*, strict_layout=True):
     schema = TaskParseWireOutput.model_json_schema()
     # Unlike the legacy grammar, do not require inactive null payloads.
     schema["required"] = ["protocol_version", "turn_kind", "status"]
     schema["properties"]["protocol_version"] = {"const": VERSION, "type": "string"}
     schema["$defs"]["TaskEntityWire"]["required"] = ["entity_id", "semantic_name", "category"]
+    for name in ("ArrangementSpacing", "ArrangementItems"):
+        definition = schema["$defs"][name]
+        definition["required"] = list(dict.fromkeys([*definition.get("required", []), "mode"]))
+    definition = schema["$defs"]["ArrangementSpec"]
+    definition["required"] = list(dict.fromkeys([*definition.get("required", []), "operation", "basis"]))
+    definition = schema["$defs"]["ArrangementRegion"]
+    definition["required"] = list(dict.fromkeys([*definition.get("required", []), "kind"]))
+    if not strict_layout:
+        return schema
+    from ..contracts.arrangement import PATTERN_FIELDS, PATTERN_REQUIRED
+    pattern = schema["$defs"]["ArrangementPattern"]
+    branches = []
+    for kind, allowed in PATTERN_FIELDS.items():
+        for required in PATTERN_REQUIRED.get(kind, ((),)):
+            properties = {key: deepcopy(value) for key, value in pattern["properties"].items()
+                          if key in allowed | {"kind", "description"}}
+            properties["kind"] = {"const": kind, "type": "string"}
+            for key in required:
+                properties[key] = _nonnull(properties[key])
+            branches.append({"type": "object", "properties": properties,
+                "required": ["kind", *required], "additionalProperties": False})
+    schema["$defs"]["ArrangementPattern"] = {"anyOf": branches}
+    from ..contracts.arrangement import ANCHOR_REGION_KINDS
+    region = schema["$defs"]["ArrangementRegion"]
+    branches = []
+    for kind in region["properties"]["kind"]["enum"]:
+        properties = deepcopy(region["properties"])
+        properties["kind"] = {"const": kind, "type": "string"}
+        required = ["kind", "surface_ref"]
+        if kind in ANCHOR_REGION_KINDS:
+            properties["anchor_ref"] = _nonnull(properties["anchor_ref"])
+            required.append("anchor_ref")
+        else:
+            properties.pop("anchor_ref")
+        if kind == "relative":
+            properties["side"].pop("default", None)
+            properties["side"]["enum"] = [side for side in properties["side"]["enum"]
+                                           if side not in {"center", "any"}]
+            required.append("side")
+        branches.append({"type": "object", "properties": properties,
+                         "required": required, "additionalProperties": False})
+    schema["$defs"]["ArrangementRegion"] = {"anyOf": branches}
+    # Layout modes have inter-field requirements that Pydantic's generated
+    # field schema alone does not represent. Constrain transport before decode;
+    # never infer missing modes from an otherwise invalid response.
+    spacing = schema["$defs"]["ArrangementSpacing"]
+    branches = []
+    for mode in ("center", "edge", "auto"):
+        branch = deepcopy(spacing)
+        branch["properties"]["mode"] = {"const": mode, "type": "string"}
+        branch["required"] = ["mode", "auto"] if mode == "auto" else ["mode", "value_m"]
+        branch["properties"]["auto"] = {"const": mode == "auto", "type": "boolean"}
+        if mode != "auto":
+            branch["properties"]["value_m"] = _nonnull(branch["properties"]["value_m"])
+        else:
+            branch["properties"]["value_m"] = {"type": "null"}
+        branches.append(branch)
+    schema["$defs"]["ArrangementSpacing"] = {"anyOf": branches}
+    items = schema["$defs"]["ArrangementItems"]
+    branches = []
+    for mode in ("single", "counts", "sequence"):
+        branch = deepcopy(items)
+        branch["properties"]["mode"] = {"const": mode, "type": "string"}
+        branch["required"] = list(dict.fromkeys([*branch.get("required", []), "mode"]))
+        if mode == "single":
+            branch["properties"]["assets"]["maxItems"] = 1
+        if mode == "sequence":
+            branch["required"].append("sequence")
+            branch["properties"]["sequence"] = _nonnull(branch["properties"]["sequence"])
+            branch["properties"]["sequence"]["minItems"] = 1
+        branches.append(branch)
+    schema["$defs"]["ArrangementItems"] = {"anyOf": branches}
     return schema
 
 
@@ -121,6 +206,7 @@ def compact_schema():
     routes = {
         "robot_task": ("e o", "e o r au hc rq ir"),
         "scene_edit": ("se", "se ir"),
+        "scene_layout": ("at", "at"),
         "scene_query": ("sq", "sq ir"),
         "session_control": ("ss", "ss ir"),
     }
@@ -188,13 +274,13 @@ def _walk(value, node, root, *, encode):
 def encode(value):
     value = deepcopy(value)
     value["protocol_version"] = VERSION
-    root = _base()
+    root = _base(strict_layout=False)
     return _walk(value, root, root, encode=True)
 
 
 def decode(value):
     Draft202012Validator(compact_schema()).validate(value)
-    root = _base()
+    root = _base(strict_layout=False)
     canonical = _walk(value, root, root, encode=False)
     canonical["protocol_version"] = "task_understanding.v3.1"
     edit = canonical.get("scene_edit") or {}
@@ -215,7 +301,7 @@ def compact_prompt(prompt):
         f'只输出紧凑 JSON，v="{VERSION}"；k(任务类型)、s(状态)必须存在。\n'
         "accepted 必须包含对应路由的完整有效数据；其他路由字段省略。"
         "k=robot_task 时 e 和 o 都必填且非空，选择关系 r 不能替代操作 o；"
-        "k=scene_edit 时 se 必填；k=scene_query 时 sq 必填；k=session_control 时 ss 必填。"
+        "k=scene_edit 时 se 必填；k=scene_layout 时 at 必填；k=scene_query 时 sq 必填；k=session_control 时 ss 必填。"
         "clarification_required/unsupported_task 必须有具体 q，不带可执行数据。\n"
         "省略可选 null、空数组及 Schema 中已声明的默认值；不得省略操作目标、"
         "必需参照物或新增/替换的资产选择。关系和参照必须同时存在或同时省略。\n"

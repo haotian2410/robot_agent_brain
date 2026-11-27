@@ -8,13 +8,16 @@ from .contracts.camera import CameraFrame
 from .contracts.commands import CommandsFile
 from .contracts.commands_atomic import AtomicCommandsFile
 from .contracts.commands_v3 import CommandsFileV3
+from .contracts.commands_dag_v4 import CommandsFileV4
 from .contracts.robot_setup import RobotSetup
 from .contracts.grounded_task import GroundedTask
 from .contracts.scene import SceneConfig, ScenePatch, SceneId
 from .contracts.skill_plan import SkillPlan
 from .contracts.task_intent import TaskIntent
 from .asset_name_normalization import canonical_name
-from .contracts.turn import BrainTurn, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus
+from .contracts.turn import BrainTurn, SceneQueryIntent, SessionControlIntent, TurnKind, TurnStatus, SceneEditPlan, SceneEditIntent
+from .contracts.task_intent import TaskEntity
+from .contracts.arrangement import LayoutPlan, LayoutResolution
 from .scene.query import SceneQueryEngine, SceneQueryResult
 from .scene.editor import SceneEditor
 from .grounding.scene_grounder import SceneGrounder, GroundingAmbiguous
@@ -105,6 +108,8 @@ def _action_route_hint(instruction):
         return None
     if re.search(r"编辑场景|修改场景|直接修改", instruction):
         return "scene_edit"
+    if re.search(r"摆放|排列|布置|排成|围成一圈|交替", instruction) and not re.search(r"机械臂|机器人|抓|搬运|释放", instruction):
+        return "scene_layout"
     if re.search(r"机械臂|机器人|放到|放进|放入", instruction):
         return "robot_task"
     if re.search(r"移动|挪到|移到", instruction):
@@ -115,8 +120,9 @@ def _action_route_hint(instruction):
 def _check_action_route(turn, instruction, route_hint):
     if (getattr(turn, "protocol_version", None) == "task_understanding.v3.1"
             and route_hint and turn.status == "accepted"
-            and turn.turn_kind in {"scene_edit", "robot_task"} and turn.turn_kind != route_hint):
-        action = "机器人搬运" if route_hint == "robot_task" else "场景编辑"
+            and turn.turn_kind in {"scene_edit", "scene_layout", "robot_task"} and turn.turn_kind != route_hint):
+        action = ("机器人搬运" if route_hint == "robot_task" else
+                  "场景布局" if route_hint == "scene_layout" else "场景编辑")
         return BrainTurn(status="clarification_required", turn_kind=route_hint,
                          instruction=instruction,
                          clarification_question=f"这条指令要求{action}，但模型解析成了另一种操作，本轮未执行。请明确操作方式。")
@@ -130,7 +136,7 @@ class BrainResult(BaseModel):
     task_intent: TaskIntent | None = Field(default=None, alias="intent")
     grounded_task: GroundedTask | None = None
     skill_plan: SkillPlan | None = None
-    commands: CommandsFile | CommandsFileV3 | AtomicCommandsFile | None = None
+    commands: CommandsFile | CommandsFileV3 | AtomicCommandsFile | CommandsFileV4 | None = None
     scene_patch: ScenePatch | None = None
     scene_replacement: SceneConfig | None = None
     scene_source_snapshot: str | None = None
@@ -139,6 +145,8 @@ class BrainResult(BaseModel):
     platform_rebind: dict | None = None
     robot_setup_was_changed: bool = False
     scene_query_result: SceneQueryResult | None = None
+    layout_plan: LayoutPlan | None = None
+    layout_resolution: LayoutResolution | None = None
     session_action: SessionControlIntent | None = None
     focus_object_ids: list[SceneId] | None = None
     deleted_object_ids: list[SceneId] = Field(default_factory=list)
@@ -161,9 +169,10 @@ class BrainResult(BaseModel):
             TurnKind.ROBOT_TASK: (self.task_intent, self.grounded_task, self.skill_plan, self.commands),
             TurnKind.SCENE_EDIT: (self.scene_patch,),
             TurnKind.SCENE_QUERY: (self.scene_query_result,),
+            TurnKind.SCENE_LAYOUT: (self.layout_plan, self.layout_resolution),
             TurnKind.SESSION_CONTROL: (self.session_action,),
         }
-        if isinstance(self.commands, (CommandsFileV3, AtomicCommandsFile)):
+        if isinstance(self.commands, (CommandsFileV3, AtomicCommandsFile, CommandsFileV4)):
             # A staged v3 plan and the control atomic document are not a
             # flattened v2 SkillPlan.
             groups[TurnKind.ROBOT_TASK] = (self.task_intent, self.grounded_task, self.commands)
@@ -180,7 +189,9 @@ class BrainResult(BaseModel):
             return self
         if self.turn_kind not in groups or any(v is None for v in groups[self.turn_kind]):
             raise ValueError("brain_result_payload_missing")
-        if any(v is not None for kind, values in groups.items() if kind != self.turn_kind for v in values):
+        if any(v is not None for kind, values in groups.items() if kind != self.turn_kind
+               and not (self.turn_kind == TurnKind.SCENE_LAYOUT and kind == TurnKind.SCENE_EDIT)
+               for v in values):
             raise ValueError("brain_result_payload_mismatch")
         return self
 
@@ -190,7 +201,8 @@ class BrainPipeline:
                  query_near_distance_m=.2, registered_profiles=None,
                  primary_table_metadata_ref=None, workspace_center_m=None,
                  placement_policy_version="grid-v2", motion_policy_version="motion-v1",
-                 scene_reference_catalog=None, catalog_for_provider: bool = True):
+                 scene_reference_catalog=None, catalog_for_provider: bool = True, layout_fonts=None,
+                 control_skill_contract=None, dual_skill_recipe=None):
         self.understanding = understanding
         self.assets = assets
         # This is the configured command/export profile, not a guess from the
@@ -198,6 +210,10 @@ class BrainPipeline:
         # explicit RobotProfile is bound we must refuse to export commands
         # rather than silently serializing them as UR5e commands.
         self.robot = robot
+        self.layout_fonts = dict(layout_fonts or {})
+        # Trusted adapter-supplied capability snapshot, never a model field.
+        self.control_skill_contract = control_skill_contract
+        self.dual_skill_recipe = dual_skill_recipe
         self.query_near_distance_m = query_near_distance_m
         self.aliases = getattr(getattr(assets, "metadata", None), "aliases", {})
         if aliases is not None:
@@ -239,7 +255,7 @@ class BrainPipeline:
         self.vision_fallback = VisionFallbackGrounder()
         self.domain_policy = TaskDomainPolicy()
 
-    def _understanding_scene_context(self, scene):
+    def _understanding_scene_context(self, scene, arrangement_index=None):
         """Build the bounded, read-only scene context sent to Qwen.
 
         The first-stage model must receive more than an object count when a
@@ -325,6 +341,7 @@ class BrainPipeline:
             })
         return {
             "basis": "current",
+            "arrangements": arrangement_index.understanding_context(scene) if arrangement_index is not None else [],
             "primary_table_available": len(table_ids) == 1,
             "primary_table_object_id": table_ids[0] if len(table_ids) == 1 else None,
             "object_count": len(scene.objects),
@@ -381,7 +398,7 @@ class BrainPipeline:
         )
 
     def understand_turn(self, instruction: str, *, scene: SceneConfig | None = None,
-                        dialogue=None) -> BrainTurn:
+                        dialogue=None, arrangement_index=None, original_context=None) -> BrainTurn:
         """Call understanding once; keep injected context out of the user text."""
         import re
         if re.search(r"(?:交换|互换).*(?:位置|坐标)|(?:位置|坐标).*互换", instruction):
@@ -391,28 +408,15 @@ class BrainPipeline:
         from .scene.initial_robot import split_initial_robot
         initial_robot, task_instruction = split_initial_robot(instruction)
         if initial_robot is not None:
-            turn = self.understand_turn(task_instruction, scene=scene, dialogue=dialogue)
+            turn = self.understand_turn(task_instruction, scene=scene, dialogue=dialogue,
+                                       arrangement_index=arrangement_index, original_context=original_context)
             return turn.model_copy(update={"initial_robot_asset": initial_robot, "instruction": instruction})
         # The OLS directory is a per-turn input, not a process-start constant.
         # Adapters backed by a read-only local index can cheaply return the same
         # revision; adapters that refresh from OLS expose the new revision here.
         # Updating the provider prompt and the request together prevents a new
         # catalog from being used to interpret an old response (or vice versa).
-        if hasattr(self.assets, "catalog_snapshot"):
-            # A live OLS adapter is read-only but can publish a new index
-            # while Brain remains running.  Refresh before taking the
-            # request-scoped snapshot so every first-stage call sees the
-            # current catalog rather than a process-start copy.  The adapter
-            # swaps atomically only after metadata/geometry validation; a
-            # stale or inconsistent publication therefore fails closed.
-            if hasattr(self.assets, "refresh_from_source"):
-                self.assets.refresh_from_source()
-            current_catalog = self.assets.catalog_snapshot(aliases=None,
-                                                          registered_profiles=self.registered_profiles)
-            if self.asset_catalog is None or current_catalog.revision != self.asset_catalog.revision:
-                self.asset_catalog = current_catalog
-                if hasattr(self.understanding, "set_asset_catalog"):
-                    self.understanding.set_asset_catalog(current_catalog)
+        self._refresh_understanding_catalog()
         deferred_reference_error = None
         try:
             original_requested = any(token in instruction.casefold() for token in ("原始场景", "初始场景", "最开始的场景", "original scene", "initial scene"))
@@ -424,7 +428,10 @@ class BrainPipeline:
             # introduced in this turn. Do not reject it before understanding.
             deferred_reference_error = exc
             provider_instruction = instruction
-        scene_context = self._understanding_scene_context(scene)
+        scene_context = self._understanding_scene_context(scene, arrangement_index)
+        if original_context is not None:
+            from copy import deepcopy
+            scene_context["original_snapshot"] = deepcopy(original_context)
         # Resolve only the product's unambiguous action default, before U.
         # This is context for parsing, never a conversion of an edit payload
         # into executable robot commands. Mixed requests remain with U/D.
@@ -515,12 +522,42 @@ class BrainPipeline:
             return None
         return preserve_explicit_pronoun_step(instruction, value)
 
+    def _refresh_understanding_catalog(self):
+        """Pin both U entry points to the same validated, current OLS snapshot."""
+        if not hasattr(self.assets, "catalog_snapshot"):
+            return
+        if hasattr(self.assets, "refresh_from_source"):
+            self.assets.refresh_from_source()
+        current_catalog = self.assets.catalog_snapshot(
+            aliases=None, registered_profiles=self.registered_profiles)
+        if self.asset_catalog is None or current_catalog.revision != self.asset_catalog.revision:
+            self.asset_catalog = current_catalog
+            if hasattr(self.understanding, "set_asset_catalog"):
+                self.understanding.set_asset_catalog(current_catalog)
+
+    def understand_composite(self, instruction, *, scene, arrangement_index=None, original_context=None):
+        from .models.task_understanding import TaskUnderstandingRequest
+        from .contracts.composite_turn import CompositeTask
+        if not hasattr(self.understanding, "understand_composite"):
+            raise ValueError("composite_understanding_unavailable")
+        self._refresh_understanding_catalog()
+        context = self._understanding_scene_context(scene, arrangement_index)
+        if original_context is not None:
+            from copy import deepcopy
+            context["original_snapshot"] = deepcopy(original_context)
+        request = TaskUnderstandingRequest(instruction=instruction,
+            asset_catalog=self.asset_catalog if self.catalog_for_provider else None,
+            workspace=self.workspace_context, scene_context=context)
+        return CompositeTask.model_validate(self.understanding.understand_composite(request))
+
     def process_turn(self, request_id: str, turn: BrainTurn, scene: SceneConfig | None, *,
                      dialogue=None, bindings_override=None, edit_defaults=None,
                      capture: Callable[[], CameraFrame] | None = None,
                      held_object: SceneId | None = None,
                      robot_profile=None, robot_setup_revision=0, arm_states=None,
                      seen_scene_object_ids=None, next_scene_object_id=None,
+                     arrangement_record=None,
+                     reserve_layout_ids=None,
                      prefer_auto_resolve: bool = False) -> BrainResult:
         """Consume an understood turn without another provider call or normalization."""
         self.skill_planner.last_trace = None
@@ -547,6 +584,145 @@ class BrainPipeline:
                                                   next_scene_object_id=next_scene_object_id)
             return BrainResult(turn_kind=turn.turn_kind, scene_patch=edited.patch,
                                focus_object_ids=edited.focus_object_ids or None,
+                               deleted_object_ids=edited.deleted_object_ids,
+                               assumptions=edited.assumptions)
+        if turn.turn_kind == TurnKind.SCENE_LAYOUT:
+            from .planning.layout_planner import plan_arrangement
+            from .planning.layout_constraints import validate_explicit_layout_constraints
+            validate_explicit_layout_constraints(turn.instruction, turn.arrangement_spec)
+            spec = turn.arrangement_spec
+            model_draft = False
+            if spec.pattern.kind == "custom" and not spec.pattern.path:
+                from .models.layout_planning import LayoutPlanningRequest, LayoutPatternDraft
+                if not hasattr(self.understanding, "plan_layout"):
+                    raise ValueError("scene_layout_custom_planner_unavailable")
+                draft = LayoutPatternDraft.model_validate(self.understanding.plan_layout(
+                    LayoutPlanningRequest(description=spec.pattern.description,
+                                          requested_count=spec.items.requested_count)))
+                pattern = spec.pattern.model_copy(update={"path": draft.points()})
+                spec = spec.model_copy(update={"pattern": pattern})
+                model_draft = True
+            layout_plan = plan_arrangement(spec, font_registry=self.layout_fonts)
+            if model_draft:
+                layout_plan = layout_plan.model_copy(update={"planner_source": "qwen_draft"})
+            if spec.operation in {"append", "rearrange", "replace"}:
+                if (arrangement_record is None or arrangement_record.scene_id != scene.scene_id
+                        or arrangement_record.arrangement_id != spec.arrangement_id):
+                    raise ValueError("scene_layout_arrangement_missing")
+                existing_ids = {o.object_id_in_scene for o in scene.objects}
+                if not set(arrangement_record.slot_bindings.values()) <= existing_ids:
+                    raise ValueError("scene_layout_arrangement_members_missing")
+            if spec.operation in {"rearrange", "replace"}:
+                names = list(arrangement_record.slot_bindings)
+                if len(names) != len(layout_plan.slots):
+                    raise ValueError("scene_layout_instance_count_mismatch")
+                layout_plan = layout_plan.model_copy(update={"slots": [
+                    slot.model_copy(update={"slot_id": name}) for slot, name in zip(layout_plan.slots, names)]})
+            if spec.operation == "append":
+                # New slots have their own explicit pattern/region. Keep every
+                # old slot and instance stable rather than re-packing them.
+                used = set(arrangement_record.slot_bindings)
+                next_slot = 0
+                slots = []
+                for slot in layout_plan.slots:
+                    while f"s{next_slot}" in used:
+                        next_slot += 1
+                    name = f"s{next_slot}"
+                    used.add(name)
+                    slots.append(slot.model_copy(update={"slot_id": name}))
+                layout_plan = layout_plan.model_copy(update={"slots": slots})
+            if spec.region.kind in {"around", "near", "relative"} and not spec.region.anchor_ref:
+                raise ValueError("scene_layout_anchor_missing")
+            if spec.region.kind not in {"surface_region", "around", "near", "relative"}:
+                raise ValueError("scene_layout_region_requires_resolver_support")
+            references = [spec.region.surface_ref]
+            if spec.region.kind != "surface_region":
+                references.append(spec.region.anchor_ref)
+            from .grounding.scene_reference_resolver import SceneReferenceResolver
+            resolver = SceneReferenceResolver(
+                table_metadata_ref=self.workspace_context.primary_table_metadata_ref,
+                assets=self.assets, aliases=self.aliases)
+            try:
+                for reference in dict.fromkeys(references):
+                    resolver.resolve(reference, scene=scene)
+            except Exception as exc:
+                raise ValueError("scene_layout_region_unresolved") from exc
+            if reserve_layout_ids is not None and spec.operation != "rearrange":
+                minimum = max(next_scene_object_id or 0,
+                              max((obj.object_id_in_scene for obj in scene.objects), default=-1) + 1)
+                reservation_size = (spec.items.max_count if spec.items.count_mode == "auto"
+                                    and spec.items.max_count is not None and spec.operation in {"create", "append"}
+                                    else len(layout_plan.slots))
+                next_scene_object_id = reserve_layout_ids(reservation_size, minimum)
+            from .planning.layout_quantity import quantity_candidates
+            requested_spec = spec
+            last_geometry_error = None
+            for quantity_attempt, candidate_spec in enumerate(quantity_candidates(requested_spec), 1):
+                if candidate_spec != requested_spec:
+                    layout_plan = plan_arrangement(candidate_spec, font_registry=self.layout_fonts)
+                    if model_draft:
+                        layout_plan = layout_plan.model_copy(update={"planner_source": "qwen_draft"})
+                    if spec.operation == "append":
+                        used = set(arrangement_record.slot_bindings)
+                        next_slot, slots = 0, []
+                        for slot in layout_plan.slots:
+                            while f"s{next_slot}" in used:
+                                next_slot += 1
+                            name = f"s{next_slot}"
+                            used.add(name)
+                            slots.append(slot.model_copy(update={"slot_id": name}))
+                        layout_plan = layout_plan.model_copy(update={"slots": slots})
+                try:
+                    edited = self.scene_editor.layout_result(candidate_spec, layout_plan, scene, defaults=edit_defaults,
+                                                    seen_scene_object_ids=seen_scene_object_ids,
+                                                    next_scene_object_id=next_scene_object_id,
+                                                    instance_ids=(list(arrangement_record.slot_bindings.values())
+                                                                  if spec.operation in {"rearrange", "replace"} else None))
+                except ValueError as error:
+                    if str(error) not in {"scene_layout_collision", "scene_layout_capacity_exceeded",
+                                          "scene_layout_workspace_exceeded"}:
+                        raise
+                    last_geometry_error = error
+                    continue
+                spec = candidate_spec
+                if spec != requested_spec:
+                    edited.assumptions.extend([
+                        f"layout_count_requested={requested_spec.items.requested_count}",
+                        f"layout_count_resolved={spec.items.requested_count}",
+                        f"layout_count_search_attempts={quantity_attempt}",
+                        "layout_count_adjustment=authorized_range"])
+                break
+            else:
+                raise last_geometry_error
+            from .scene.layout_resolver import LayoutResolver
+            focus_ids = edited.created_object_ids or edited.focus_object_ids or []
+            resolution = LayoutResolver().resolve(spec, layout_plan, scene_id=scene.scene_id,
+                                                  scene_version=scene.scene_version + 1,
+                                                  instance_ids=focus_ids)
+            resolution.adjusted_spacing_m = edited.adjusted_layout_spacing_m
+            resolution.assumptions = list(edited.assumptions)
+            # Record actual candidate transforms, not an unrelated projection
+            # across the full support bounds.
+            from .scene.scene_manager import SceneManager
+            from .scene.scene_graph import world_transform
+            candidate = SceneManager(scene).apply_patch(edited.patch)
+            resolution.world_positions = {slot: tuple(world_transform(candidate, oid).position[:2])
+                                          for slot, oid in resolution.slot_bindings.items()}
+            if spec.operation == "append":
+                from .scene.scene_graph import world_transform
+                old_bindings = arrangement_record.slot_bindings
+                resolution = resolution.model_copy(update={
+                    "instance_ids": [*old_bindings.values(), *resolution.instance_ids],
+                    "slot_bindings": {**old_bindings, **resolution.slot_bindings},
+                    "slot_assets": {**arrangement_record.slot_assets, **resolution.slot_assets},
+                    "world_positions": {
+                        **{slot: tuple(world_transform(scene, oid).position[:2])
+                           for slot, oid in old_bindings.items()},
+                        **resolution.world_positions},
+                })
+            return BrainResult(turn_kind=turn.turn_kind, layout_plan=layout_plan,
+                               layout_resolution=resolution,
+                               scene_patch=edited.patch, focus_object_ids=edited.focus_object_ids or None,
                                deleted_object_ids=edited.deleted_object_ids,
                                assumptions=edited.assumptions)
         if turn.turn_kind == TurnKind.SCENE_QUERY:
@@ -626,21 +802,46 @@ class BrainPipeline:
                         raise GroundingAmbiguous(exc.entity, exc.candidates, reason="vision_ambiguous") from vision_error
                     raise
                 overrides[exc.entity.entity_id] = ids
-        grounded = self.expander.expand(grounded, scene)
+        # v4 schedules per-arm chains after assignment; the legacy global
+        # barrier would incorrectly serialize independent opposite-arm work.
+        grounded = self.expander.expand(grounded, scene,
+            serial_barriers=not (dual and robot_profile.commands_version == "4.0"))
         grounded = self.motion.resolve(grounded)
         if dual:
             from .planning.dual_arm_recipe_planner import DualArmRecipePlanner
             from .planning.arm_assignment_resolver import resolve_arms
+            if robot_profile.commands_version == "4.0":
+                from .planning.dual_v4_planner import require_v4_contract
+                require_v4_contract(self.control_skill_contract)
+            elif self.control_skill_contract is not None:
+                # A supplied advertisement is authoritative even for a legacy
+                # profile. Never silently emit v3 to a v4-only controller.
+                # No-advertisement v3 replay keeps its historical behavior.
+                from .contracts.control_skill_contract import ControlSkillContract
+                contract = ControlSkillContract.model_validate(self.control_skill_contract)
+                if robot_profile.commands_version not in contract.supported_protocols:
+                    raise ValueError("unsupported_protocol_version: commands_" + robot_profile.commands_version)
             if arm_states is None:
                 raise ValueError("robot_runtime_state_unknown")
-            grounded = resolve_arms(grounded, robot_profile, arm_usage=intent.arm_usage)
+            assignment_audit = []
+            grounded = resolve_arms(grounded, robot_profile, arm_usage=intent.arm_usage,
+                                    runtime=arm_states, audit=assignment_audit,
+                                    model_provider=(self.skill_planner.provider
+                                        if robot_profile.commands_version == "4.0" else None),
+                                    scene=scene, capture=capture)
             operations = grounded.operations
             if any(op.parallel_required for op in operations) and not robot_profile.coordinated_execution:
                 raise ValueError("dual_coordinated_execution_not_registered")
             from .planning.skill_planner_router import PlanningTrace
             mode = "qwen" if self.skill_planner.mode == "qwen" else "recipe"
             trace = self.skill_planner.last_trace = PlanningTrace(self.skill_planner.mode, used_planner=mode)
-            if mode == "qwen":
+            if robot_profile.commands_version == "4.0":
+                from .planning.dual_v4_planner import plan_v4
+                commands = plan_v4(request_id=request_id, task=grounded, scene=scene,
+                    profile=robot_profile, revision=robot_setup_revision, runtime=arm_states,
+                    skill_contract=self.control_skill_contract, provider=self.skill_planner.provider,
+                    recipe=self.dual_skill_recipe, trace=trace)
+            elif mode == "qwen":
                 from .planning.dual_qwen_planner import DualQwenPlanner
                 commands = DualQwenPlanner().plan(request_id, grounded, scene, robot_profile,
                     robot_setup_revision, arm_states, self.skill_planner.provider, REGISTRY, trace)
@@ -648,11 +849,12 @@ class BrainPipeline:
                 commands = DualArmRecipePlanner().plan(request_id, grounded, scene, robot_profile.setup,
                                                       robot_setup_revision, arm_states)
             from .planning.dual_capability import validate_dual_capability
-            validate_dual_capability(commands, robot_profile)
+            if robot_profile.commands_version != "4.0":
+                validate_dual_capability(commands, robot_profile)
             by_entity = {e.entity_id: e.scene_object_id for e in grounded.entities}
             return BrainResult(task_intent=intent, grounded_task=grounded, commands=commands,
                 focus_object_ids=list(dict.fromkeys(by_entity[op.source or op.target] for op in operations)),
-                planner_used=mode, planner_trace=trace.debug_payload(),
+                planner_used=mode, planner_trace={**trace.debug_payload(), "arm_assignment": assignment_audit},
                 selection_decisions=list(self.grounder.last_selection_decisions))
         # The control runtime consumes the atomic-skill document directly, so
         # the semantic SkillPlan and the legacy exporter stay off this path.

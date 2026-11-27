@@ -20,6 +20,7 @@ MAX_SUBTASKS = 6
 
 class SubtaskKind(StrEnum):
     SCENE_EDIT = "scene_edit"
+    SCENE_LAYOUT = "scene_layout"
     ROBOT_TASK = "robot_task"
     SCENE_QUERY = "scene_query"
 

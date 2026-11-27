@@ -885,6 +885,44 @@ class QwenHTTPProvider:
         return turn.task_intent
 
     @timed("qwen.task_understanding", component="brain.models")
+    def understand_composite(self, request: TaskUnderstandingRequest):
+        from jsonschema import Draft202012Validator
+        from jsonschema.exceptions import ValidationError as SchemaValidationError
+        from .composite_understanding import composite_wire_schema, COMPOSITE_ENVELOPE_RULES
+        from ..contracts.composite_turn import CompositeTask
+        if request.asset_catalog is None and self.asset_catalog_snapshot is not None:
+            request = request.model_copy(update={"asset_catalog": self.asset_catalog_snapshot})
+        base = self.build_understanding_request(request)
+        schema = composite_wire_schema(base.schema)
+
+        def parse(value):
+            try:
+                Draft202012Validator(schema).validate(value)
+            except SchemaValidationError as exc:
+                path = ".".join(str(part) for part in exc.absolute_path) or "$"
+                raise QwenProviderError(f"composite_understanding: {path}: {exc.message}",
+                                        code="provider_output_schema_invalid") from exc
+            phases, canonical = [], []
+            for phase in value["phases"]:
+                payload = phase["payload"]
+                if self.understanding_wire_format == "compact_v1":
+                    from .understanding_wire import decode
+                    payload = decode(payload)
+                turn = parse_qwen_turn(payload, phase["instruction"])
+                if request.asset_catalog is not None:
+                    self._validate_live_asset_choices(payload, request.model_copy(
+                        update={"instruction": phase["instruction"]}))
+                phases.append(turn.model_copy(update={"asset_catalog_revision":
+                    request.asset_catalog.revision if request.asset_catalog is not None else None}))
+                canonical.append(payload)
+            result = CompositeTask(instruction=request.instruction, phases=phases)
+            self.last_raw_values["composite_understanding_canonical"] = deepcopy(canonical)
+            self.last_raw_text["composite_understanding_canonical"] = json.dumps(canonical, ensure_ascii=False)
+            return result
+
+        return self._call_request(replace(base, stage="composite_understanding",
+            prompt=base.prompt + COMPOSITE_ENVELOPE_RULES, schema=schema), parse)
+
     def understand_turn(self, request: TaskUnderstandingRequest):
         if request.asset_catalog is None and self.asset_catalog_snapshot is not None:
             # Direct callers use the same immutable snapshot for prompt,
@@ -1169,6 +1207,50 @@ class QwenHTTPProvider:
                         "（lift_up/pull/push 不写 target），put 的 relation 只在任务要求侧向落点时写，"
                         "不要写 distance_m（由 Brain 回填），"
                         "pick 与 put 前后必须分别是同一 target 的 approach 与 retreat。")
+
+    def plan_layout(self, request):
+        from .layout_planning import LayoutPlanningRequest, LayoutPatternDraft
+        from .prompts import LAYOUT_PLANNING_PROMPT
+        request = LayoutPlanningRequest.model_validate(request)
+        return self._call("layout_planning", LAYOUT_PLANNING_PROMPT,
+                          prompt_payload(request.model_dump(mode="json")),
+                          LayoutPatternDraft.model_json_schema(), LayoutPatternDraft.model_validate,
+                          max_completion_tokens=self.planner_max_completion_tokens)
+
+    def assign_arms(self, request):
+        from .arm_assignment import ArmAssignmentRequest
+        from ..planning.arm_assignment import ArmAssignmentOutput, validate_assignment_output
+        from .prompts import ARM_ASSIGNMENT_PROMPT
+        request = ArmAssignmentRequest.model_validate(request)
+        content = [{"type": "text", "text": prompt_payload({**request.model_dump(mode="json"),
+            "image_evidence": request.frame.model_dump(mode="json", exclude={"rgb", "depth", "segmentation"})})},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64," +
+                base64.b64encode(request.frame.rgb).decode("ascii")}}]
+        def parse(value):
+            output = ArmAssignmentOutput.model_validate(value)
+            if output.status == "assigned":
+                validate_assignment_output(output, operation_ids=[op.operation_id for op in request.operations],
+                    locked_arms={op.operation_id: op.locked_arm for op in request.operations if op.locked_arm},
+                    both_required=request.both_required, same_arm_groups=request.same_arm_groups,
+                    ordered_operations=[op.operation_id for op in request.operations])
+            return output
+        return self._call("arm_assignment", ARM_ASSIGNMENT_PROMPT, content,
+                          ArmAssignmentOutput.model_json_schema(), parse,
+                          max_completion_tokens=self.planner_max_completion_tokens)
+
+    def plan_dual_operations(self, request):
+        from .dual_operation_planning import DualOperationPlanningRequest
+        from ..contracts.dual_skill_draft import DualSkillDraft
+        from .prompts import ATOMIC_MULTI_ARM_RULES_PROMPT
+        request = DualOperationPlanningRequest.model_validate(request)
+        def parse(value):
+            draft = DualSkillDraft.model_validate(value)
+            draft.steps_for(operation.operation_id for operation in request.operations)
+            return draft
+        return self._call("dual_operation_planning", ATOMIC_MULTI_ARM_RULES_PROMPT,
+                          prompt_payload(request.model_dump(mode="json")),
+                          DualSkillDraft.model_json_schema(), parse,
+                          max_completion_tokens=self.planner_max_completion_tokens)
 
     def plan_dual(self, request):
         from .dual_skill_planning import DualSkillPlanOutput

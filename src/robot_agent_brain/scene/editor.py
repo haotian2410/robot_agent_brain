@@ -32,6 +32,8 @@ class SceneEditResult:
     deleted_object_ids: list[int] = field(default_factory=list)
     entity_bindings: dict[str, list[int]] = field(default_factory=dict)
     assumptions: list[str] = field(default_factory=list)
+    # Resolver-produced metadata, not a model-supplied distance.
+    adjusted_layout_spacing_m: float | None = None
 
 
 class SceneEditor:
@@ -53,6 +55,15 @@ class SceneEditor:
 
     def edit(self, intent, scene, **kwargs):
         return self.edit_result(intent, scene, **kwargs).patch
+
+    def layout_result(self, spec, plan, scene, *, defaults=None,
+                      seen_scene_object_ids=None, next_scene_object_id=None, instance_ids=None):
+        """Resolve a private candidate; the session owns atomic publication."""
+        from .layout_resolver import LayoutResolver
+        return LayoutResolver(editor=self).resolve_candidate(
+            spec, plan, scene, defaults=defaults,
+            seen_scene_object_ids=seen_scene_object_ids,
+            next_scene_object_id=next_scene_object_id, instance_ids=instance_ids)
 
     @timed("scene.edit", component="brain.scene")
     def edit_result(self, intent, scene, *, dialogue=None, defaults=None, bindings_override=None,
@@ -309,9 +320,10 @@ class SceneEditor:
                     or bounds[1][i] > edit_workspace[1][i] + 1e-9 for i in (0, 1)):
                 raise ValueError("scene_edit_workspace_exceeded")
 
-    def _replace(self, matches, entity, scene, next_id, *, asset_key=None):
-        model = AssetResolver(self.assets, aliases=self.aliases, category_aliases=self.category_aliases).resolve(
-            entity, asset_key=asset_key).model
+    def _replace(self, matches, entity, scene, next_id, *, asset_key=None, resolved_model=None):
+        model = resolved_model if resolved_model is not None else AssetResolver(
+            self.assets, aliases=self.aliases, category_aliases=self.category_aliases).resolve(
+                entity, asset_key=asset_key).model
         if getattr(model, "asset_type", None) == "robot":
             raise ValueError("scene_replace_robot_unsupported")
         index, facts = SceneIndex(scene), self._facts(self.scale_defaults)

@@ -6,7 +6,7 @@ from ..scene.scene_graph import world_transform
 
 class TaskExpander:
     """Keep set membership stable across phases; zip equally sized roles."""
-    def expand(self, task: GroundedTask, scene=None) -> GroundedTask:
+    def expand(self, task: GroundedTask, scene=None, *, serial_barriers=True) -> GroundedTask:
         objects = {o.object_id_in_scene: o for o in scene.objects} if scene else {}
         scene_index = SceneIndex(scene) if scene else None
         entities, members = [], {}
@@ -28,6 +28,9 @@ class TaskExpander:
                                 model_scale=world_transform(scene, object_id).scale)
                 entities.append(entity.model_copy(update=data))
         operations, expanded_ids = [], {}
+        concrete_objects = {entity.entity_id: entity.scene_object_id for entity in entities}
+        previous_actor = {}
+        reference_readers = {}
         previous_block, current_block = [], []
         active_group = None
         pairwise_cursors = {}
@@ -94,12 +97,34 @@ class TaskExpander:
                 milestone_holders = {h.holder_operation for h in task.hold_constraints
                                      if h.kind == "hold_until_operation" and h.while_operation == operation.operation_id}
                 excluded = {i for h in milestone_holders for i in expanded_ids.get(h, [])}
-                dependencies.extend(i for i in previous_block if i not in excluded)
+                if serial_barriers:
+                    dependencies.extend(i for i in previous_block if i not in excluded)
                 # Explicit parallel sets are assigned to arms after expansion.
                 # Keep user dependencies and the preceding group barrier, but
                 # do not invent a serial dependency inside that parallel set.
-                if ids and operation.parallel_group is None:
+                if serial_barriers and ids and operation.parallel_group is None:
                     dependencies.append(ids[-1])
+                if not serial_barriers:
+                    # Independent arms may overlap, but repeated manipulation
+                    # of the same physical source still follows input order.
+                    # Match actual object IDs, including different entity aliases.
+                    object_id = concrete_objects[data.get("source") or data.get("target")]
+                    if object_id in previous_actor:
+                        dependencies.append(previous_actor[object_id])
+                    dependencies.extend(reference_readers.pop(object_id, []))
+                    references = {data.get("destination"), data.get("reference")}
+                    if data.get("placement_target"):
+                        references.add(data["placement_target"]["reference"])
+                    reference_ids = sorted({concrete_objects[name] for name in references if name is not None}
+                                           - {object_id})
+                    for reference_id in reference_ids:
+                        prior = previous_actor.get(reference_id)
+                        # An explicit hold milestone replaces the full-operation
+                        # reference barrier; its skill-level edge is built later.
+                        if prior is not None and prior not in excluded:
+                            dependencies.append(prior)
+                        reference_readers.setdefault(reference_id, []).append(data["operation_id"])
+                    previous_actor[object_id] = data["operation_id"]
                 data["depends_on"] = list(dict.fromkeys(dependencies))
                 operations.append(Operation.model_validate(data))
                 ids.append(data["operation_id"])

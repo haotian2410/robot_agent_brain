@@ -54,6 +54,25 @@ def test_qwen_mode_never_silently_uses_recipe():
     assert not session.exported_commands
 
 
+@pytest.mark.parametrize("mode", ["recipe", "qwen"])
+def test_v3_profile_cannot_override_explicit_v4_only_advertisement(mode, monkeypatch):
+    from test_control_skill_contract import contract
+    session, _ = configured(mode=mode)
+    session.pipeline.control_skill_contract = contract()
+    calls = []
+    def forbidden_assignment(*args, **kwargs):
+        calls.append("assignment")
+        raise AssertionError("version mismatch must precede assignment")
+    monkeypatch.setattr("robot_agent_brain.planning.arm_assignment_resolver.resolve_arms",
+                        forbidden_assignment)
+    before = session.scene.raw_document()
+    with pytest.raises(ValueError, match="unsupported_protocol_version: commands_3.0"):
+        session.process_turn("v3-profile-v4-controller", task())
+    assert not calls
+    assert not session.exported_commands
+    assert session.scene.raw_document() == before
+
+
 def test_no_initial_state_declaration_does_not_invent_empty_grippers():
     session, registry = configured()
     session.initialize_scene(session.scene)

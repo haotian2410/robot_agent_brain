@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "layout_plan.schema.json",
+  "$defs": {
+    "LayoutSlot": {
+      "additionalProperties": false,
+      "properties": {
+        "slot_id": {
+          "pattern": "^s[0-9]+$",
+          "title": "Slot Id",
+          "type": "string"
+        },
+        "u": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "U",
+          "type": "number"
+        },
+        "v": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "V",
+          "type": "number"
+        },
+        "index": {
+          "minimum": 0,
+          "title": "Index",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "slot_id",
+        "u",
+        "v",
+        "index"
+      ],
+      "title": "LayoutSlot",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "arrangement_id": {
+      "minLength": 1,
+      "title": "Arrangement Id",
+      "type": "string"
+    },
+    "pattern_kind": {
+      "enum": [
+        "line",
+        "grid",
+        "circle",
+        "ring",
+        "arc",
+        "checker",
+        "alternating",
+        "scatter",
+        "text",
+        "custom"
+      ],
+      "title": "Pattern Kind",
+      "type": "string"
+    },
+    "slot_frame": {
+      "const": "normalized_region_2d",
+      "default": "normalized_region_2d",
+      "title": "Slot Frame",
+      "type": "string"
+    },
+    "slots": {
+      "items": {
+        "$ref": "#/$defs/LayoutSlot"
+      },
+      "maxItems": 1000,
+      "minItems": 1,
+      "title": "Slots",
+      "type": "array"
+    },
+    "orientation_hints": {
+      "items": {
+        "type": "number"
+      },
+      "title": "Orientation Hints",
+      "type": "array"
+    },
+    "planner_source": {
+      "default": "deterministic",
+      "enum": [
+        "deterministic",
+        "qwen_draft"
+      ],
+      "title": "Planner Source",
+      "type": "string"
+    },
+    "planner_revision": {
+      "default": "layout-planner-v1",
+      "title": "Planner Revision",
+      "type": "string"
+    },
+    "effective_seed": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Effective Seed"
+    }
+  },
+  "required": [
+    "arrangement_id",
+    "pattern_kind",
+    "slots"
+  ],
+  "title": "LayoutPlan",
+  "type": "object"
+}

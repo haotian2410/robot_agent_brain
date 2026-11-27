@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "layout_resolution.schema.json",
+  "additionalProperties": false,
+  "properties": {
+    "arrangement_id": {
+      "title": "Arrangement Id",
+      "type": "string"
+    },
+    "scene_id": {
+      "title": "Scene Id",
+      "type": "integer"
+    },
+    "scene_version": {
+      "minimum": 0,
+      "title": "Scene Version",
+      "type": "integer"
+    },
+    "instance_ids": {
+      "items": {
+        "type": "integer"
+      },
+      "minItems": 1,
+      "title": "Instance Ids",
+      "type": "array"
+    },
+    "slot_bindings": {
+      "additionalProperties": {
+        "type": "integer"
+      },
+      "title": "Slot Bindings",
+      "type": "object"
+    },
+    "slot_assets": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "title": "Slot Assets",
+      "type": "object"
+    },
+    "world_positions": {
+      "additionalProperties": {
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "number"
+          }
+        ],
+        "type": "array"
+      },
+      "title": "World Positions",
+      "type": "object"
+    },
+    "adjusted_spacing_m": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Adjusted Spacing M"
+    },
+    "assumptions": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Assumptions",
+      "type": "array"
+    }
+  },
+  "required": [
+    "arrangement_id",
+    "scene_id",
+    "scene_version",
+    "instance_ids",
+    "slot_bindings"
+  ],
+  "title": "LayoutResolution",
+  "type": "object"
+}

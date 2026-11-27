@@ -120,6 +120,7 @@ class CommandsFileV3(StrictModel):
     request_id: str = Field(min_length=1)
     scene_id: SceneId
     scene_version: int = Field(strict=True, ge=0)
+    scene_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     robot_setup_revision: int = Field(strict=True, ge=1)
     robot_setup: RobotSetup
     execution_policy: ExecutionPolicy = Field(default_factory=ExecutionPolicy)

@@ -14,7 +14,7 @@ class RobotProfile(BaseModel):
     robot_object_ids: set[SceneId] = Field(min_length=1)
     platform_object_ids: set[SceneId] = Field(min_length=1)
     supported_skills: set[Literal["locate", "move", "grasp", "release"]]
-    commands_version: Literal["2.0", "3.0"]
+    commands_version: Literal["2.0", "3.0", "4.0"]
     coordinated_execution: bool = False
     initial_state: RobotRuntimeState | None = None
     default_task_arm: Literal["left", "right", "single"] | None = None
@@ -30,8 +30,10 @@ class RobotProfile(BaseModel):
         ids = {o.object_id_in_scene for o in self.template.objects}
         if not self.robot_object_ids <= self.platform_object_ids <= ids:
             raise ValueError("robot_profile_manifest_invalid")
-        if self.setup.mode == "dual" and self.commands_version != "3.0":
-            raise ValueError("robot_profile_dual_requires_v3")
+        if self.setup.mode == "dual" and self.commands_version not in {"3.0", "4.0"}:
+            raise ValueError("robot_profile_dual_requires_v3_or_v4")
+        if self.commands_version == "4.0" and self.setup.mode != "dual":
+            raise ValueError("robot_profile_v4_requires_dual")
         if self.default_task_arm is not None and self.default_task_arm not in self.setup.arms:
             raise ValueError("robot_profile_default_arm_invalid")
         if self.initial_state is not None:

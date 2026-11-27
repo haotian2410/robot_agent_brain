@@ -126,6 +126,9 @@ def build_atomic_skill_reference_tables() -> str:
 # fragment order previously made duplicate rules compete and caused Qwen to
 # emit a legacy scene_edit envelope.
 TASK_UNDERSTANDING_PROMPT = _load_prompt("task_understanding_clean_v3.txt") + build_spatial_reference_tables()
+LAYOUT_PLANNING_PROMPT = _load_prompt("layout_planning_v1.txt")
+ARM_ASSIGNMENT_PROMPT = _load_prompt("arm_assignment_v1.txt")
+ATOMIC_MULTI_ARM_RULES_PROMPT = _load_prompt("atomic_multi_arm_rules_v1.txt")
 VISION_GROUNDING_PROMPT = _load_prompt("vision_grounding_v1.txt")
 SKILL_PLANNING_PROMPT = _load_prompt("skill_planning_v2.txt")
 def build_atomic_draft_output_rules() -> str:

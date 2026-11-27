@@ -48,7 +48,7 @@ def test_complete_new_task_supersedes_failure_chain_before_recovery():
             status="accepted", turn_kind="robot_task", instruction=instruction, task_intent=intent)),
     )
     session = SimpleNamespace(conversation_memory=memory, scene=None, dialogue=SimpleNamespace(),
-                              last_recovery_evidence=None)
+                              last_recovery_evidence=None, original_understanding_context=lambda: None)
     request = SimpleNamespace(sessionID="s", clientRequestID="new", command="拉开抽屉", new_task=False)
 
     assert service._maybe_recover(session, request) == "拉开抽屉"
@@ -87,7 +87,8 @@ def test_complete_new_task_can_escape_blocked_failure_chain():
             task_intent=intent)),
     )
     session = SimpleNamespace(conversation_memory=memory, scene=None,
-                              dialogue=SimpleNamespace(), last_recovery_evidence=None)
+                              dialogue=SimpleNamespace(), last_recovery_evidence=None,
+                              original_understanding_context=lambda: None)
     request = SimpleNamespace(sessionID="s", clientRequestID="new", command="重新拉开抽屉",
                               new_task=False)
 

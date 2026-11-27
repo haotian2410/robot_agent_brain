@@ -33,6 +33,7 @@
   "hold_constraints": [],
   "clarification_question": null,
   "scene_edit": null,
+  "arrangement_spec": null,
   "scene_query": null,
   "session_control": null,
   "robot_setup_request": null,
@@ -59,6 +60,7 @@
 - `robot_task`
 - `robot_config`
 - `scene_edit`
+- `scene_layout`
 - `scene_query`
 - `session_control`
 - `unsupported_task`
@@ -760,6 +762,7 @@ Python 的场景解析器处理。
   "hold_constraints": [],
   "clarification_question": null,
   "scene_edit": null,
+  "arrangement_spec": null,
   "scene_query": null,
   "session_control": null,
   "robot_setup_request": null,
@@ -790,6 +793,7 @@ Python 的场景解析器处理。
   "hold_constraints": [],
   "clarification_question": null,
   "scene_edit": null,
+  "arrangement_spec": null,
   "scene_query": null,
   "session_control": null,
   "robot_setup_request": null,
@@ -811,3 +815,44 @@ Python 的场景解析器处理。
   ]
 }
 ```
+## 场景布局路由
+
+当用户描述“摆放、排列、布置”且没有机器人/机械臂执行语义时，使用
+`turn_kind=scene_layout`，并在 `arrangement_spec` 中表达资产、数量、pattern、region
+和 spacing。已知的 line/grid/circle/ring/arc/checker/alternating/scatter 图案按契约填写；
+布局数量不使用普通单物体任务的“未说明数量则1个”默认规则。新增布局必须有用户
+给出的总数、各资产数量、明确行列数，或明确的自动数量授权；已有布局重排可沿用
+已确认成员数量。都没有时返回 clarification_required，询问需要多少个，不输出
+可执行 arrangement_spec。“摆成A”“围成一圈”“交替排列”本身不提供数量；
+自动安排间距也不等于授权自动数量，不得自行补1个、6个或3+3个。
+用户明确允许数量范围时，items.count_mode=auto、auto_count=true，并保留
+min_count/max_count；requested_count为用户优先数量（没有优先数量时使用明确上限）。
+上下限必须来自用户或已明确提供的配置，不得把“自动间距”解释成数量范围。
+不要输出世界坐标、实例 ID、关节、技能、轨迹或碰撞结论。只有明确要求机器人抓取、搬运、
+释放或由左/右臂执行时才使用 `robot_task`。
+布局在某物体左/右/前/后侧时，region.kind=relative，anchor_ref 为该参照物，
+surface_ref 为实际支撑面，side 分别为 left_half/right_half/front_half/back_half。
+这里的方向相对锚点，不是桌面半区；未指定相对方向时不能自行补成 center。
+“在某物体周围/围绕某物体均匀摆放”使用 region.kind=around、anchor_ref=该物体、
+side=center；circle 表示绕该锚点的完整圆周，不是 relative 的前半区或任何单侧。
+只有用户明确说锚点左/右/前/后时才使用 relative 和对应方向。
+用户只说围成一圈、没有指定半径时，circle 省略 radius_m，并使用 spacing.mode=auto、
+auto=true，由 Python 根据资产尺寸和可用区域确定半径；不能编造固定米数。
+用户明确给出半径时保留 radius_m，不能将其作为可自动改变的值。
+指定中心间距使用 spacing.mode=center、value_m=换算后的米数、auto=false；
+例如“中心间距20厘米”或“中心间距二十厘米”均为 value_m=0.2。
+只有用户允许自动安排间距时才使用 mode=auto；明确数值不能改成自动间距。
+scene_context.arrangements 提供当前场景的布局组与槽位成员。新增独立组使用未占用的
+arrangement_id；追加、重排、替换既有组时使用该组真实 ID，不凭空编造或复用其他组。
+scene_context.original_snapshot 是独立的原始快照上下文；仅在用户明确授权 original
+时读取其中的对象和 arrangements，不以当前分支的成员补充或替代原始成员。
+组成员缺失或存在多个无法区分的组时澄清，不把失效成员当成仍在场景中。
+operation 必须明确输出：create 新增独立组；append 仅追加新成员；rearrange
+只重排既有成员、不新建对象；replace 替换组内资产。“重新排成”是 rearrange，
+不是 create；必须保持该组 ID 和原有数量，除非用户明确要求改变成员。
+
+## 双臂同臂约束
+
+用户明确要求若干操作使用同一只机械臂，但未指定左右时，为这些操作填写相同的
+same_arm_group 标签，保留已有显式 arm。它不是 parallel_group，不表示同时执行。
+不同物体可以属于同一组；只出现多个物体不意味着自动要求双臂，也不得擅自分成左右臂。

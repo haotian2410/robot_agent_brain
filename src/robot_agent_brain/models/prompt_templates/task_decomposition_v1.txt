@@ -7,10 +7,10 @@
 ## 1. 输出结构
 
 ```json
-{"steps":[{"kind":"scene_edit","instruction":"在桌子里增加苹果"},{"kind":"robot_task","instruction":"把苹果放进篮子"}]}
+{"steps":[{"kind":"scene_layout","instruction":"在桌面摆六个苹果排成两行三列"},{"kind":"robot_task","instruction":"把其中两个放进篮子"}]}
 ```
 
-- `kind` 只能是 `scene_edit`、`robot_task`、`scene_query`。
+- `kind` 只能是 `scene_layout`、`scene_edit`、`robot_task`、`scene_query`。
 - `instruction` 是这一条子任务的自然语言表述，必须是一句能被单独理解的话。
   例如“移开盒子，然后根据露出的画面抓起里面的物体”的第二条机器人动作需要新观察，设为 true；
   “苹果放入托盘，再把香蕉放入托盘”不需要中间拍照，设为 false。
@@ -21,6 +21,7 @@
 ## 2. 三类子任务
 
 - `scene_edit`：只改变场景状态。增加、删除、移动位置、改颜色、改名、设尺寸/质量/摩擦/碰撞。例：「把篮子改成蓝色」「在桌子左边放一个苹果」。
+- `scene_layout`：只改变桌面布置。摆放、排列、布置多个对象或明确图案时使用；输出交给 ArrangementSpec/LayoutPlanner，不生成机器人动作。
 - `robot_task`：要求机器人动手。抓取、放置、按压、拧、擦、递交、回位。判据是用户表达了由机器人执行的动作，例：「把苹果放进篮子」「按三下按钮」。
 - `scene_query`：只是询问现场，不改变任何东西。例：「篮子里有什么」「有几个苹果」。
 

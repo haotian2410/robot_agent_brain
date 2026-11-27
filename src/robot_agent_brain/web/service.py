@@ -426,7 +426,12 @@ class AgentService:
             if steps is None:
                 report, result, trajs = self._run_step(session, platform, request, identifier, request.command)
             else:
-                result, trajs = self._run_steps(session, platform, request, identifier, steps)
+                prepared, evidence = self._prepare_scene_robot_composite(request, session, steps)
+                if prepared is not None:
+                    from ..contracts.decomposition import Subtask
+                    steps = [Subtask(kind=turn.turn_kind.value, instruction=turn.instruction) for turn in prepared]
+                result, trajs = self._run_steps(session, platform, request, identifier, steps,
+                                               prepared_turns=prepared, understanding_evidence=evidence)
             uncertain = session.sync_state == "unknown"
         except Exception as exc:
             failure_details = {"diagnostic_id": f"task-{identifier}"}
@@ -618,7 +623,9 @@ class AgentService:
                 "blocked_system", "exhausted"}:
             try:
                 preview = self.app.pipeline.understand_turn(
-                    request.command, scene=session.scene, dialogue=session.dialogue)
+                    request.command, scene=session.scene, dialogue=session.dialogue,
+                    arrangement_index=getattr(session, "arrangement_index", None),
+                    original_context=session.original_understanding_context())
                 payload = {
                     "scene_edit": getattr(preview, "scene_edit", None),
                     "scene_query": getattr(preview, "scene_query", None),
@@ -689,7 +696,10 @@ class AgentService:
         payload = FailureContextRequest(current_user_text=request.command,
             root_failure_turn_id=chain.root_failure_turn_id, history=history,
             latest_task_draft=chain.semantic_draft.model_dump(mode="json") if chain.semantic_draft else {},
-            step_ledger=[item.model_dump(mode="json") for item in chain.step_ledger],
+            # Raw provider responses/timing belong to the audit journal, not
+            # the recovery prompt. Keep the validated phase semantics/effects.
+            step_ledger=[item.model_dump(mode="json", exclude={"understanding_evidence"})
+                         for item in chain.step_ledger],
             unresolved_slots=(chain.semantic_draft.unresolved_slots if chain.semantic_draft else []),
             current_scene_context={"scene_digest": digest(session.scene) if session.scene else None},
             policy_summary=chain.policy_snapshot,
@@ -879,6 +889,7 @@ class AgentService:
                                    if getattr(session, "last_recovery_evidence", None) else None),
                 auto_selection_decisions=[SelectionDecision.model_validate(item) for item in
                                          (result.get("metrics") or {}).get("selection_decisions", [])],
+                step_ledger=[item.model_copy(deep=True) for item in session.pending_step_ledger],
             )
             # Planning-only delivery is successful interpretation, not a
             # failed execution. It must not create an R chain or authorize
@@ -930,6 +941,11 @@ class AgentService:
                         if (item.get("execution") or {}).get("effect") == "partial" else [],
                     receipts=list(result.get("commitReceipts") or []))
                     for index, item in enumerate(step_records)]
+                if turn.step_ledger:
+                    # Preserve the pre-dispatch semantic checkpoint, actual
+                    # per-step receipts and no-replay evidence, not a lossy
+                    # reconstruction from the user-facing summary.
+                    chain.step_ledger = [item.model_copy(deep=True) for item in turn.step_ledger]
                 chain.selection_decisions = list(turn.auto_selection_decisions)
             elif memory.active_failure_chain is not None and memory.active_failure_chain.state not in {
                     FailureChainState.EXHAUSTED, FailureChainState.BLOCKED_RECONCILIATION,
@@ -1018,8 +1034,34 @@ class AgentService:
             return None
         return None if value is None else list(value.steps)
 
+    def _prepare_scene_robot_composite(self, request, session, steps):
+        """Parse the scene-prefix/robot-suffix once, before any child effects.
+
+        Other mixed orderings and historical failure recovery keep their existing
+        executor. A failed unified U is never retried through the old per-step U.
+        """
+        provider = session.pipeline.understanding
+        if not hasattr(provider, "understand_composite") or session.last_recovery_evidence is not None:
+            return None, None
+        kinds = [step.kind.value for step in steps]
+        first_robot = next((i for i, kind in enumerate(kinds) if kind == "robot_task"), 0)
+        if not first_robot or any(k not in {"scene_edit", "scene_layout"} for k in kinds[:first_robot]) \
+                or any(k != "robot_task" for k in kinds[first_robot:]):
+            return None, None
+        calls_start = len(getattr(provider, "calls", []))
+        task = session.pipeline.understand_composite(request.command, scene=session.scene,
+                                                    arrangement_index=session.arrangement_index,
+                                                    original_context=session.original_understanding_context())
+        from ..diagnostics import redact
+        secret = self.config.api_key.get_secret_value() if self.config.api_key else None
+        evidence = redact({"model_calls": list(getattr(provider, "calls", []))[calls_start:],
+                           "raw_response": getattr(provider, "last_raw_text", {}).get("composite_understanding"),
+                           "canonical_task": task.model_dump(mode="json")}, secret)
+        return task.phases, evidence
+
     @timed("web.child_step", component="brain.web")
-    def _run_step(self, session, platform, request, identifier, instruction, *, expected_turn_kind=None):
+    def _run_step(self, session, platform, request, identifier, instruction, *, expected_turn_kind=None,
+                  prepared_turn=None):
         """One turn plus every side effect that turn is allowed to have.
 
         A scene edit commits inside ``app.handle``; an exported plan is dispatched
@@ -1028,8 +1070,9 @@ class AgentService:
         the clips leave only once the lease does, so the caller keeps them.
         """
         from .camera_policy import choose_camera
+        prepared_kwargs = {"prepared_turn": prepared_turn} if prepared_turn is not None else {}
         report = self.app.handle(instruction, session_id=request.sessionID, origin="internal_step",
-                                 expected_turn_kind=expected_turn_kind)
+                                 expected_turn_kind=expected_turn_kind, **prepared_kwargs)
         camera_reason = None
         # Original derivation remaps the frozen original IDs, not the previous
         # branch's camera ID. Revalidate semantic binding on the confirmed scene.
@@ -1071,7 +1114,8 @@ class AgentService:
         return report, result, trajs
 
     @timed("web.composite", component="brain.web")
-    def _run_steps(self, session, platform, request, identifier, steps):
+    def _run_steps(self, session, platform, request, identifier, steps, *, prepared_turns=None,
+                   understanding_evidence=None):
         """Walk the subtasks in order, keeping whatever already landed.
 
         This is the 分一个做一个 policy: an ambiguous third step must not throw
@@ -1083,7 +1127,14 @@ class AgentService:
         """
         from ..session.conversation_memory import StepLedgerEntry
         from ..models.task_decomposition import execution_segments
-        steps, segment_sources = execution_segments(steps)
+        if prepared_turns is None:
+            steps, segment_sources = execution_segments(steps)
+        else:
+            if len(steps) != len(prepared_turns) or any(
+                    s.instruction != t.instruction or s.kind != t.turn_kind
+                    for s, t in zip(steps, prepared_turns)):
+                raise ValueError("composite_prepared_steps_mismatch")
+            segment_sources = [[step.instruction] for step in steps]
         all_steps = list(steps)
         results, records, trajs = [], [], []
         prior_ledger = []
@@ -1124,9 +1175,22 @@ class AgentService:
             step_id=f"step-{index}", original_step_index=index,
             instruction=step.instruction, status="planned")
             for index, step in enumerate(steps_to_run, start=skip_count + 1)]
+        if prepared_turns is not None:
+            for ledger, turn in zip(session.pending_step_ledger, prepared_turns):
+                ledger.canonical_turn = turn.model_dump(mode="json")
+            session.pending_step_ledger[0].understanding_evidence = understanding_evidence
         self.app._save_session(request.sessionID)
 
         def checkpoint_step(ledger, record, report, result, attempts, receipts):
+            if session.scene is not None:
+                ledger.scene_after = {"scene_id": session.scene.scene_id,
+                    "scene_version": session.scene.scene_version,
+                    "scene_sub_version": session.scene.scene_sub_version,
+                    "scene_digest": digest(session.scene)}
+            record.update(scene_version_before=(ledger.scene_before or {}).get("scene_version"),
+                          scene_version_after=(ledger.scene_after or {}).get("scene_version"),
+                          scene_digest_before=(ledger.scene_before or {}).get("scene_digest"),
+                          scene_digest_after=(ledger.scene_after or {}).get("scene_digest"))
             ledger.status = ("committed" if record.get("state") == "completed" and record["outcome"] == "scene_updated"
                              else "executed_confirmed" if record["executed"]
                              else "clarification" if record["outcome"] == "clarification_required"
@@ -1149,14 +1213,21 @@ class AgentService:
         for index, step in enumerate(steps_to_run, start=skip_count + 1):
             ledger = session.pending_step_ledger[index - 1]
             ledger.status = "processing"
+            if session.scene is not None:
+                ledger.scene_before = {"scene_id": session.scene.scene_id,
+                    "scene_version": session.scene.scene_version,
+                    "scene_sub_version": session.scene.scene_sub_version,
+                    "scene_digest": digest(session.scene)}
             ledger.task_revision += 1
             self.app._save_session(request.sessionID)
             self.progress[identifier] = f"拆分执行 {index}/{len(all_steps)} · {step.instruction}"
             receipts_before = len(platform.receipts)
             expected_kind = "robot_task" if len(segment_sources[index - 1]) > 1 else None
+            prepared_kwargs = ({"prepared_turn": prepared_turns[index - 1]}
+                               if prepared_turns is not None else {})
             with span("web.step_attempt", source="web/service.py:AgentService._run_steps", step_index=index, attempt=1):
                 report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction,
-                                                           expected_turn_kind=expected_kind)
+                                                           expected_turn_kind=expected_kind, **prepared_kwargs)
             attempts = 1
             while (attempts < self.MAX_STEP_ATTEMPTS and len(platform.receipts) == receipts_before
                    and (result.get("error") or {}).get("code") in self.RETRYABLE_EXECUTION_CODES
@@ -1165,7 +1236,7 @@ class AgentService:
                 self.progress[identifier] = f"拆分执行 {index}/{len(all_steps)} · 第 {attempts} 次尝试 · {step.instruction}"
                 with span("web.retry", source="web/service.py:AgentService._run_steps", step_index=index, attempt=attempts):
                     report, result, step_trajs = self._run_step(session, platform, request, identifier, step.instruction,
-                                                               expected_turn_kind=expected_kind)
+                                                               expected_turn_kind=expected_kind, **prepared_kwargs)
             trajs += step_trajs
             results.append(result)
             record = {"step": index, "segment_id": f"segment-{index}",
@@ -1228,6 +1299,45 @@ class AgentService:
             session.pending_step_ledger[index - 1].status = "not_run"
         self.app._save_session(request.sessionID)
         result = self.composite_result(records, results, all_steps)
+        if understanding_evidence is not None:
+            metrics = result.setdefault("metrics", {})
+            metrics["composite_understanding"] = understanding_evidence
+            child_metrics = [item.get("metrics") or {} for item in results]
+            for key in ("understanding_calls", "vision_calls", "skill_planning_calls"):
+                metrics[key] = sum(item.get(key, 0) for item in child_metrics)
+            metrics["understanding_calls"] += 1
+            details = list(understanding_evidence.get("model_calls") or [])
+            for item in child_metrics:
+                details.extend(item.get("model_call_details") or [])
+            metrics["model_call_details"] = details
+            metrics["model_calls"] = len(details)
+        # Persist a compact, versioned audit record for composite turns.  This
+        # is deliberately metadata only: dispatch and SceneEditor remain the
+        # sources of truth for effects and scene commits.
+        from ..contracts.composite_turn import CompositePhase, CompositeTurnRecord
+        phases = []
+        for index, (record, step) in enumerate(zip(records, all_steps), start=1):
+            outcome = record.get("outcome")
+            status = ("executed" if record.get("executed") and record.get("state") == "completed"
+                      else "committed" if outcome == "scene_updated" and record.get("state") == "completed"
+                      else "planned" if outcome == "plan_ready"
+                      else "failed" if outcome == "failed"
+                      else "skipped" if record.get("state") == "not_run"
+                      else "pending")
+            phases.append(CompositePhase(
+                phase_id=f"phase-{index}", kind=step.kind.value, status=status,
+                request_id=str(record.get("request_id") or identifier),
+                scene_version_before=record.get("scene_version_before"),
+                scene_version_after=record.get("scene_version_after"),
+                scene_digest_before=record.get("scene_digest_before"),
+                scene_digest_after=record.get("scene_digest_after"),
+                error_code=(record.get("error") or {}).get("code") if isinstance(record.get("error"), dict) else None,
+            ))
+        audit = CompositeTurnRecord(turn_id=str(identifier), phases=phases, atomic=False)
+        if not hasattr(session, "composite_turn_records"):
+            session.composite_turn_records = []
+        session.composite_turn_records.append(audit.model_dump(mode="json"))
+        self.app._save_session(request.sessionID)
         return result, trajs
 
     @staticmethod
@@ -1886,6 +1996,14 @@ def create_http_app(service):
                 raise ValueError("session_browser_not_active")
             if binding["uncertain"]:
                 raise ValueError("session_reconciliation_required")
+            # A committed request legitimately contains the pre-commit Scene
+            # (including a first-turn empty Scene). Return its existing receipt
+            # before checking that snapshot against the now-current Scene.
+            # Binding and exact payload fingerprint still gate this read.
+            existing = service.tasks.matching_request(value)
+            if existing is not None:
+                return web.json_response({"taskID": existing["id"], "state": existing["state"],
+                                          "terminal": existing["terminal"], "code": 0})
             session = service._bind(value.sessionID)
             service.validate_scene(value.scene, session)
             record, fresh = service.tasks.submit(value)

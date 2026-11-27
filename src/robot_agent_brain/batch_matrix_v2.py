@@ -33,7 +33,7 @@ INVARIANT_COLUMNS = ("test_id", "priority", "module", "name", "input", "assertio
 ALLOWED_POLICIES = {"none", "fixed", "seed", "all"}
 ALLOWED_OUTCOMES = {"scene_updated", "answered", "clarification_required", "safe_rejection",
                     "plan_ready", "capability_unsupported", "blocked", "semantic_accepted", "robot_setup_updated"}
-ALLOWED_EXPECTED_ROUTES = {"scene_edit", "scene_query", "robot_task", "robot_config"}
+ALLOWED_EXPECTED_ROUTES = {"scene_edit", "scene_layout", "scene_query", "robot_task", "robot_config"}
 V2_PLACEHOLDERS = {"object_a", "object_b", "placement_1", "placement_2", "surface_1"}
 SCENE_EDIT_OPERATIONS = {"add", "remove", "replace", "translate", "move_relative", "rotate",
                          "scale", "update_properties"}

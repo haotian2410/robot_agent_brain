@@ -7,13 +7,13 @@ from pathlib import Path
 from ..perf_trace import timed
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator, field_serializer
 from ..adapters.artifact_writer import safe_identifier
 from ..filelock import lock_exclusive
 from ..contracts.commands import CommandsFile, canonical_commands, parse_commands
 from ..contracts.robot_setup import RobotSetup, RobotRuntimeState
 from ..contracts.feedback_v3 import ExecutionRecoveryContext
-from ..contracts.scene import SceneConfig, SceneId
+from ..contracts.scene import SceneConfig, SceneId, parse_scene_document
 from ..scene.scene_manager import SceneManager
 from .dialogue_state import DialogueState
 from .original_scene_store import OriginalSceneManifest, OriginalSceneStore
@@ -62,6 +62,33 @@ class SessionState(BaseModel):
     conversation_memory: ConversationMemory = Field(default_factory=ConversationMemory)
     prefer_auto_resolve: bool = False
     pending_step_ledger: list[StepLedgerEntry] = Field(default_factory=list)
+    arrangement_records: list[dict] = Field(default_factory=list)
+    layout_request_receipts: dict[str, dict[str, str]] = Field(default_factory=dict)
+    layout_id_reservations: dict[str, tuple[int, int]] = Field(default_factory=dict)
+    composite_turn_records: list[dict] = Field(default_factory=list)
+
+    @field_validator("layout_id_reservations", mode="before")
+    @classmethod
+    def strict_reservation_ranges(cls, value):
+        if not isinstance(value, dict) or any(
+                not isinstance(pair, (tuple, list)) or len(pair) != 2
+                or any(type(item) is not int for item in pair) for pair in value.values()):
+            raise ValueError("session_layout_reservation_invalid")
+        return value
+
+    @field_validator("scene", mode="before")
+    @classmethod
+    def decode_scene_document(cls, value):
+        if isinstance(value, dict):
+            document = parse_scene_document(value, uint32=False)
+            if document.rejected_objects:
+                raise ValueError("session_scene_objects_rejected")
+            return document.view
+        return value
+
+    @field_serializer("scene")
+    def encode_scene_document(self, value):
+        return None if value is None else value.raw_document()
 
     @field_validator("profile_object_map", mode="before")
     @classmethod
@@ -88,6 +115,11 @@ class SessionState(BaseModel):
     @model_validator(mode="after")
     def consistent(self):
         safe_identifier(self.session_id)
+        ranges = sorted(self.layout_id_reservations.values())
+        for index, (start, end) in enumerate(ranges):
+            if (not 0 <= start < end <= self.next_scene_object_id or end - start > 1000
+                    or (index and ranges[index - 1][1] > start)):
+                raise ValueError("session_layout_reservation_invalid")
         if self.recovery_context is not None:
             recovery = self.recovery_context
             if (self.scene is None or self.robot_setup is None or self.sync_state != "unknown"
@@ -209,21 +241,22 @@ class SessionStore:
         state.conversation_memory = session.conversation_memory.model_copy(deep=True)
         state.prefer_auto_resolve = bool(getattr(session, "prefer_auto_resolve", False))
         state.pending_step_ledger = [item.model_copy(deep=True) for item in getattr(session, "pending_step_ledger", [])]
+        state.arrangement_records = session.arrangement_index.snapshot()
+        state.layout_request_receipts = {key: dict(value) for key, value in session.layout_request_receipts.items()}
+        state.layout_id_reservations = {key: tuple(value) for key, value in session.layout_id_reservations.items()}
+        state.composite_turn_records = [dict(item) for item in getattr(session, "composite_turn_records", [])]
         parent = self.directory(session_id)
         fd, temporary = tempfile.mkstemp(prefix=".state-", dir=parent)
         try:
             encoded = state.model_dump(mode="json")
-            # Preserve the lossless Scene document's omission of the optional zero sub-version.
-            # Pydantic's nested serializer materializes defaults, which otherwise turns an
-            # unchanged scene into a different raw document after restart and trips the browser
-            # scene-digest/version gate.
-            if session.scene is not None and "scene_sub_version" not in session.scene.raw_document():
-                encoded["scene"].pop("scene_sub_version", None)
             with os.fdopen(fd, "w", encoding="utf-8") as stream:
                 stream.write(json.dumps(encoded, ensure_ascii=False, allow_nan=False))
                 stream.flush()
                 os.fsync(stream.fileno())
             check = SessionState.model_validate_json(Path(temporary).read_text(encoding="utf-8"))
+            if state.scene is not None and (check.scene is None
+                    or state.scene.raw_document() != check.scene.raw_document()):
+                raise ValueError("session_state_readback_mismatch: scene_document")
             if state != check:
                 # The dumps of two *equal* states can still differ: a set built by incremental
                 # adds iterates in its own table order, and a reload from the written list can
@@ -244,6 +277,11 @@ class SessionStore:
 
     @staticmethod
     def restore(state, session):
+        # A crash after reservation but before publication must not resurrect
+        # those IDs. Current committed members remain legal existing objects.
+        state = state.model_copy(deep=True)
+        for bounds in state.layout_id_reservations.values():
+            state.seen_scene_object_ids.update(range(*bounds))
         if state.scene is not None:
             session._validate_identity_range(state.scene)
             # A checkpoint is not authoritative evidence of post-execution
@@ -263,6 +301,13 @@ class SessionStore:
                      "last_feedback_source", "recovery_context", "conversation_memory", "prefer_auto_resolve",
                      "pending_step_ledger"):
             setattr(session, name, getattr(state.model_copy(deep=True), name))
+        session.composite_turn_records = [dict(item) for item in state.composite_turn_records]
+        session.layout_request_receipts = {key: dict(value) for key, value in state.layout_request_receipts.items()}
+        session.layout_id_reservations = {key: list(value) for key, value in state.layout_id_reservations.items()}
+        from ..scene.arrangement_index import ArrangementIndex, ArrangementRecord
+        session.arrangement_index = ArrangementIndex()
+        for item in state.arrangement_records:
+            session.arrangement_index.put(ArrangementRecord.model_validate(item))
         for name in ("robot_setup", "robot_setup_revision", "arm_states", "original_scene_manifest", "platform_object_ids", "profile_object_map"):
             setattr(session, name, getattr(state.model_copy(deep=True), name))
         session.last_request_id = state.last_exported_request

@@ -60,6 +60,13 @@ class TestContract:
         value = TaskDecomposition.model_validate({"steps": [ARM, {**ARM, "instruction": "把香蕉放到左边"}]})
         assert [step.kind for step in value.steps] == [SubtaskKind.ROBOT_TASK, SubtaskKind.ROBOT_TASK]
 
+    def test_layout_is_a_boundary_before_robot_task(self):
+        value = TaskDecomposition.model_validate({"steps": [
+            {"kind": "scene_layout", "instruction": "在桌面摆六个苹果"},
+            {"kind": "robot_task", "instruction": "把其中两个放进篮子"},
+        ]})
+        assert [step.kind.value for step in value.steps] == ["scene_layout", "robot_task"]
+
     def test_the_five_clause_sentence_splits_into_five_legal_steps(self):
         value = TaskDecomposition.model_validate({"steps": [
             {"kind": "robot_task", "instruction": "把苹果放到篮子里"},
@@ -88,7 +95,7 @@ class TestContract:
 class TestWire:
     def test_the_schema_offers_exactly_the_kinds_the_contract_accepts(self):
         kinds = task_decomposition_wire_schema()["properties"]["steps"]["items"]["properties"]["kind"]
-        assert kinds["enum"] == ["scene_edit", "robot_task", "scene_query"]
+        assert kinds["enum"] == ["scene_edit", "scene_layout", "robot_task", "scene_query"]
 
     def test_an_array_answer_is_the_same_document_without_the_envelope(self):
         assert [step.instruction for step in parse_decomposition([EDIT, ARM]).steps] == [

@@ -104,7 +104,10 @@ class ComponentReferenceRegistry:
 
     def validate_scene(self, scene):
         from .component_access import SceneIndex
-        scene = SceneConfig.model_validate(scene.model_dump())
+        from ..adapters.scene_file_codec import SceneFileCodec
+        document = scene.raw_document()
+        document.update(scene.model_dump(mode="json"))
+        scene = SceneFileCodec().decode(document)
         known = {o.object_id_in_scene for o in scene.objects}
         index = SceneIndex(scene)
         for obj in scene.objects:

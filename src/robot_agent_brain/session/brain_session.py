@@ -24,11 +24,17 @@ class BrainSession:
         from ..scene.component_reference_registry import ComponentReferenceRegistry
         self.reference_registry = reference_registry or ComponentReferenceRegistry()
         self.dialogue = DialogueState()
+        from ..scene.arrangement_index import ArrangementIndex
+        self.arrangement_index = ArrangementIndex()
+        self.layout_request_receipts = {}
+        self.layout_id_reservations = {}
+        self.persist_identity_reservation = None
         self.conversation_memory = ConversationMemory()
         # Durable pre-dispatch ledger for composite tasks.  It is checkpointed
         # before each child turn so a process loss cannot erase which step may
         # have had side effects.
         self.pending_step_ledger: list[StepLedgerEntry] = []
+        self.composite_turn_records: list[dict] = []
         self.prefer_auto_resolve = False
         self.last_recovery_evidence = None
         self.session_action = None
@@ -111,6 +117,30 @@ class BrainSession:
         self.last_request_id = None
 
         self.recovery_context = None
+
+    @staticmethod
+    def _confirmed_scene_view(scene):
+        """Validate feedback without dropping lossless Scene display metadata."""
+        from ..adapters.scene_file_codec import SceneFileCodec
+        if hasattr(scene, "raw_document"):
+            document = scene.raw_document()
+            document.update(scene.model_dump(mode="json"))
+        else:
+            document = scene
+        return SceneFileCodec().decode(document)
+
+    def original_understanding_context(self):
+        """Read immutable snapshot context without mixing in current membership."""
+        if self.original_scene_manifest is None or self.original_store is None:
+            return None
+        from ..scene.arrangement_index import ArrangementIndex
+        scene, manifest = self.original_store.load(self.original_scene_manifest)
+        index = ArrangementIndex()
+        for record in manifest.arrangement_records:
+            index.put(record)
+        context = self.pipeline._understanding_scene_context(scene, index)
+        context["basis"] = "original"
+        return context
 
     def _candidate_manager(self, scene):
         self._validate_identity_range(scene)
@@ -476,11 +506,15 @@ class BrainSession:
     def run_task(self, request_id, instruction):
         if self.session_action == "close":
             raise ValueError("session_closed")
-        turn = self.pipeline.understand_turn(instruction, scene=self.scene, dialogue=self.dialogue)
+        turn = self.pipeline.understand_turn(instruction, scene=self.scene, dialogue=self.dialogue,
+                                           arrangement_index=self.arrangement_index)
         return self.process_turn(request_id, turn)
 
     def check_turn(self, turn):
-        if turn.scene_edit is not None and turn.scene_edit.scene_basis == "original" and self.original_scene_manifest is None:
+        arrangement = getattr(turn, "arrangement_spec", None)
+        original_requested = ((turn.scene_edit is not None and turn.scene_edit.scene_basis == "original")
+                              or (arrangement is not None and arrangement.basis == "original"))
+        if original_requested and self.original_scene_manifest is None:
             raise ValueError("original_scene_unavailable")
         if turn.turn_kind == "robot_task" and self.robot_asset is not None \
                 and self.scene is not None and self.robot_assembly_adapter is not None:
@@ -509,7 +543,7 @@ class BrainSession:
             pass
         elif self.robot_setup is None or self.robot_setup.mode != "dual":
             turn.require_legacy_execution()
-        elif turn.turn_kind == "scene_edit":
+        elif turn.turn_kind in {"scene_edit", "scene_layout"}:
             if self.arm_states is None:
                 raise ValueError("robot_runtime_state_unknown")
             self.arm_states.require_idle(self.robot_setup)
@@ -523,6 +557,130 @@ class BrainSession:
             raise ValueError("session_paused")
 
     def process_turn(self, request_id, turn, *, bindings_override=None, edit_defaults=None):
+        if turn.turn_kind != "scene_layout" or turn.status != "accepted":
+            return self._process_turn_once(request_id, turn, bindings_override=bindings_override,
+                                           edit_defaults=edit_defaults)
+        from ..web.protocol import digest
+        from ..pipeline import BrainResult
+        fingerprint = self._layout_fingerprint(turn)
+        receipt = self.layout_request_receipts.get(request_id)
+        if receipt is not None:
+            if receipt["fingerprint"] != fingerprint:
+                raise ValueError("scene_layout_request_conflict")
+            self.check_turn(turn)
+            if self.scene is None or digest(self.scene) != receipt["scene_digest"]:
+                raise ValueError("scene_layout_request_stale")
+            # Publication already happened. In particular do not call
+            # _accept_result, observe dialogue or allocate IDs a second time.
+            return BrainResult.model_validate_json(receipt["result_json"])
+        try:
+            result = self._process_turn_once(request_id, turn, bindings_override=bindings_override,
+                                             edit_defaults=edit_defaults)
+        finally:
+            self._retire_layout_reservation(request_id)
+        if result.status == "accepted":
+            self._remember_layout_request(request_id, turn, result)
+        return result
+
+    @staticmethod
+    def _layout_fingerprint(turn):
+        import hashlib
+        import json
+        return hashlib.sha256(json.dumps(turn.model_dump(mode="json"),
+            sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+
+    def _remember_layout_request(self, request_id, turn, result):
+        from ..web.protocol import digest
+        self.layout_request_receipts[request_id] = {
+            "fingerprint": self._layout_fingerprint(turn),
+            "scene_digest": digest(self.require_scene()), "result_json": result.model_dump_json(),
+        }
+
+    def _reserve_layout_ids(self, request_id, count, minimum):
+        """Advance the existing allocator before constructing candidate objects.
+
+        A failed request keeps its reservation. Retrying it needs publication
+        reconciliation or a new request ID, not reuse of its transient IDs.
+        """
+        if request_id in self.layout_id_reservations:
+            raise ValueError("scene_layout_request_reserved")
+        start = max(self.next_scene_object_id, minimum)
+        end = start + count
+        if type(count) is not int or not 1 <= count <= 1000 or end > 2 ** self.scene_id_bits:
+            raise ValueError("scene_identity_range_unsupported")
+        self.layout_id_reservations[request_id] = [start, end]
+        self.next_scene_object_id = end
+        if self.scene_manager is not None:
+            self.scene_manager.next_scene_object_id = end
+        if self.persist_identity_reservation is not None:
+            # Failure stops before candidate construction; never continue with
+            # an allocation whose durability could not be established.
+            self.persist_identity_reservation()
+        return start
+
+    def _retire_layout_reservation(self, request_id):
+        reservation = self.layout_id_reservations.get(request_id)
+        if reservation is not None:
+            self.seen_scene_object_ids.update(range(*reservation))
+            if self.scene_manager is not None:
+                self.scene_manager.seen_scene_object_ids.update(range(*reservation))
+
+    def process_composite_turn(self, request_id, task, *, edit_defaults=None):
+        """Execute parsed scene phases then re-ground a robot plan on their commit.
+
+        No understanding or Control execution occurs here. The application owns
+        checkpointing and publication of the returned results/phase ledger.
+        """
+        from ..contracts.composite_turn import CompositeTask, CompositePhase, CompositeTurnRecord
+        from ..web.protocol import digest
+        task = CompositeTask.model_validate(task)
+        if any(record["turn_id"] == request_id for record in self.composite_turn_records):
+            raise ValueError("composite_request_already_recorded")
+        record = CompositeTurnRecord(turn_id=request_id, phases=[CompositePhase(
+            phase_id=f"phase-{i+1}", kind=phase.turn_kind, status="pending",
+            request_id=f"{request_id}-phase-{i+1}") for i, phase in enumerate(task.phases)])
+        self.composite_turn_records.append(record.model_dump(mode="json"))
+        results = []
+        for index, turn in enumerate(task.phases):
+            phase = record.phases[index]
+            scene = self.require_scene()
+            phase.scene_version_before, phase.scene_digest_before = scene.scene_version, digest(scene)
+            try:
+                result = self.process_turn(phase.request_id, turn, edit_defaults=edit_defaults)
+                # Grounding/planning use process_turn's current scene, never
+                # a cached pre-edit binding or predicted object ID.
+                if turn.turn_kind == "robot_task":
+                    commands = result.commands
+                    if (commands is None or commands.scene_id != self.scene.scene_id
+                            or commands.scene_version != self.scene.scene_version):
+                        raise ValueError("composite_commands_scene_mismatch")
+                    command_digest = getattr(commands, "scene_digest", None)
+                    if command_digest != digest(self.scene):
+                        raise ValueError("composite_commands_digest_mismatch")
+                results.append(result)
+                phase.status = "planned" if turn.turn_kind == "robot_task" else "committed"
+            except Exception as exc:
+                phase.status = "failed"
+                phase.error_code = getattr(exc, "code", None) or str(exc).split(":", 1)[0]
+                for remaining in record.phases[index+1:]:
+                    remaining.status = "skipped"
+                # Do not publish commands from this failed planning phase.
+                self.exported_commands.pop(phase.request_id, None)
+                if self.last_exported_request == phase.request_id:
+                    self.last_exported_request = None
+                raise
+            finally:
+                phase.scene_version_after = self.scene.scene_version if self.scene is not None else None
+                phase.scene_digest_after = digest(self.scene) if self.scene is not None else None
+                self.composite_turn_records[-1] = record.model_dump(mode="json")
+        return results
+
+    def run_composite_task(self, request_id, instruction, *, edit_defaults=None):
+        task = self.pipeline.understand_composite(instruction, scene=self.require_scene(),
+                                                arrangement_index=self.arrangement_index)
+        return self.process_composite_turn(request_id, task, edit_defaults=edit_defaults)
+
+    def _process_turn_once(self, request_id, turn, *, bindings_override=None, edit_defaults=None):
         self.check_turn(turn)
         # Reuse a persisted opt-in source/actor choice when a failure-chain
         # continuation retries the same task.  The Grounder still validates
@@ -544,6 +702,47 @@ class BrainSession:
             return self._accept_result(request_id, BrainResult(turn_kind=turn.turn_kind, platform_rebind=binding))
         if turn.robot_setup_request is not None:
             return self._process_setup_turn(request_id, turn, bindings_override=effective_bindings)
+        if turn.arrangement_spec is not None and turn.arrangement_spec.basis == "original":
+            if self.original_store is None:
+                raise ValueError("original_scene_unavailable")
+            result = None
+
+            def layout(original):
+                nonlocal result
+                current_turn = turn.model_copy(update={"arrangement_spec":
+                    turn.arrangement_spec.model_copy(update={"basis": "current"})})
+                from ..scene.arrangement_index import ArrangementIndex
+                original_index = ArrangementIndex()
+                for record in self.original_scene_manifest.arrangement_records:
+                    original_index.put(record.model_copy(deep=True))
+                original_record = original_index.validate_operation(current_turn.arrangement_spec, original)
+                next_id = max(self.next_scene_object_id,
+                              max((o.object_id_in_scene for o in original.objects), default=-1) + 1)
+                result = self.pipeline.process_turn(
+                    request_id, current_turn, original, edit_defaults=edit_defaults,
+                    arrangement_record=original_record,
+                    reserve_layout_ids=lambda count, minimum: self._reserve_layout_ids(request_id, count, minimum),
+                    next_scene_object_id=next_id)
+                return SceneManager(original, next_scene_object_id=next_id).apply_patch(result.scene_patch)
+
+            remapped = self.derive_original_scene(
+                self.original_store, layout, reset_allowed=self.scene_reset_allowed)
+            resolution = result.layout_resolution.model_copy(update={
+                "scene_id": remapped.scene.scene_id,
+                "scene_version": remapped.scene.scene_version,
+                "instance_ids": [remapped.id_map[i] for i in result.layout_resolution.instance_ids],
+                "slot_bindings": {slot: remapped.id_map[i]
+                                  for slot, i in result.layout_resolution.slot_bindings.items()},
+            })
+            final = result.model_copy(update={
+                "scene_patch": None, "scene_replacement": remapped.scene,
+                "scene_source_snapshot": self.original_scene_manifest.snapshot_id,
+                "scene_id_remap": remapped.id_map, "layout_resolution": resolution,
+                "focus_object_ids": [remapped.id_map[i] for i in (result.focus_object_ids or [])],
+            })
+            # derive_original_scene already published the replacement. Only
+            # record its remapped bindings/focus here; never apply its old patch.
+            return self._accept_result(request_id, final)
         if turn.scene_edit is not None and turn.scene_edit.scene_basis == "original":
             from ..pipeline import BrainResult
             if self.original_store is None:
@@ -567,6 +766,9 @@ class BrainSession:
             self.dialogue.observe(final)
             return final
         profile = None
+        arrangement_record = None
+        if turn.arrangement_spec is not None:
+            arrangement_record = self.arrangement_index.validate_operation(turn.arrangement_spec, self.require_scene())
         if self.robot_setup is not None:
             from ..contracts.robot_setup import RobotSetupRequest
             if self.robot_profiles is None:
@@ -579,6 +781,8 @@ class BrainSession:
                                            held_object=self.holding_object, bindings_override=effective_bindings, edit_defaults=edit_defaults,
                                            seen_scene_object_ids=self.seen_scene_object_ids,
                                            next_scene_object_id=self.next_scene_object_id,
+                                           reserve_layout_ids=lambda count, minimum: self._reserve_layout_ids(request_id, count, minimum),
+                                           arrangement_record=arrangement_record,
                                            robot_profile=profile, robot_setup_revision=self.robot_setup_revision, arm_states=self.arm_states,
                                            prefer_auto_resolve=self.prefer_auto_resolve)
         return self._accept_result(request_id, result)
@@ -734,7 +938,7 @@ class BrainSession:
                 or robot_setup_revision != context.robot_setup_revision):
             raise ValueError("execution_robot_setup_mismatch")
         scene = self.require_scene()
-        candidate = SceneConfig.model_validate(confirmed_scene.model_dump() if hasattr(confirmed_scene, "model_dump") else confirmed_scene)
+        candidate = self._confirmed_scene_view(confirmed_scene)
         if candidate.scene_id != context.scene_id or candidate.scene_version < context.minimum_scene_version:
             raise ValueError("execution_recovery_scene_mismatch")
         self._validate_execution_scene(candidate, kind="recovery")
@@ -785,7 +989,11 @@ class BrainSession:
         if self.original_scene_manifest is None:
             raise ValueError("original_scene_unavailable")
         original, manifest = original_store.load(self.original_scene_manifest)
-        edited = SceneConfig.model_validate(transform(original.model_copy(deep=True)).model_dump())
+        from ..adapters.scene_file_codec import SceneFileCodec
+        transformed = transform(original.model_copy(deep=True))
+        edited_document = transformed.raw_document()
+        edited_document.update(transformed.model_dump(mode="json"))
+        edited = SceneFileCodec().decode(edited_document)
         # Original is an immutable content snapshot, not an immutable robot
         # assembly.  Re-inject the currently confirmed OLS arm/gripper/camera
         # before remapping IDs so a Piper/UR10 session does not silently jump
@@ -798,7 +1006,7 @@ class BrainSession:
                 camera_asset=self.camera_asset)
             payload = edited.raw_document()
             payload["scene_sub_version"] = 0
-            edited = SceneConfig.model_validate(payload)
+            edited = SceneFileCodec().decode(payload)
             platform_manifest = self.robot_assembly_adapter.platform_object_ids(
                 edited, previous=platform_manifest
             )
@@ -811,6 +1019,21 @@ class BrainSession:
         if not platform_manifest <= set(remapped.id_map):
             raise ValueError("original_scene_platform_object_removed")
         manager = self._candidate_manager(remapped.scene)
+        from ..scene.arrangement_index import ArrangementIndex
+        from ..scene.scene_graph import world_transform
+        restored_arrangements = ArrangementIndex()
+        for record in manifest.arrangement_records:
+            if not set(record.slot_bindings.values()) <= set(remapped.id_map):
+                # A group whose members were removed/replaced cannot retain
+                # stale bindings. Layout replacement records its new members
+                # only after this transaction is acknowledged.
+                continue
+            bindings = {slot: remapped.id_map[oid] for slot, oid in record.slot_bindings.items()}
+            restored_arrangements.put(record.model_copy(update={
+                "scene_id": remapped.scene.scene_id, "scene_version": remapped.scene.scene_version,
+                "slot_bindings": bindings,
+                "world_positions": {slot: tuple(world_transform(remapped.scene, oid).position[:2])
+                                    for slot, oid in bindings.items()}}))
         try:
             self._check_snapshot(self.platform.load_scene(remapped.scene), remapped.scene)
         except SceneCommitRejected:
@@ -819,6 +1042,7 @@ class BrainSession:
             self.sync_state = "unknown"
             raise
         self._commit_manager(manager)
+        self.arrangement_index = restored_arrangements
         self.robot_setup = remapped.robot_setup
         self.profile_object_map = ({int(k): remapped.id_map[v] for k, v in manifest.profile_object_map.items()}
                                    if manifest.profile_object_map is not None else None)
@@ -840,24 +1064,41 @@ class BrainSession:
         return remapped
 
     def process_initial_edit_turn(self, request_id, turn, scene, *, bindings_override, edit_defaults, profile=None):
+        try:
+            return self._process_initial_edit_turn_once(request_id, turn, scene,
+                bindings_override=bindings_override, edit_defaults=edit_defaults, profile=profile)
+        finally:
+            self._retire_layout_reservation(request_id)
+
+    def _process_initial_edit_turn_once(self, request_id, turn, scene, *, bindings_override, edit_defaults, profile=None):
         """Validate bootstrap + all edits in memory, then publish exactly once."""
         self.check_turn(turn)
-        if self.scene is not None or turn.turn_kind != "scene_edit" or turn.status != "accepted":
+        if self.scene is not None or turn.turn_kind not in {"scene_edit", "scene_layout"} or turn.status != "accepted":
             raise ValueError("initial_edit_turn_required")
         next_id = max(self.next_scene_object_id, max((o.object_id_in_scene for o in scene.objects), default=-1)+1)
         result = self.pipeline.process_turn(request_id, turn, scene,
             bindings_override=bindings_override, edit_defaults=edit_defaults,
+            reserve_layout_ids=lambda count, minimum: self._reserve_layout_ids(request_id, count, minimum),
             seen_scene_object_ids=self.seen_scene_object_ids, next_scene_object_id=next_id)
         candidate = SceneManager(scene, next_scene_object_id=next_id).apply_patch(result.scene_patch)
         document = candidate.raw_document()
         document.update(scene_version=1, scene_sub_version=0)
-        candidate = SceneConfig.model_validate(document)
+        # OLS templates may include display metadata outside the typed Scene
+        # view. Preserve it through the lossless parser, as normal commits do.
+        from ..contracts.scene import parse_scene_document
+        candidate = parse_scene_document(document, uint32=False).view
         if profile is not None:
             profile.validate_scene(candidate)
         self.initialize_scene(candidate)
         if profile is not None:
             self.bind_imported_profile(profile)
         result = result.model_copy(update={"scene_patch": None, "scene_replacement": candidate})
+        if turn.turn_kind == "scene_layout":
+            result = result.model_copy(update={"layout_resolution": result.layout_resolution.model_copy(
+                update={"scene_id": candidate.scene_id, "scene_version": candidate.scene_version})})
+            result = self._accept_result(request_id, result)
+            self._remember_layout_request(request_id, turn, result)
+            return result
         self.dialogue.observe(result)
         return result
 
@@ -896,6 +1137,16 @@ class BrainSession:
             if result.session_action is None or result.session_action.action not in {"resume", "close"}:
                 raise ValueError("session_paused")
         if result.commands is not None:
+            if self.scene is not None:
+                from ..web.protocol import digest
+                committed_digest = digest(self.scene)
+                commands = result.commands
+                if (commands.scene_id != self.scene.scene_id
+                        or commands.scene_version != self.scene.scene_version
+                        or getattr(commands, "scene_digest", None) not in (None, committed_digest)):
+                    raise ValueError("commands_scene_binding_mismatch")
+                result = result.model_copy(update={"commands": commands.model_copy(
+                    update={"scene_digest": committed_digest})})
             # Atomic commands are scene-bound.  Attach the resolved OLS arm
             # assembly at the last Brain-owned boundary so the bridge/control
             # path cannot silently use its default UR5e configuration.
@@ -926,12 +1177,30 @@ class BrainSession:
             if self.holding_object is not None and any(op.object_id_in_scene == self.holding_object for op in result.scene_patch.operations):
                 raise ValueError("scene_edit_held_object_conflict")
             self.apply_scene_patch(result.scene_patch)
+        if getattr(result, "layout_resolution", None) is not None:
+            from ..scene.arrangement_index import ArrangementRecord
+            resolution = result.layout_resolution
+            self.arrangement_index.put(ArrangementRecord(
+                arrangement_id=resolution.arrangement_id,
+                scene_id=resolution.scene_id,
+                scene_version=resolution.scene_version,
+                slot_bindings=resolution.slot_bindings,
+                slot_assets=resolution.slot_assets,
+                world_positions=resolution.world_positions,
+                planner_revision=getattr(result.layout_plan, "planner_revision", None),
+                effective_seed=getattr(result.layout_plan, "effective_seed", None),
+            ))
         if result.session_action is not None:
             self.session_action = result.session_action.action
         self.dialogue.observe(result)
         return result
 
     def mark_dispatched(self, commands):
+        # Replay support is not execution capability. Until the live adapter
+        # negotiates v4 and supplies its result contract, never dispatch this
+        # graph through either the flat v2 or staged v3 controller path.
+        if commands.schema_version == "4.0":
+            raise ValueError("unsupported_protocol_version: commands_dag_v4")
         if self.pending_execution_request is not None:
             raise ValueError("execution_pending")
         if self.sync_state != "synchronized" or self.session_action in {"pause", "close"}:
@@ -984,7 +1253,7 @@ class BrainSession:
             raise ValueError("execution_feedback_holding_unknown")
         candidate = None
         if confirmed_scene is not None:
-            candidate = SceneConfig.model_validate(confirmed_scene.model_dump())
+            candidate = self._confirmed_scene_view(confirmed_scene)
             if candidate.scene_id != scene.scene_id or candidate.scene_version <= scene.scene_version:
                 raise ValueError("execution_feedback_scene_mismatch")
             if feedback.holding_object is not None and feedback.holding_object not in {o.object_id_in_scene for o in candidate.objects}:
@@ -1047,7 +1316,7 @@ class BrainSession:
         if feedback_source not in {"external", "simulated"}:
             raise ValueError("execution_feedback_source_invalid")
         scene = self.require_scene()
-        candidate = SceneConfig.model_validate(confirmed_scene.model_dump()) if confirmed_scene is not None else None
+        candidate = self._confirmed_scene_view(confirmed_scene) if confirmed_scene is not None else None
         if candidate is not None:
             self._validate_execution_scene(candidate, kind="feedback")
         known = {o.object_id_in_scene for o in (candidate or scene).objects}

@@ -46,7 +46,18 @@ class ArtifactWriter:
         artifacts = {}
         try:
             if scene is not None:
-                self._write(staged / "scene_config.json", SceneFileCodec.payload(scene), SceneConfig.model_json_schema())
+                # Validate the typed view, but publish the lossless document.
+                # OLS display metadata and unknown components are preserved by
+                # SceneFileCodec; the closed internal model is not its schema.
+                payload = SceneFileCodec.payload(scene)
+                codec = SceneFileCodec()
+                decoded = codec.decode(payload)
+                Draft202012Validator(SceneConfig.model_json_schema()).validate(decoded.model_dump(mode="json"))
+                if decoded.model_dump(mode="json") != scene.model_dump(mode="json"):
+                    raise ValueError("artifact_scene_view_mismatch")
+                scene_path = staged / "scene_config.json"
+                self._write(scene_path, payload)
+                codec.load(scene_path)
                 artifacts["scene_config"] = str(destination / "scene_config.json")
             if result is not None and report.run_status == "success":
                 if result.commands is not None:

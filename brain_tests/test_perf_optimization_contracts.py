@@ -98,7 +98,8 @@ def recovery_service_fixture(command="左边的", state="waiting_user", new_task
     service.config = NS(conversation_recovery_enabled=True,
         conversation_recovery_max_failed_user_turns=5, conversation_recovery_max_input_chars=20000)
     service.app = NS(pipeline=NS(understand_turn=preview), provider=NS(recover_failure=recover))
-    session = NS(conversation_memory=memory, scene=None, dialogue=None)
+    session = NS(conversation_memory=memory, scene=None, dialogue=None,
+                 original_understanding_context=lambda: None)
     request = NS(command=command, sessionID="s", clientRequestID="t2", new_task=new_task)
     return service, session, request, calls
 

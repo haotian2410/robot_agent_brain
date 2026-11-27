@@ -18,12 +18,19 @@ dependencies = [
 dev = ["pytest>=8.3,<9"]
 web = ["aiohttp>=3.10,<4", "rfc8785>=0.1,<1"]
 batch = ["openpyxl>=3.1,<4"]
+layout = ["fonttools>=4.62,<5"]
 
 [project.scripts]
 robot-brain = "robot_agent_brain.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/robot_agent_brain"]
+# The public wire schemas live at repository root for tooling and review, but
+# must travel with the wheel for offline replay/contract validation too.
+include = ["schemas/*.json"]
+# Keep the reviewed root schemas available to installed/offline clients under
+# the package namespace without maintaining a second copy.
+force-include = { "schemas" = "robot_agent_brain/schemas" }
 exclude = ["**/.idea/**", "src/robot_agent_brain/robot_agent.md"]
 
 [tool.pytest.ini_options]

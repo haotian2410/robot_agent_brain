@@ -125,6 +125,40 @@ def test_http_lifecycle_results_and_artifact_whitelist(tmp_path):
     asyncio.run(scenario())
 
 
+def test_http_empty_scene_request_replay_after_initialization_is_read_only(tmp_path):
+    async def scenario():
+        service, browser = configured(tmp_path)
+        async with TestClient(TestServer(create_http_app(service))) as client:
+            sid = (await (await client.post('/sessions', json={"browserID": "b"})).json())["sessionID"]
+            empty = {"scene_schema_version": 1, "scene_id": 0, "scene_version": 0, "objects": []}
+            payload = {"sessionID": sid, "clientRequestID": "empty-first", "browserID": "b",
+                       "command": "新增布局", "scene": empty, "sceneDigest": digest(empty)}
+            record, fresh = service.tasks.submit(StartTask.model_validate(payload))
+            assert fresh
+            service.tasks.update(record["id"], "任务完成", terminal=True)
+            service.app.accept_browser_scene(sid, browser.scene)
+            session = service._bind(sid)
+            before = session.scene.raw_document()
+            with pytest.raises(ValueError, match="browser_scene_identity_invalid"):
+                service.validate_scene(empty, session)
+            response = await client.post('/startTask', json=payload)
+            assert response.status == 200, await response.text()
+            assert (await response.json())["taskID"] == record["id"]
+            assert service.queue.empty()
+            assert session.scene.raw_document() == before
+            assert service.tasks.db.execute("SELECT count(*) FROM tasks").fetchone()[0] == 1
+            response = await client.post('/startTask', json=payload | {"command": "不同的布局"})
+            assert response.status == 409
+            assert (await response.json())["error"]["code"] == "idempotency_conflict"
+            response = await client.post('/startTask', json=payload | {"clientRequestID": "new-request"})
+            assert response.status == 400
+            assert (await response.json())["error"]["code"] == "browser_scene_identity_invalid"
+            response = await client.post('/startTask', json=payload | {"browserID": "other-browser"})
+            assert response.status == 409
+            assert (await response.json())["error"]["code"] == "session_browser_not_active"
+    asyncio.run(scenario())
+
+
 def test_manual_edits_preserve_original_and_invalidate_exports(tmp_path):
     service,browser=configured(tmp_path)
     sid=service.activate(SessionRequest(browserID="b"))["sessionID"]

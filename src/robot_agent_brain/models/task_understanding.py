@@ -15,6 +15,7 @@ from ..semantics.scene_references import CanonicalReference, RefScope, SceneRefe
 from ..semantics import spatial_phrases
 from ..contracts.asset_catalog import AssetCatalogSnapshot
 from ..contracts.workspace import WorkspaceSemanticPolicy
+from ..contracts.arrangement import ArrangementSpec
 
 
 def task_understanding_wire_schema():
@@ -77,7 +78,7 @@ class TaskUnderstandingRequest(BaseModel):
     asset_catalog: AssetCatalogSnapshot | None = None
     workspace: WorkspaceSemanticPolicy = Field(default_factory=WorkspaceSemanticPolicy)
     scene_context: dict[str, Any] = Field(default_factory=dict)
-    route_hint: Literal["robot_task", "scene_edit"] | None = None
+    route_hint: Literal["robot_task", "scene_edit", "scene_layout"] | None = None
 
 
 class TaskUnderstandingProvider(Protocol):
@@ -115,6 +116,7 @@ class ParseOperation(BaseModel):
     arm: Literal["left", "right", "single"] | None = None
     parallel_group: str | None = Field(default=None, min_length=1)
     parallel_required: bool = False
+    same_arm_group: str | None = Field(default=None, min_length=1)
     assignment_mode: str = Field(default="broadcast", pattern=r"^(broadcast|pairwise|repeat_all|relation_matched)$")
 
 
@@ -177,6 +179,7 @@ class RobotOperationWire(BaseModel):
     arm: Literal["left", "right", "single"] | None = None
     parallel_group: str | None = Field(default=None, min_length=1)
     parallel_required: bool = False
+    same_arm_group: str | None = Field(default=None, min_length=1)
     assignment_mode: str = Field(default="broadcast", pattern=r"^(broadcast|pairwise|repeat_all|relation_matched)$")
 
     @model_validator(mode="before")
@@ -269,6 +272,7 @@ class TaskParseOutput(BaseModel):
     turn_kind: TurnKind = TurnKind.ROBOT_TASK
     clarification_question: str | None = None
     scene_edit: SceneEditPlan | None = None
+    arrangement_spec: ArrangementSpec | None = None
     scene_query: SceneQueryIntent | None = None
     session_control: SessionControlIntent | None = None
     robot_setup_request: RobotSetupRequest | None = None
@@ -284,7 +288,8 @@ class TaskParseOutput(BaseModel):
             raise ValueError("task_semantic_invalid: hold constraints require accepted robot task")
         if self.arm_usage != "unspecified" and (self.status != TurnStatus.ACCEPTED or self.turn_kind != TurnKind.ROBOT_TASK):
             raise ValueError("task_semantic_invalid: arm usage requires accepted robot task")
-        payloads = {TurnKind.SCENE_EDIT: self.scene_edit, TurnKind.SCENE_QUERY: self.scene_query, TurnKind.SESSION_CONTROL: self.session_control}
+        payloads = {TurnKind.SCENE_EDIT: self.scene_edit, TurnKind.SCENE_LAYOUT: self.arrangement_spec,
+                    TurnKind.SCENE_QUERY: self.scene_query, TurnKind.SESSION_CONTROL: self.session_control}
         if self.status != TurnStatus.ACCEPTED:
             if self.robot_setup_request is not None or self.entities or self.operations or self.relations or any(v is not None for v in payloads.values()):
                 raise ValueError("task_semantic_invalid: rejected turn has payload")
@@ -367,6 +372,7 @@ class TaskParseOutput(BaseModel):
         return BrainTurn(protocol_version=self.protocol_version, status=status, turn_kind=self.turn_kind, instruction=instruction,
                          clarification_question=self.clarification_question,
                          task_intent=task, scene_edit=self.scene_edit, scene_query=self.scene_query,
+                         arrangement_spec=getattr(self, "arrangement_spec", None),
                          session_control=self.session_control, robot_setup_request=self.robot_setup_request,
                          robot_asset_switch=getattr(self, "robot_asset_switch", None))
 
@@ -390,6 +396,7 @@ class TaskParseWireOutput(BaseModel):
     clarification_question: str | None = None
     initial_robot_asset: str | None = None
     scene_edit: SceneEditWire | None = None
+    arrangement_spec: ArrangementSpec | None = None
     scene_query: SceneQueryWire | None = None
     session_control: SessionControlIntent | None = None
     robot_setup_request: RobotSetupRequest | None = None
@@ -426,6 +433,7 @@ class TaskParseWireOutput(BaseModel):
             raise ValueError("task_semantic_invalid: arm usage requires accepted robot task")
         payloads = {
             TurnKind.SCENE_EDIT: self.scene_edit,
+            TurnKind.SCENE_LAYOUT: self.arrangement_spec,
             TurnKind.SCENE_QUERY: self.scene_query,
             TurnKind.SESSION_CONTROL: self.session_control,
         }
@@ -520,6 +528,7 @@ class TaskParseWireOutput(BaseModel):
                          turn_kind=self.turn_kind, instruction=instruction,
                          clarification_question=self.clarification_question,
                          task_intent=task, scene_edit=None, scene_query=None,
+                         arrangement_spec=self.arrangement_spec,
                          session_control=self.session_control,
                          robot_setup_request=self.robot_setup_request,
                          robot_asset_switch=self.robot_asset_switch)
@@ -1185,6 +1194,20 @@ def parse_qwen_turn(value, instruction: str) -> BrainTurn:
     if isinstance(value, dict) and value.get("status", TurnStatus.ACCEPTED.value) == TurnStatus.ACCEPTED.value \
             and value.get("turn_kind") == TurnKind.SCENE_EDIT.value:
         return _parse_scene_edit_wire(value, instruction)
+    if isinstance(value, dict) and value.get("status", TurnStatus.ACCEPTED.value) == TurnStatus.ACCEPTED.value \
+            and value.get("turn_kind") == TurnKind.SCENE_LAYOUT.value:
+        try:
+            wire = TaskParseWireOutput.model_validate(value)
+        except ValidationError as exc:
+            raise BrainError("provider_output_schema_invalid", "wire_parse",
+                             "scene_layout payload violates ArrangementSpec",
+                             category="provider_schema", details={"errors": exc.errors()}) from exc
+        if wire.arrangement_spec is None:
+            raise BrainError("semantic_protocol_error", "semantic_validation",
+                             "scene_layout requires arrangement_spec", category="semantic_protocol")
+        return BrainTurn(protocol_version=wire.protocol_version, status=TurnStatus.ACCEPTED,
+                         turn_kind=TurnKind.SCENE_LAYOUT, instruction=instruction,
+                         arrangement_spec=wire.arrangement_spec)
     if isinstance(value, dict) and value.get("status", TurnStatus.ACCEPTED.value) == TurnStatus.ACCEPTED.value \
             and value.get("turn_kind") == TurnKind.SCENE_QUERY.value:
         return _parse_scene_query_wire(value, instruction)

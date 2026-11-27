@@ -209,6 +209,9 @@ class AtomicCommandsFile(StrictModel):
     request_id: str = Field(min_length=1)
     scene_id: SceneId
     scene_version: int = Field(strict=True, ge=0)
+    # Optional only for historical replay; live session export binds this to
+    # the committed, lossless Scene rather than a model-predicted snapshot.
+    scene_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     commands: list[AtomicCommand] = Field(min_length=1)
     # Brain/bridge context for selecting the robot assembled in the Scene.
     # The control runner may ignore this metadata because it derives the

@@ -67,6 +67,7 @@ class BrainConfig(BaseModel):
     asset_geometry_cache: str | None = None
     asset_category_index: str | None = None
     scene_layout_interiors: str | None = None
+    layout_fonts: dict[str, str] = Field(default_factory=dict)
     semantic_aliases: str | None = None
     scene_reference_catalog: str | None = None
     library_ref_prefix: str = "$LIBRARY_SERVER/"
@@ -198,6 +199,9 @@ class BrainConfig(BaseModel):
                         "scene_layout_interiors", "scene_reference_catalog", "default_scene"):
                 if user.get(key) and not Path(user[key]).is_absolute():
                     values[key] = str((Path(path).resolve().parent / user[key]).resolve())
+            if isinstance(user.get("layout_fonts"), dict):
+                values["layout_fonts"] = {name: str((Path(path).resolve().parent / location).resolve())
+                                          for name, location in user["layout_fonts"].items()}
         env = os.environ if environ is None else environ
         for key in cls.model_fields:
             value = env.get("ROBOT_BRAIN_" + key.upper())

@@ -16,7 +16,10 @@ class RemappedScene:
 
 def remap_scene(scene, *, new_scene_id, next_object_id, robot_setup=None, reference_registry=None):
     """Allocate every restored object above the session allocator high-water mark."""
-    scene = SceneConfig.model_validate(scene.model_dump())
+    from ..adapters.scene_file_codec import SceneFileCodec
+    document = scene.raw_document()
+    document.update(scene.model_dump(mode="json"))
+    scene = SceneFileCodec().decode(document)
     from .component_reference_registry import ComponentReferenceRegistry
     registry = reference_registry or ComponentReferenceRegistry()
     registry.validate_scene(scene)
@@ -28,7 +31,7 @@ def remap_scene(scene, *, new_scene_id, next_object_id, robot_setup=None, refere
     if next_object_id + len(scene.objects) > 2**53:
         raise ValueError("scene_object_id_exhausted")
     mapping = {obj.object_id_in_scene: next_object_id + i for i, obj in enumerate(scene.objects)}
-    payload = scene.model_dump(mode="json")
+    payload = scene.raw_document()
     payload.update(scene_id=new_scene_id, scene_version=1)
     for obj in payload["objects"]:
         obj["object_id_in_scene"] = mapping[obj["object_id_in_scene"]]
@@ -41,5 +44,5 @@ def remap_scene(scene, *, new_scene_id, next_object_id, robot_setup=None, refere
                 raise ValueError("scene_remap_robot_missing")
             arm["robot_object_id"] = mapping[arm["robot_object_id"]]
         setup = RobotSetup.model_validate(values)
-    candidate = registry.validate_scene(SceneConfig.model_validate(payload))
+    candidate = registry.validate_scene(SceneFileCodec().decode(payload))
     return RemappedScene(candidate, mapping, setup, next_object_id + len(scene.objects))

@@ -211,6 +211,7 @@ def test_recovered_composite_skips_completed_prefix_and_runs_only_suffix():
                     instruction="第一步", status="committed", request_ids=["old-child"])])),
         last_recovery_evidence={"scope": "remaining_steps"},
         pending_step_ledger=[],
+        scene=None,
     )
     request = SimpleNamespace(sessionID="s")
     platform = SimpleNamespace(receipts=[])

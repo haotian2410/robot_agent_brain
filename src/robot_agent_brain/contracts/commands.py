@@ -140,6 +140,7 @@ class CommandsFile(BaseModel):
     request_id: str
     scene_id: SceneId
     scene_version: int = Field(ge=0)
+    scene_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     robot: str
     operations: list[CommandOperation]
     commands: list[Command]
@@ -177,6 +178,9 @@ def canonical_commands(commands) -> dict:
     """The sole wire representation. Validate models and the public schema."""
     from .commands_atomic import AtomicCommandsFile, canonical_atomic_commands
     from .commands_v3 import CommandsFileV3, canonical_commands_v3
+    from .commands_dag_v4 import CommandsFileV4, canonical_commands_v4
+    if isinstance(commands, CommandsFileV4):
+        return canonical_commands_v4(commands)
     if isinstance(commands, CommandsFileV3):
         return canonical_commands_v3(commands)
     if isinstance(commands, AtomicCommandsFile):
@@ -189,7 +193,7 @@ def canonical_commands(commands) -> dict:
 
 
 def parse_commands(payload):
-    """Version dispatch is explicit; never interpret v3 as a v2 flat list."""
+    """Explicit replay parsing, independent of live Control capability."""
     from .commands_atomic import AtomicCommandsFile
     from .commands_v3 import CommandsFileV3
     version = payload.get("schema_version")
@@ -201,4 +205,7 @@ def parse_commands(payload):
         return CommandsFile.model_validate(payload)
     if version == "3.0":
         return CommandsFileV3.model_validate(payload)
+    if version == "4.0":
+        from .commands_dag_v4 import CommandsFileV4
+        return CommandsFileV4.model_validate(payload)
     raise ValueError("commands_schema_version_unsupported")

@@ -12,6 +12,7 @@ from ..contracts.scene import SceneConfig, SceneId, parse_scene_document
 from ..contracts.robot_setup import RobotSetup
 from ..adapters.scene_file_codec import SceneFileCodec
 from ..filelock import sync_directory
+from ..scene.arrangement_index import ArrangementRecord
 
 
 class OriginalSceneManifest(BaseModel):
@@ -25,6 +26,7 @@ class OriginalSceneManifest(BaseModel):
     robot_setup: RobotSetup | None = None
     profile_object_map: dict[str, SceneId] | None = None
     config_fingerprint: str | None = None
+    arrangement_records: list[ArrangementRecord] = Field(default_factory=list)
 
 
 class PreparedOriginalScene(BaseModel):
@@ -38,6 +40,20 @@ class PreparedOriginalScene(BaseModel):
 class OriginalSceneStore:
     def __init__(self, directory):
         self.directory = Path(directory)
+
+    @staticmethod
+    def _validate_arrangements(scene, manifest):
+        ids = {obj.object_id_in_scene for obj in scene.objects}
+        names = set()
+        for record in manifest.arrangement_records:
+            if (record.arrangement_id in names or record.scene_id != scene.scene_id
+                    or record.scene_version > scene.scene_version
+                    or not record.slot_bindings
+                    or not set(record.slot_bindings.values()) <= ids
+                    or len(set(record.slot_bindings.values())) != len(record.slot_bindings)
+                    or set(record.slot_assets) != set(record.slot_bindings)):
+                raise ValueError("snapshot_arrangement_invalid")
+            names.add(record.arrangement_id)
 
     def load(self, expected=None):
         try:
@@ -56,6 +72,7 @@ class OriginalSceneStore:
                 reasons = ",".join(sorted({str(item.get("reason", "unknown")) for item in document.rejected_objects}))
                 raise ValueError("scene_object_rejected:" + reasons)
             scene = document.view
+            self._validate_arrangements(scene, manifest)
             ids = {o.object_id_in_scene for o in scene.objects}
             tasks, platform = set(manifest.task_object_ids), set(manifest.platform_object_ids)
             if tasks & platform or tasks | platform != ids:
@@ -89,6 +106,7 @@ class OriginalSceneStore:
             reasons = ",".join(sorted({str(item.get("reason", "unknown")) for item in document.rejected_objects}))
             raise ValueError("scene_object_rejected:" + reasons)
         scene = document.view
+        self._validate_arrangements(scene, manifest)
         ids = {o.object_id_in_scene for o in scene.objects}
         tasks, platform = set(manifest.task_object_ids), set(manifest.platform_object_ids)
         if tasks & platform or tasks | platform != ids:
@@ -104,7 +122,7 @@ class OriginalSceneStore:
             if not path.exists():
                 self._write_once(path, payload)
 
-    def capture_once(self, scene, *, platform_object_ids, request_id, source, robot_setup=None, config_fingerprint=None, profile_object_map=None, allow_empty=False):
+    def capture_once(self, scene, *, platform_object_ids, request_id, source, robot_setup=None, config_fingerprint=None, profile_object_map=None, allow_empty=False, arrangement_records=()):
         paths = [self.directory / name for name in ("original_scene.json", "original_scene_manifest.json")]
         recovery_paths = [*paths, self.directory / "original_scene_prepare.json", self.directory / "original_scene_commit.json"]
         if any(p.exists() or p.is_symlink() for p in recovery_paths):
@@ -123,7 +141,9 @@ class OriginalSceneStore:
         manifest = OriginalSceneManifest(snapshot_id=uuid.uuid4().hex, scene_sha256=hashlib.sha256(payload).hexdigest(),
             source_request_id=request_id, source=source, task_object_ids=sorted(task_ids),
             platform_object_ids=sorted(platform_object_ids), robot_setup=robot_setup, config_fingerprint=config_fingerprint,
+            arrangement_records=list(arrangement_records),
             profile_object_map={str(k): v for k, v in profile_object_map.items()} if profile_object_map is not None else None)
+        self._validate_arrangements(scene, manifest)
         self.directory.mkdir(parents=True, exist_ok=True)
         manifest_json = manifest.model_dump_json(indent=2)
         prepared = PreparedOriginalScene(scene_json=payload.decode(), manifest_json=manifest_json,

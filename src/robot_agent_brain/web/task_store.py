@@ -104,7 +104,8 @@ class TaskStore:
         with self.lock:
             return [dict(r) for r in self.db.execute("SELECT * FROM sessions")]
 
-    def submit(self, task):
+    @staticmethod
+    def _payload(task):
         value = task.model_dump(mode="json")
         # Keep the submitted Scene document lossless. Pydantic materializes the optional
         # scene_sub_version=0 when serializing a nested SceneConfig, which changes the JCS digest
@@ -112,13 +113,27 @@ class TaskStore:
         # like a gateway scene conflict.
         if hasattr(task.scene, "raw_document") and "scene_sub_version" not in task.scene.raw_document():
             value["scene"].pop("scene_sub_version", None)
+        return value
+
+    def matching_request(self, task):
+        """Read a prior request without queueing it or adopting its old Scene."""
+        fingerprint = digest(self._payload(task))
+        with self.lock:
+            existing = self.db.execute("SELECT id,fingerprint FROM tasks WHERE session=? AND request_key=?",
+                                      (task.sessionID, task.clientRequestID)).fetchone()
+            if existing is None:
+                return None
+            if existing["fingerprint"] != fingerprint:
+                raise ValueError("idempotency_conflict")
+            return self.get(existing["id"])
+
+    def submit(self, task):
+        value = self._payload(task)
         fingerprint = digest(value)
         with self.lock, self.db:
-            existing = self.db.execute("SELECT * FROM tasks WHERE session=? AND request_key=?", (task.sessionID,task.clientRequestID)).fetchone()
+            existing = self.matching_request(task)
             if existing is not None:
-                if existing["fingerprint"] != fingerprint:
-                    raise ValueError("idempotency_conflict")
-                return self.get(existing["id"]), False
+                return existing, False
             binding = self.binding(task.sessionID)
             if not binding["active"] or binding["browser"] != task.browserID:
                 raise ValueError("session_browser_not_active")

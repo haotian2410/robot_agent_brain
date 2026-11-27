@@ -96,6 +96,7 @@ class Operation(StrictModel):
     arm: Literal["left", "right", "single"] | None = None
     parallel_group: str | None = Field(default=None, min_length=1)
     parallel_required: bool = False
+    same_arm_group: str | None = Field(default=None, min_length=1)
     assignment_mode: str = Field(default="broadcast", pattern=r"^(broadcast|pairwise|repeat_all|relation_matched)$")
 
     @model_validator(mode="after")

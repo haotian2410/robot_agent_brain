@@ -1,0 +1,293 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "commands_dag_v4.schema.json",
+  "$defs": {
+    "DagCommand": {
+      "additionalProperties": false,
+      "properties": {
+        "command_id": {
+          "minLength": 1,
+          "title": "Command Id",
+          "type": "string"
+        },
+        "operation_id": {
+          "minLength": 1,
+          "title": "Operation Id",
+          "type": "string"
+        },
+        "arm": {
+          "enum": [
+            "left",
+            "right"
+          ],
+          "title": "Arm",
+          "type": "string"
+        },
+        "skill_name": {
+          "minLength": 1,
+          "title": "Skill Name",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "depends_on": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Depends On",
+          "type": "array"
+        }
+      },
+      "required": [
+        "command_id",
+        "operation_id",
+        "arm",
+        "skill_name"
+      ],
+      "title": "DagCommand",
+      "type": "object"
+    },
+    "DagExecutionPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "scheduler": {
+          "const": "dependency_dag",
+          "default": "dependency_dag",
+          "title": "Scheduler",
+          "type": "string"
+        },
+        "parallel": {
+          "default": "allowed",
+          "enum": [
+            "allowed",
+            "disabled"
+          ],
+          "title": "Parallel",
+          "type": "string"
+        },
+        "on_failure": {
+          "default": "stop_dependents_continue_independent",
+          "enum": [
+            "stop_dependents_continue_independent",
+            "stop_all"
+          ],
+          "title": "On Failure",
+          "type": "string"
+        }
+      },
+      "title": "DagExecutionPolicy",
+      "type": "object"
+    },
+    "HoldConstraintV4": {
+      "additionalProperties": false,
+      "properties": {
+        "object_id": {
+          "minimum": 0,
+          "title": "Object Id",
+          "type": "integer"
+        },
+        "holder_arm": {
+          "enum": [
+            "left",
+            "right"
+          ],
+          "title": "Holder Arm",
+          "type": "string"
+        },
+        "until_command_id": {
+          "minLength": 1,
+          "title": "Until Command Id",
+          "type": "string"
+        },
+        "after_command_id": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "After Command Id"
+        },
+        "region_object_id": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region Object Id"
+        },
+        "region": {
+          "anyOf": [
+            {
+              "const": "placement_region",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Region"
+        }
+      },
+      "required": [
+        "object_id",
+        "holder_arm",
+        "until_command_id"
+      ],
+      "title": "HoldConstraintV4",
+      "type": "object"
+    },
+    "ResourceGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "resource_id": {
+          "minLength": 1,
+          "title": "Resource Id",
+          "type": "string"
+        },
+        "mode": {
+          "default": "exclusive",
+          "enum": [
+            "exclusive",
+            "shared"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "command_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Command Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "resource_id",
+        "command_ids"
+      ],
+      "title": "ResourceGroup",
+      "type": "object"
+    },
+    "SyncGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "sync_id": {
+          "minLength": 1,
+          "title": "Sync Id",
+          "type": "string"
+        },
+        "command_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "title": "Command Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "sync_id",
+        "command_ids"
+      ],
+      "title": "SyncGroup",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "4.0",
+      "default": "4.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "request_id": {
+      "minLength": 1,
+      "title": "Request Id",
+      "type": "string"
+    },
+    "scene_id": {
+      "minimum": 0,
+      "title": "Scene Id",
+      "type": "integer"
+    },
+    "scene_version": {
+      "minimum": 0,
+      "title": "Scene Version",
+      "type": "integer"
+    },
+    "scene_digest": {
+      "minLength": 1,
+      "title": "Scene Digest",
+      "type": "string"
+    },
+    "robot_setup_revision": {
+      "minimum": 0,
+      "title": "Robot Setup Revision",
+      "type": "integer"
+    },
+    "skill_contract_revision": {
+      "minLength": 1,
+      "title": "Skill Contract Revision",
+      "type": "string"
+    },
+    "execution_policy": {
+      "$ref": "#/$defs/DagExecutionPolicy"
+    },
+    "commands": {
+      "items": {
+        "$ref": "#/$defs/DagCommand"
+      },
+      "minItems": 1,
+      "title": "Commands",
+      "type": "array"
+    },
+    "resource_groups": {
+      "items": {
+        "$ref": "#/$defs/ResourceGroup"
+      },
+      "title": "Resource Groups",
+      "type": "array"
+    },
+    "hold_constraints": {
+      "items": {
+        "$ref": "#/$defs/HoldConstraintV4"
+      },
+      "title": "Hold Constraints",
+      "type": "array"
+    },
+    "sync_groups": {
+      "items": {
+        "$ref": "#/$defs/SyncGroup"
+      },
+      "title": "Sync Groups",
+      "type": "array"
+    }
+  },
+  "required": [
+    "request_id",
+    "scene_id",
+    "scene_version",
+    "scene_digest",
+    "robot_setup_revision",
+    "skill_contract_revision",
+    "commands"
+  ],
+  "title": "CommandsFileV4",
+  "type": "object"
+}

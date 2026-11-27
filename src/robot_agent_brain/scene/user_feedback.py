@@ -32,7 +32,9 @@ def explain_issue(issue, exc, scene, assets):
     code = issue.code
     original = issue.message
     question = None
-    if code == "robot_asset_unknown":
+    if code in {"arm_assignment_insufficient_evidence", "dual_arm_assignment_required"}:
+        question = "当前证据不足以确定由哪只机械臂操作。请明确左臂、右臂分别操作哪些物体。"
+    elif code == "robot_asset_unknown":
         name = original.split(":", 1)[-1].strip()
         question = (f"当前 OLS 目录中没有找到机械臂型号“{name}”。请核对并提供准确型号。"
                     "若已开启上下文恢复且当前空会话尚未初始化，可直接补充型号，保留原任务继续处理；"
@@ -167,6 +169,30 @@ def explain_issue(issue, exc, scene, assets):
         issue.message = "当前场景编辑关系暂不支持（" + original.split(":", 1)[-1].strip() + "），场景未改变。请使用左/右/前/后、旁边、桌面上或容器内部等明确表达。"
     elif code == "scene_edit_layout_collision":
         issue.message = "编辑失败：目标位置存在碰撞或超出可用范围，场景未改变。"
+    elif code == "scene_layout_pattern_unsupported":
+        issue.message = "当前布局图案暂不支持，场景未改变。请改用直线、网格、圆形或明确的自定义路径。"
+    elif code == "scene_layout_count_conflict":
+        issue.message = "布局数量与图案参数不一致，场景未改变。请明确对象数量以及行列或间距。"
+    elif code.startswith(("scene_layout_explicit_spacing_", "scene_layout_explicit_dimension_")):
+        issue.message = "布局解析未完整保留您指定的间距、半径或角度，本轮未提交，场景未改变。请核对明确的数值与单位；系统不会自动改值执行。"
+    elif code == "scene_layout_region_unresolved":
+        issue.message = "布局参照的桌面、容器或锚点无法在当前场景中唯一确认，场景未改变。"
+    elif code == "scene_layout_capacity_exceeded":
+        issue.message = "指定区域无法容纳全部对象，场景未改变。请减小数量或明确允许自动调整间距。"
+    elif code == "scene_layout_collision":
+        issue.message = "布局中的对象相互碰撞，或与已有对象发生碰撞，本轮未提交，场景未改变。请调整布局区域或间距；系统不会自行减少指定数量。"
+    elif code == "scene_layout_workspace_exceeded":
+        issue.message = "布局超出场景编辑工作区，本轮未提交，场景未改变。请调整布局区域或尺寸。"
+    elif code == "scene_layout_arrangement_exists":
+        issue.message = "当前场景已存在这个布局，场景未改变。请明确是追加对象、重新排列，还是创建另一个布局。"
+    elif code == "scene_layout_request_reserved":
+        issue.message = "该布局请求已经预留过对象编号，但没有已确认的成功回执，本次未重复创建对象。请核对该请求的发布结果；确认未提交后，使用新请求重新尝试。"
+    elif code == "scene_layout_arrangement_missing":
+        issue.message = "当前场景分支中没有找到指定布局，场景未改变。请先创建布局或指定当前已有的布局。"
+    elif code == "scene_layout_arrangement_members_missing":
+        issue.message = "指定布局中的部分对象已被删除，场景未改变。请确认要操作的现有对象或重新创建布局。"
+    elif code.startswith("scene_layout_"):
+        issue.message = "布局任务未提交：布局参数或支撑区域不合法，场景未改变。"
     elif code in {"provider_error", "model_output_invalid", "validation_failed"}:
         issue.message = "模型响应未通过语义校验，本轮未执行。请重新说明对象、动作和参照物；可凭诊断编号查看详细日志。"
     if question:
